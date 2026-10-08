@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Headswap</string>
+    <string name="autosrv_label">Headswap: автозапуск сервера ГУ</string>
+    <string name="autosrv_description">Открывает настройки Android Auto и нажимает «Остановить/Запустить сервер головного устройства» перед поездкой. Видит только окна Android Auto.</string>
+    <string name="notif_channel_bridge">Headswap</string>
+    <string name="action_stop">Стоп</string>
+    <string name="action_open_aa">Открыть Android Auto</string>
+</resources>

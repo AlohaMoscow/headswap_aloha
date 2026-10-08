@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature
+        android:name="android.hardware.usb.accessory"
+        android:required="true" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- AA-режим: TCP на loopback к серверу ГУ Android Auto (127.0.0.1:5277) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- одно из условий для foreground-сервиса connectedDevice; обычное разрешение, выдаётся при установке -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- микрофон телефона как запасной источник звука для AA (режим «авто»/«телефон») -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- онбординг: запрос исключения из оптимизации батареи (HyperOS убивает фон) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:enableOnBackInvokedCallback="false"
+        android:theme="@style/Theme.Headswap">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
+                android:resource="@xml/accessory_filter" />
+        </activity>
+
+        <!-- раздача логов и отчётов через «Поделиться» (только чтение, без AndroidX FileProvider) -->
+        <provider
+            android:name=".ui.LogProvider"
+            android:authorities="com.yegorkapomidorka.headswap.logs"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <!-- кнопка «Стоп» в уведомлении -->
+        <receiver
+            android:name=".ui.StopReceiver"
+            android:exported="false" />
+
+        <!-- microphone: только на время захвата микрофона телефона (fallback AA-микрофона); тип в runtime выбирает сервис -->
+        <service
+            android:name=".BridgeService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|microphone" />
+
+        <!-- Автозапуск сервера ГУ Android Auto: включается пользователем в спецвозможностях -->
+        <service
+            android:name=".autosrv.AutoServerService"
+            android:exported="false"
+            android:label="@string/autosrv_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/autosrv_config" />
+        </service>
+    </application>
+</manifest>
