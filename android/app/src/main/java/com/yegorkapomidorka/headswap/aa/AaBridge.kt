@@ -313,6 +313,17 @@ class AaBridgeCore(
         p.sendKey(android)
     }
 
+    /** MODULE_CONTROL VR=1 от ГУ (кнопка голоса) -> AA KEYCODE_SEARCH: AA открывает ассистента и сам просит микрофон. */
+    fun onCarlifeVoiceKey() {
+        val p = peer
+        if (p == null) {
+            log("BRIDGE кнопка голоса проигнорирована: AA не подключён", true)
+            return
+        }
+        log("BRIDGE кнопка голоса (MODULE_CONTROL VR=1) -> AA KEYCODE $KEYCODE_SEARCH", true)
+        p.sendKey(KEYCODE_SEARCH)
+    }
+
     // --- события AA ---
     @Synchronized
     fun onAaConnecting() {
@@ -854,6 +865,9 @@ class AaBridgeCore(
         const val VOICE_EXIT_DELAY_MS = 500L
         private const val TTS_DIAG_PACKETS = 3
 
+        /** Android KEYCODE_SEARCH: в AA запускает голосового ассистента. */
+        const val KEYCODE_SEARCH = 84
+
         /**
          * CarLife hard key (HUJ/CommonParams) -> Android KeyEvent; все значения есть в AapMessages.KEYCODES_SUPPORTED.
          * Громкость, HOME, MEDIA/RADIO/NAVI и цифры не мапим: их обрабатывает само ГУ либо аналога нет.
@@ -871,6 +885,7 @@ class AaBridgeCore(
             0x16 to 22,     // MOVE_RIGHT -> DPAD_RIGHT
             0x17 to 19,     // MOVE_UP -> DPAD_UP
             0x18 to 20,     // MOVE_DOWN -> DPAD_DOWN
+            0x21 to KEYCODE_SEARCH, // VR_START -> голосовой ассистент
         )
 
         const val TEXT_START_SERVER = "Запустите сервер ГУ в Android Auto"

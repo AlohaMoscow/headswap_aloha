@@ -91,6 +91,8 @@ class CarLifeSession(
     private var audioTx = 0L
     @Volatile private var micRxPackets = 0L
     @Volatile private var micRxBytes = 0L
+    /** Когда сами слали MODULE_STATUS VR=1: ответный MODULE_CONTROL VR=1 сразу после него считаем эхом. */
+    @Volatile private var lastOwnVrOnMs = 0L
 
     // заглушка (VideoSource с текстом) или AA-видео; переключается ядром моста
     private val videoLock = Any()
@@ -331,6 +333,14 @@ class CarLifeSession(
                     val on = bridge.isMediaInited
                     AppLog.i("== MODULE_CONTROL MUSIC status=$status, отвечаю MODULE_STATUS MUSIC=${if (on) 1 else 0}", ui = false)
                     sendModuleStatus(CarlifeAudio.MODULE_MUSIC, if (on) 1 else 0)
+                } else if (module == MODULE_VR) {
+                    // Кнопка голоса на ГУ/руле: Baidu на VR=1 открывает голосовой ввод (openVrAndDialog), 0/3 - закрывает
+                    val sinceOwn = SystemClock.elapsedRealtime() - lastOwnVrOnMs
+                    when {
+                        status != 1 -> AppLog.i("== MODULE_CONTROL VR status=$status: игнор")
+                        sinceOwn < VR_ECHO_MS -> AppLog.i("== MODULE_CONTROL VR=1 через $sinceOwn мс после нашего VR=1: эхо, игнор")
+                        else -> bridge.onCarlifeVoiceKey()
+                    }
                 }
             }
             Msg.MD_EXIT -> close("ГУ прислало MD_EXIT")
@@ -461,7 +471,10 @@ class CarLifeSession(
             micRxBytes = 0
             AppLog.i("MIC -> ГУ: MIC_RECORD_RECOG_START${if (cfg.micVrStatus) " + MODULE_STATUS VR=1" else ""}")
             sendCmd(Msg.MIC_RECORD_RECOG_START, null)
-            if (cfg.micVrStatus) sendCmd(Msg.MODULE_STATUS, Msgs.moduleStatusSingle(MODULE_VR, 1))
+            if (cfg.micVrStatus) {
+                lastOwnVrOnMs = SystemClock.elapsedRealtime()
+                sendCmd(Msg.MODULE_STATUS, Msgs.moduleStatusSingle(MODULE_VR, 1))
+            }
         } else {
             AppLog.i("MIC -> ГУ: MIC_RECORD_END${if (cfg.micVrStatus) " + MODULE_STATUS VR=0" else ""}; с ГУ принято $micRxPackets пакетов, $micRxBytes Б")
             sendCmd(Msg.MIC_RECORD_END, null)
@@ -731,6 +744,7 @@ class CarLifeSession(
 
         /** moduleID голосового помощника в MODULE_STATUS (ModuleStatusManage: 4 = VR). */
         private const val MODULE_VR = 4
+        private const val VR_ECHO_MS = 1500L
 
         /** SkinDisplayModeManager.getDisplayModeInt: 0 светлая, 1 тёмная, 2 авто. */
         private const val THEME_LIGHT = 0
