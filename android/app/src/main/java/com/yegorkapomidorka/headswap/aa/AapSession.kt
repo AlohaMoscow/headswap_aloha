@@ -59,6 +59,9 @@ interface AaPeer {
     /** Нажатие кнопки (Android KeyEvent keycode): down, затем up. По умолчанию игнорируется. */
     fun sendKey(keycode: Int) {}
 
+    /** Поворот шайбы на delta щелчков (> 0 по часовой). По умолчанию игнорируется. */
+    fun sendRotary(delta: Int) {}
+
     /** PCM16 mono 16 кГц микрофона -> телефону, пока открыта микрофонная сессия AA. По умолчанию игнорируется. */
     fun sendMicPcm(pcm: ByteArray, capturedAtUs: Long) {}
 }
@@ -165,6 +168,20 @@ class AapSession(
             outQueue.offer(MsgJob(M.keyEvent(ts + 1_000_000L, keycode, false), false, "key up $keycode ts=${ts + 1_000_000L}ns"))
         } catch (e: Throwable) {
             log("AA ошибка постановки key в очередь: ${e.javaClass.simpleName}: ${e.message}", true)
+        }
+    }
+
+    /** Поворот шайбы: relative_event KEYCODE_ROTARY_CONTROLLER. Игнорируется до готовности сессии. */
+    override fun sendRotary(delta: Int) {
+        if (!established || stopReason != null) {
+            log("AA rotary($delta) пропущен: сессия ${if (established) "завершается" else "ещё не готова"}", true)
+            return
+        }
+        try {
+            val ts = System.nanoTime() - clockBaseNs + 1_000_000_000L
+            outQueue.offer(MsgJob(M.rotaryEvent(ts, delta), false, "rotary $delta ts=${ts}ns"))
+        } catch (e: Throwable) {
+            log("AA ошибка постановки rotary в очередь: ${e.javaClass.simpleName}: ${e.message}", true)
         }
     }
 

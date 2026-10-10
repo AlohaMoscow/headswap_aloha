@@ -69,6 +69,11 @@ class FakePeer : AaPeer {
     override fun sendKey(keycode: Int) {
         keys.add(keycode)
     }
+
+    val rotary = CopyOnWriteArrayList<Int>()
+    override fun sendRotary(delta: Int) {
+        rotary.add(delta)
+    }
 }
 
 class AaBridgeCoreTest {
@@ -224,6 +229,22 @@ class AaBridgeCoreTest {
         core.onCarlifeHardKey(16)                             // AA не подключён: игнор без исключений
         assertEquals(3, peer.keys.size)
         assertTrue(AaBridgeCore.HARD_KEY_TO_ANDROID.values.all { it in AapMessages.KEYCODES_SUPPORTED })
+    }
+
+    @Test
+    fun selectorKnobToRotary() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onCarlifeHardKey(6)                              // SELECTOR_NEXT
+        core.onCarlifeHardKey(7)                              // SELECTOR_PREVIOUS
+        core.onCarlifeHardKey(0x14)                           // OK: нажатие шайбы
+        assertEquals(listOf(1, -1), peer.rotary.toList())
+        assertEquals(listOf(23), peer.keys.toList())
+        assertTrue(logs.any { it.contains("шайба keycode=6 -> AA rotary 1") })
+        assertTrue(AapMessages.KEYCODE_ROTARY_CONTROLLER in AapMessages.KEYCODES_SUPPORTED)
+        core.peer = null
+        core.onCarlifeHardKey(6)                              // AA не подключён: игнор без исключений
+        assertEquals(2, peer.rotary.size)
     }
 
     @Test

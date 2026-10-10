@@ -299,6 +299,16 @@ class AaBridgeCore(
 
     /** TOUCH_CAR_HARD_KEY_CODE ГУ (кнопки руля) -> AA: нажатие Android KeyEvent по [HARD_KEY_TO_ANDROID]. */
     fun onCarlifeHardKey(code: Int) {
+        HARD_KEY_TO_ROTARY[code]?.let { delta ->
+            val p = peer
+            if (p == null) {
+                log("BRIDGE шайба keycode=$code проигнорирована: AA не подключён", true)
+                return
+            }
+            log("BRIDGE шайба keycode=$code -> AA rotary $delta", true)
+            p.sendRotary(delta)
+            return
+        }
         val android = HARD_KEY_TO_ANDROID[code]
         if (android == null) {
             log("BRIDGE руль keycode=$code: нет аналога в AA, игнор", true)
@@ -886,6 +896,12 @@ class AaBridgeCore(
             0x17 to 19,     // MOVE_UP -> DPAD_UP
             0x18 to 20,     // MOVE_DOWN -> DPAD_DOWN
             0x21 to KEYCODE_SEARCH, // VR_START -> голосовой ассистент
+        )
+
+        /** Поворот шайбы (Mazda Commander и т.п.) -> rotary AA: фокус по спискам, выбор — OK (DPAD_CENTER). */
+        val HARD_KEY_TO_ROTARY: Map<Int, Int> = mapOf(
+            0x06 to 1,      // SELECTOR_NEXT -> по часовой
+            0x07 to -1,     // SELECTOR_PREVIOUS -> против часовой
         )
 
         const val TEXT_START_SERVER = "Запустите сервер ГУ в Android Auto"
