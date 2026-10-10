@@ -1,5 +1,7 @@
 package com.yegorkapomidorka.headswap
 
+import com.yegorkapomidorka.headswap.aa.VideoMode
+
 /** Состояние для экрана; пишут сервис и сессия, читает activity (один процесс). */
 object CarLifeState {
     @Volatile var status: String = "не запущено"
@@ -8,6 +10,9 @@ object CarLifeState {
     @Volatile var auth: String = "-"
     @Volatile var video: String = "-"
     @Volatile var touch: String = "-"
+
+    /** Видео-режим текущей/последней сессии (фактический, с учётом passthrough); null - сессии не было. */
+    @Volatile var videoMode: VideoMode? = null
     @Volatile var running: Boolean = false
 
     fun resetSession() {

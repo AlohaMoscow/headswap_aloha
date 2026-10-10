@@ -55,6 +55,8 @@ class Inputs(
     val usbAudio: Boolean,
     /** Мост не стартует из-за настройки (нет сертификата head unit): текст для пользователя. */
     val setupError: String? = null,
+    /** Размер видео на ГУ («1280×720»): фактический режим сессии. */
+    val videoRes: String = "1280×720",
 )
 
 object HomeLogic {
@@ -95,7 +97,7 @@ object HomeLogic {
                 "Android Auto на экране машины. Телефон можно убрать.",
                 listOf(
                     StageState.DONE to "работает", StageState.DONE to "CarLife 2.0", StageState.DONE to "подключён",
-                    StageState.DONE to "1280×720",
+                    StageState.DONE to i.videoRes,
                     if (i.usbAudio) StageState.DONE to "USB" else StageState.PEND to "выключен",
                 ),
                 outline = OutlineAction.STOP,
@@ -253,6 +255,7 @@ object HeadswapStatus {
             graceTotalS = graceTotalS,
             usbAudio = aaPrefs.usbAudio,
             setupError = AaState.setupError,
+            videoRes = (CarLifeState.videoMode ?: aaPrefs.videoMode.effective(aaPrefs.transcode)).outLabel,
         )
     }
 

@@ -29,6 +29,10 @@ class AaTranscoder(
     private val log: (String) -> Unit = { AppLog.i(it, false) },
     /** Эксперименты: "vbr", "repeat=NNN" (мкс), "norealtime", "nolowlat", "nobase". */
     private val tuning: String = "",
+    /** Размер кадра AA на входе (подсказка декодеру) и вырезаемая из него часть; по умолчанию вход = выход, без кропа. */
+    private val srcWidth: Int = width,
+    private val srcHeight: Int = height,
+    private val crop: VideoCrop = VideoCrop.NONE,
 ) : VideoTranscoder {
     private var encoder: MediaCodec? = null
     private var surface: Surface? = null
@@ -98,15 +102,16 @@ class AaTranscoder(
         if (!tuning.contains("nogl")) {
             // декодер -> GL-реле -> Surface энкодера: реле перерисовывает последний кадр на статике (>= 10 fps)
             try {
-                relay = GlRelay(surface!!, width, height, REDRAW_IDLE_MS, log).also { it.start() }
+                relay = GlRelay(surface!!, width, height, REDRAW_IDLE_MS, log, srcWidth, srcHeight, crop).also { it.start() }
             } catch (e: Exception) {
                 log("транскодер: GL-реле не поднялось (${e.message}), декодер пишет прямо в энкодер")
                 relay = null
             }
         }
+        if (relay == null && !crop.isNone) log("транскодер: !!!!!! без GL-реле кроп невозможен, кадр AA будет сжат целиком")
         running = true
         encThread = Thread({ encodeLoop(c) }, "aa-trans-enc").also { it.start() }
-        log("транскодер: энкодер $encoderName ${width}x$height ${fps}fps ${bitrate / 1000}kbps ($encoderNote)")
+        log("транскодер: энкодер $encoderName ${width}x$height (вход AA ${srcWidth}x$srcHeight${if (crop.isNone) "" else ", кроп $crop"}) ${fps}fps ${bitrate / 1000}kbps ($encoderNote)")
     }
 
     private fun format(level: Int): MediaFormat {
@@ -212,7 +217,7 @@ class AaTranscoder(
         }
         val surf = relay?.inputSurface ?: surface ?: return false
         return try {
-            val f = MediaFormat.createVideoFormat(MIME, width, height)
+            val f = MediaFormat.createVideoFormat(MIME, srcWidth, srcHeight)
             f.setByteBuffer("csd-0", ByteBuffer.wrap(s))
             f.setByteBuffer("csd-1", ByteBuffer.wrap(p))
             f.setInteger(MediaFormat.KEY_PRIORITY, 0)
@@ -224,7 +229,7 @@ class AaTranscoder(
             } catch (e: Exception) {
                 // без low-latency/priority (не все декодеры принимают)
                 c.reset()
-                val f2 = MediaFormat.createVideoFormat(MIME, width, height)
+                val f2 = MediaFormat.createVideoFormat(MIME, srcWidth, srcHeight)
                 f2.setByteBuffer("csd-0", ByteBuffer.wrap(s))
                 f2.setByteBuffer("csd-1", ByteBuffer.wrap(p))
                 c.configure(f2, surf, null, 0)

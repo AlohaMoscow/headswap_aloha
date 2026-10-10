@@ -58,6 +58,9 @@ data class AapSdOptions(
     val resolution: String = "1280x720",
     val fps: Int = 30,
     val density: Int = 160,
+    /** margin_width / margin_height VideoConfiguration: AA оставляет такие поля (пополам по краям), интерфейс только внутри. */
+    val marginW: Int = 0,
+    val marginH: Int = 0,
     val mic: Boolean = true,
     val vehicleType: Int? = null,
     val fullAudio: Boolean = false,
@@ -308,7 +311,7 @@ object AapMessages {
             .msg(1, AapPb().v(1, SENSOR_NIGHT))))
 
         // video
-        val vc = AapPb().v(1, resCode).v(2, if (o.fps == 30) 2 else 1).v(3, 0).v(4, 0).v(5, o.density)
+        val vc = AapPb().v(1, resCode).v(2, if (o.fps == 30) 2 else 1).v(3, o.marginW).v(4, o.marginH).v(5, o.density)
             .v(8, 10000).v(10, MEDIA_CODEC_VIDEO_H264_BP)
         r.msg(1, AapPb().v(1, CH_VIDEO).msg(3, AapPb()
             .v(1, MEDIA_CODEC_VIDEO_H264_BP).v(2, AUDIO_NONE).msg(4, vc).bool(5, true)))

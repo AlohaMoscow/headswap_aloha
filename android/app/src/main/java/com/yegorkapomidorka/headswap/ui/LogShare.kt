@@ -197,6 +197,7 @@ object LogShare {
             appendLine()
             appendLine("Настройки моста")
             appendLine("  видео: ${if (aa.transcode) "перекодирование" else "passthrough"}")
+            appendLine("  разрешение видео: выбрано ${aa.videoMode.name}, в сессии: ${CarLifeState.videoMode?.describe() ?: "сессии не было"}")
             appendLine("  звук по USB: ${aa.usbAudio}")
             appendLine("  сертификат: ${aa.certSet}")
             appendLine("  автозапуск сервера ГУ: ${aa.autoServer}")

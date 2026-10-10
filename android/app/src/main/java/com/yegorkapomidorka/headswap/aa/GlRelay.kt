@@ -32,6 +32,10 @@ class GlRelay(
     private val height: Int,
     private val idleRedrawMs: Long = 100,
     private val log: (String) -> Unit = {},
+    /** Размер исходного кадра AA (по умолчанию как выход) и вырезаемый из него прямоугольник. */
+    private val srcWidth: Int = width,
+    private val srcHeight: Int = height,
+    crop: VideoCrop = VideoCrop.NONE,
 ) {
     private val thread = HandlerThread("aa-gl-relay")
     private lateinit var handler: Handler
@@ -46,7 +50,11 @@ class GlRelay(
     private var uMatrix = 0
     private val tm = FloatArray(16)
     private val quad: FloatBuffer = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
-        put(floatArrayOf(-1f, -1f, 0f, 0f, 1f, -1f, 1f, 0f, -1f, 1f, 0f, 1f, 1f, 1f, 1f, 1f))
+        // x, y, u, v; кроп = центральный прямоугольник вместо всей текстуры (uSTMatrix применяется шейдером поверх)
+        put(floatArrayOf(
+            -1f, -1f, crop.u0, crop.v0, 1f, -1f, crop.u1, crop.v0,
+            -1f, 1f, crop.u0, crop.v1, 1f, 1f, crop.u1, crop.v1,
+        ))
         position(0)
     }
     @Volatile private var haveFrame = false
@@ -148,7 +156,7 @@ class GlRelay(
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         val s = SurfaceTexture(texId)
-        s.setDefaultBufferSize(width, height)
+        s.setDefaultBufferSize(srcWidth, srcHeight)
         s.setOnFrameAvailableListener({ onFrame() }, handler)
         st = s
         inputSurface = Surface(s)

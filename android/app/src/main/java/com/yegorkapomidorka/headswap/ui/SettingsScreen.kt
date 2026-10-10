@@ -13,6 +13,7 @@ import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.MicMode
+import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
 
 /** Шапка «назад + заголовок» и прокручиваемое тело. */
@@ -34,6 +35,8 @@ fun scaffold(ctx: Context, title: String, onBack: () -> Unit, body: View): Linea
 class SettingsScreen(host: MainActivity) : Screen(host) {
     private val aa = AaPrefs(ctx)
     private val micRows = HashMap<MicMode, RadioRow>()
+    private val modeRows = LinkedHashMap<VideoMode, RadioRow>()
+    private lateinit var modeNote: TextView
     private lateinit var transcodeRow: RadioRow
     private lateinit var directRow: RadioRow
     private lateinit var jvc: TextView
@@ -57,6 +60,16 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         body.addView(transcodeRow.view, lp(MATCH, WRAP))
         body.addView(directRow.view, lp(MATCH, WRAP))
         setTranscode(aa.transcode, save = false)
+
+        body.addView(c.sectionTitle("Разрешение видео"))
+        for (m in VideoMode.values()) {
+            val row = RadioRow(c, m.title, m.sub) { setVideoMode(m) }
+            modeRows[m] = row
+            body.addView(row.view, lp(MATCH, WRAP))
+        }
+        modeNote = c.text("Применится при следующем подключении.", 13f, 400, c.clr(R.color.on2))
+        body.addView(modeNote, lp(WRAP, WRAP).margins(c, 8, 2, 8, 0))
+        refreshVideoMode()
 
         body.addView(c.sectionTitle("Сертификат ГУ"))
         body.addView(certCard())
@@ -128,6 +141,24 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         if (save) aa.transcode = on
         transcodeRow.setSelected(on)
         directRow.setSelected(!on)
+        if (::modeNote.isInitialized) refreshVideoMode()
+    }
+
+    private fun setVideoMode(m: VideoMode) {
+        if (m.needsTranscode && !aa.transcode) return      // кроп возможен только при перекодировании
+        aa.videoMode = m
+        refreshVideoMode()
+    }
+
+    /** Без перекодирования «широкий» недоступен: радио затемнено, фактический режим 1280×720 (в prefs выбор остаётся). */
+    private fun refreshVideoMode() {
+        val shown = aa.videoMode.effective(aa.transcode)
+        for ((m, row) in modeRows) {
+            val blocked = m.needsTranscode && !aa.transcode
+            row.setSelected(m == shown)
+            row.setSub(if (blocked) "Нужно перекодирование" else m.sub)
+            row.view.alpha = if (blocked) 0.45f else 1f
+        }
     }
 
     private fun certCard(): View {

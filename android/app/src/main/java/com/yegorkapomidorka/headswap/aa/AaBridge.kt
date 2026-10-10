@@ -82,6 +82,12 @@ class AaBridgeCore(
     // --- видео: перекодирование (по умолчанию в приложении) или passthrough ---
     /** Режим видео моста: true = AA -> декодер -> энкодер (кадры повторяются на статике), false = H.264 как есть. */
     @Volatile var transcodeEnabled = false
+
+    /**
+     * Разрешение видео, снятое один раз при создании хоста (уже с учётом passthrough): им построена AA (SDR),
+     * его же берут CarLife-сессия (INIT_DONE, энкодер) и маппинг тача. Prefs отсюда не читаются.
+     */
+    @Volatile var videoMode: VideoMode = VideoMode.DEFAULT
     private var transcoder: VideoTranscoder? = null
     private var encCsd: ByteArray? = null
     private var outGotIdr = false
@@ -281,7 +287,7 @@ class AaBridgeCore(
         return true
     }
 
-    /** TOUCH_ACTION ГУ -> AA: 0 DOWN, 1 UP, 2 MOVE, координаты кадра 1280x720 1:1. */
+    /** TOUCH_ACTION ГУ -> AA: 0 DOWN, 1 UP, 2 MOVE; координаты кадра ГУ -> кадр AA через [VideoMode.mapTouch] (без margin-ов 1:1). */
     fun onCarlifeTouch(action: Int, x: Int, y: Int) {
         if (action !in 0..2) {
             log("BRIDGE тач action=$action x=$x y=$y не передаю (нет аналога в AA)", false)
@@ -293,8 +299,11 @@ class AaBridgeCore(
             log("BRIDGE тач $name $x,$y проигнорирован: AA не подключён", false)
             return
         }
-        log("BRIDGE тач $name $x,$y -> AA", action != 2)
-        p.sendTouch(action, x, y)
+        val mode = videoMode
+        val (ax, ay) = mode.mapTouch(x, y)
+        if (ax == x && ay == y) log("BRIDGE тач $name $x,$y -> AA", action != 2)
+        else log("BRIDGE тач $name ГУ $x,$y -> AA $ax,$ay (${mode.name})", action != 2)
+        p.sendTouch(action, ax, ay)
     }
 
     /** TOUCH_CAR_HARD_KEY_CODE ГУ (кнопки руля) -> AA: нажатие Android KeyEvent по [HARD_KEY_TO_ANDROID]. */

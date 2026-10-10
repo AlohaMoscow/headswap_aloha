@@ -8,6 +8,7 @@ import com.yegorkapomidorka.headswap.aa.CarlifeAudio
 import com.yegorkapomidorka.headswap.aa.AaTranscoder
 import com.yegorkapomidorka.headswap.aa.CarlifeLink
 import com.yegorkapomidorka.headswap.aa.TranscodeOutput
+import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.aa.VideoTranscoder
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -38,6 +39,9 @@ class CarLifeSession(
 ) : VideoSource.Listener, CarlifeLink {
 
     private class Out(val chan: Int, val inner: ByteArray)
+
+    /** Видео-режим хоста, снятый при подключении: одинаков для INIT_DONE, энкодера и тача в течение всей сессии. */
+    private val mode: VideoMode = bridge.videoMode
 
     private val input = FileInputStream(pfd.fileDescriptor)
     private val output = FileOutputStream(pfd.fileDescriptor)
@@ -105,6 +109,8 @@ class CarLifeSession(
         bridge.attach(this)
         AppLog.i("сессия: старт")
         CarLifeState.resetSession()
+        CarLifeState.videoMode = mode
+        AppLog.i(mode.describe())
         CarLifeState.status = "соединено, жду HU_PROTOCOL_VERSION"
         lastRx = SystemClock.elapsedRealtime()
         writer = Thread({ writeLoop() }, "cl-writer").also { it.start() }
@@ -361,8 +367,8 @@ class CarLifeSession(
             sendCmd(Msg.VIDEO_ENCODER_INIT_DONE, Msgs.videoEncoderInfo(pendingW, pendingH, pendingFps))
             return
         }
-        // всегда 1280x720 fps 30 (ГУ Honda принимает и показывает целиком, проверено в машине)
-        val (w, h, why) = Triple(1280, 720, "мост: всегда 1280x720")
+        // размер задаёт видео-режим (по умолчанию 1280x720 fps 30: ГУ Honda принимает и показывает целиком, проверено в машине)
+        val (w, h, why) = Triple(mode.outW, mode.outH, "мост: режим ${mode.name}")
         val fps = FPS
         pendingW = w
         pendingH = h
@@ -397,9 +403,9 @@ class CarLifeSession(
     private fun onVideoStart() {
         paused = false
         if (pendingW <= 0) {
-            pendingW = 1280
-            pendingH = 720
-            chosen = "1280x720 (START без INIT, мост)"
+            pendingW = mode.outW
+            pendingH = mode.outH
+            chosen = "${mode.outW}x${mode.outH} (START без INIT, мост, режим ${mode.name})"
         }
         carlifeStarted = true
         synchronized(videoLock) {
@@ -420,7 +426,7 @@ class CarLifeSession(
                 cur.requestKeyFrame()
                 return
             }
-            val s = VideoSource(pendingW, pendingH, pendingFps, BITRATE, this)
+            val s = VideoSource(pendingW, pendingH, pendingFps, mode.bitrate, this)
             s.banner = text
             try {
                 s.start()
@@ -483,9 +489,12 @@ class CarLifeSession(
         return true
     }
 
-    /** Транскодер моста: декодер AA -> Surface энкодера 1280x720. null, если MediaCodec не поднялся. */
+    /** Транскодер моста: декодер AA (кадр режима) -> кроп -> Surface энкодера (выход режима). null, если MediaCodec не поднялся. */
     override fun createTranscoder(out: TranscodeOutput): VideoTranscoder? = try {
-        AaTranscoder(1280, 720, FPS, BITRATE, out, { AppLog.i(it, false) }).also { it.start() }
+        AaTranscoder(
+            mode.outW, mode.outH, FPS, mode.bitrate, out, { AppLog.i(it, false) },
+            srcWidth = mode.aaW, srcHeight = mode.aaH, crop = mode.crop,
+        ).also { it.start() }
     } catch (e: Exception) {
         AppLog.e("BRIDGE транскодер не создан", e)
         null
@@ -737,7 +746,6 @@ class CarLifeSession(
 
     companion object {
         const val FPS = 30
-        const val BITRATE = 4_000_000
         private const val MAX_QUEUE = 90
         private const val SILENCE_MS = 10_000L
         private const val FEATURE_CONTENT_ENCRYPTION = "CONTENT_ENCRYPTION"

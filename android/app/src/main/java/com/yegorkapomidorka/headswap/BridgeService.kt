@@ -23,11 +23,11 @@ import com.yegorkapomidorka.headswap.aa.AaCreds
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.aa.AapOptions
-import com.yegorkapomidorka.headswap.aa.AapSdOptions
 import com.yegorkapomidorka.headswap.aa.BridgeHost
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.PhoneMicCapture
 import com.yegorkapomidorka.headswap.aa.ServerPhase
+import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
 import com.yegorkapomidorka.headswap.autosrv.AutoServerPolicy
 import com.yegorkapomidorka.headswap.autosrv.Trigger
@@ -125,8 +125,14 @@ class BridgeService : Service() {
 
         // AA-сессия к серверу ГУ на 127.0.0.1:5277 живёт на уровне сервиса (BridgeHost), а не этой USB-сессии
         var h = host
+        // режим фиксируется на подключение; тёплая AA с другой геометрией не годится (SDR уже ушёл), её закрываем
+        val wantMode = aaPrefs.videoMode.effective(aaPrefs.transcode)
+        if (h != null && !h.isDead && h.core.videoMode != wantMode) {
+            AppLog.i("BRIDGE: видео-режим сменился (${h.core.videoMode.name} -> ${wantMode.name}), тёплую AA закрываю и поднимаю заново")
+            h.shutdown("смена видео-режима")
+        }
         if (h == null || h.isDead) {
-            h = createHost(aaPrefs, previous = h)
+            h = createHost(aaPrefs, wantMode, previous = h)
             host = h
             if (h == null) {
                 // нет сертификата head unit или мост не собрался: причина уже в AaState.setupError, USB-сессию не открываем
@@ -159,7 +165,7 @@ class BridgeService : Service() {
     }
 
     /** Новый AA-хост: ядро, коннектор, сертификаты. null = мост не поднялся (причина в AaState.setupError). */
-    private fun createHost(aaPrefs: AaPrefs, previous: BridgeHost?): BridgeHost? {
+    private fun createHost(aaPrefs: AaPrefs, mode: VideoMode, previous: BridgeHost?): BridgeHost? {
         return try {
             val loaded = AaCreds.load(this, aaPrefs.certSet)
             AaState.setupError = null
@@ -172,11 +178,13 @@ class BridgeService : Service() {
             core.phoneMic = PhoneMicCapture(applicationContext)
             core.usbAudioEnabled = aaPrefs.usbAudio
             core.transcodeEnabled = aaPrefs.transcode
+            core.videoMode = mode
             core.expectFeatureConfig = true
+            if (aaPrefs.videoMode != mode) AppLog.i("BRIDGE видео-режим ${aaPrefs.videoMode.name} недоступен без перекодирования, использую ${mode.name}")
             // аудио-синки (MEDIA/SPEECH) объявляются в момент запроса телефона, когда уже известно решение по звуку
             val conn = AaConnector(
                 core, loaded.creds, log,
-                options = { AapOptions(sdProvider = { AapSdOptions(fullAudio = core.audioViaUsb) }) },
+                options = { AapOptions(sdProvider = { mode.sdOptions(fullAudio = core.audioViaUsb) }) },
                 serverPrep = { phase -> prepareServer(core, phase) },
             )
             AppLog.i("BRIDGE звук по USB: ${if (aaPrefs.usbAudio) "включён (решение по FEATURE_CONFIG ГУ)" else "выключен в UI"}")

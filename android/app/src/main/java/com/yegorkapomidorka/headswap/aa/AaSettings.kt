@@ -26,6 +26,11 @@ class AaPrefs(ctx: Context) {
         get() = sp.getBoolean("transcode", true)
         set(v) = sp.edit().putBoolean("transcode", v).apply()
 
+    /** Разрешение видео (имя VideoMode, по умолчанию 1280×720). Читается один раз на подключение. */
+    var videoMode: VideoMode
+        get() = VideoMode.parse(sp.getString("videoMode", VideoMode.DEFAULT.name))
+        set(v) = sp.edit().putString("videoMode", v.name).apply()
+
     /** Автозапуск сервера ГУ (USB подключён / сессия AA закончилась); работает, только если включена служба спецвозможностей. */
     var autoServer: Boolean
         get() = sp.getBoolean("autoServer", true)
