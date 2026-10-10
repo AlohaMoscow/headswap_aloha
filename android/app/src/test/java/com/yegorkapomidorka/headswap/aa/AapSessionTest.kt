@@ -186,6 +186,9 @@ class AapSessionTest {
                 // с этого момента запись HU падает; HU должен закрыть сессию сам и не слать ByeBye
                 onBeforeFail()
                 sendMsg(0, M.PING_REQUEST, AapPb().v(1, 1L).toByteArray())
+                // свою сторону не закрываем, пока HU не закроет сокет сам: иначе наш EOF обгоняет сбой записи
+                while (sock.getInputStream().read(buf) >= 0) {
+                }
                 return
             }
 
