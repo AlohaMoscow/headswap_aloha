@@ -259,6 +259,15 @@ object AapMessages {
         return AapOut(CH_INPUT, INPUT_EVENT, AapPb().v(1, timestampNs).msg(4, AapPb().msg(1, key)).toByteArray())
     }
 
+    /** Android KEYCODE_ROTARY_CONTROLLER (AA): шайба, двигает фокус по элементам интерфейса. */
+    const val KEYCODE_ROTARY_CONTROLLER = 65536
+
+    /** InputReport{timestamp ns, relative_event{data=[{keycode ROTARY_CONTROLLER, delta}]}}; delta > 0 по часовой. */
+    fun rotaryEvent(timestampNs: Long, delta: Int): AapOut {
+        val rel = AapPb().v(1, KEYCODE_ROTARY_CONTROLLER).v(2, delta)
+        return AapOut(CH_INPUT, INPUT_EVENT, AapPb().v(1, timestampNs).msg(6, AapPb().msg(1, rel)).toByteArray())
+    }
+
     // --- ServiceDiscoveryResponse ---
     /** KeyCode.supported из headunit-revived (input/KeyCode.kt:9-61), номера Android KeyEvent. */
     val KEYCODES_SUPPORTED: List<Int> = listOf(

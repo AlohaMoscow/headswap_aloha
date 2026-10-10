@@ -200,6 +200,17 @@ class AapMessagesTest {
     }
 
     @Test
+    fun rotaryEventBytes() {
+        // InputReport{1: ts=5, 6: RelativeEvent{1: Rel{1: 65536, 2: delta}}}
+        val cw = M.rotaryEvent(5, 1)
+        assertEquals(M.CH_INPUT, cw.chan)
+        assertEquals(M.INPUT_EVENT, cw.type)
+        assertArrayEquals(Golden.hex("08 05 32 08 0a 06 08 80 80 04 10 01"), cw.payload)
+        val ccw = M.rotaryEvent(5, -1)
+        assertArrayEquals(Golden.hex("08 05 32 11 0a 0f 08 80 80 04 10 ff ff ff ff ff ff ff ff ff 01"), ccw.payload)
+    }
+
+    @Test
     fun versionResponseParse() {
         val v = M.parseVersionResponse(Golden.hex("00 01 00 07 00 00"))!!
         assertEquals(listOf(1, 7, 0), listOf(v.major, v.minor, v.status))
