@@ -47,6 +47,8 @@ class BridgeService : Service() {
     private var host: BridgeHost? = null
     private var stopRequested = false
     private var wakeLock: PowerManager.WakeLock? = null
+    /** Автозапуск пропущен из-за неподключённой службы спецвозможностей: RETRY запустит его, когда она появится. */
+    @Volatile private var serverStartPending = false
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "bridge-grace").also { it.isDaemon = true } }
 
     private val detachReceiver = object : BroadcastReceiver() {
@@ -231,15 +233,24 @@ class BridgeService : Service() {
             ServerPhase.AFTER_SESSION -> Trigger.AFTER_SESSION
             ServerPhase.RETRY -> Trigger.RETRY
         }
+        val autoPref = AaPrefs(this).autoServer
+        // после старта процесса служба спецвозможностей подключается позже сервиса: даём ей время
+        if (trigger != Trigger.RETRY && autoPref && !AutoServer.isConnected && AutoServer.isListed(this)) {
+            AutoServer.log("жду подключения службы спецвозможностей (${trigger.label})")
+            AutoServer.awaitService(SERVICE_WAIT_MS)
+        }
         val skip = AutoServerPolicy.skipReason(
-            trigger, AaPrefs(this).autoServer, AutoServer.isConnected,
+            trigger, autoPref, AutoServer.isConnected,
             usbAlive = core.hasCarlifeLink, warmAaSession = false, lastLocked = AutoServer.lastLocked,
+            startPending = serverStartPending,
         )
         if (skip != null) {
+            if (trigger != Trigger.RETRY && !AutoServer.isConnected) serverStartPending = true
             // RETRY вызывается каждые несколько секунд и почти всегда пропускается: молча
             if (trigger != Trigger.RETRY) AutoServer.log("пропуск (${trigger.label}): $skip")
             return
         }
+        serverStartPending = false
         core.showStatus(AutoServerPolicy.runningText(trigger))
         val run = AutoServer.start(trigger)
         val out = AutoServer.await(run, AutoServerPolicy.waitMs(trigger))
@@ -299,5 +310,7 @@ class BridgeService : Service() {
         const val ACTION_STOP = "com.yegorkapomidorka.headswap.STOP"
         private const val CHANNEL = "bridge"
         private const val NOTIF_ID = 1
+        /** Сколько автозапуск ждёт подключения включённой службы спецвозможностей. */
+        private const val SERVICE_WAIT_MS = 3_000L
     }
 }

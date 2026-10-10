@@ -36,6 +36,13 @@ object AutoServer {
 
     fun log(line: String) = AppLog.i("AUTOSRV $line", true)
 
+    /** Ждёт подключения службы не дольше waitMs; true = подключена. */
+    fun awaitService(waitMs: Long): Boolean {
+        val end = System.nanoTime() + waitMs * 1_000_000
+        while (service == null && System.nanoTime() < end) Thread.sleep(50)
+        return service != null
+    }
+
     /** Служба включена в системных настройках (может быть ещё не подключена). */
     fun isListed(ctx: Context): Boolean {
         val cls = AutoServerService::class.java

@@ -65,7 +65,8 @@ class AutoServerTextTest {
 class AutoServerPolicyTest {
     private fun skip(
         t: Trigger, pref: Boolean = true, svc: Boolean = true, usb: Boolean = true, warm: Boolean = false, locked: Boolean = false,
-    ) = AutoServerPolicy.skipReason(t, pref, svc, usb, warm, locked)
+        pending: Boolean = false,
+    ) = AutoServerPolicy.skipReason(t, pref, svc, usb, warm, locked, pending)
 
     @Test
     fun buttonRunsRegardlessOfPrefButNeedsService() {
@@ -94,6 +95,15 @@ class AutoServerPolicyTest {
         assertTrue(skip(Trigger.RETRY, locked = false) != null)
         assertNull(skip(Trigger.RETRY, locked = true))
         assertTrue(skip(Trigger.RETRY, locked = true, usb = false) != null)
+    }
+
+    @Test
+    fun retryCatchesUpStartSkippedBeforeServiceConnected() {
+        // лог пользователя: USB_ATTACH пропущен за 86 мс до подключения службы, сервер ГУ так и не запустился
+        assertNull(skip(Trigger.RETRY, pending = true))
+        assertTrue(skip(Trigger.RETRY, pending = true, svc = false) != null)
+        assertTrue(skip(Trigger.RETRY, pending = true, pref = false) != null)
+        assertTrue(skip(Trigger.RETRY, pending = true, usb = false) != null)
     }
 
     @Test

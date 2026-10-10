@@ -25,7 +25,10 @@ class AutoOutcome(val result: AutoResult, val detail: String, val tookMs: Long) 
 
 /** Решения «запускать ли автоматизацию» и «что показать на ГУ». Чистая логика, без Android. */
 object AutoServerPolicy {
-    /** null = запускать, иначе причина пропуска. */
+    /**
+     * null = запускать, иначе причина пропуска. startPending: прошлый USB_ATTACH/AFTER_SESSION пропущен, потому что
+     * служба ещё не была подключена (после старта процесса она подключается позже сервиса) - RETRY догоняет.
+     */
     fun skipReason(
         trigger: Trigger,
         prefEnabled: Boolean,
@@ -33,6 +36,7 @@ object AutoServerPolicy {
         usbAlive: Boolean,
         warmAaSession: Boolean,
         lastLocked: Boolean,
+        startPending: Boolean = false,
     ): String? {
         if (!serviceConnected) return "служба спецвозможностей не подключена"
         return when (trigger) {
@@ -51,7 +55,7 @@ object AutoServerPolicy {
             Trigger.RETRY -> when {
                 !prefEnabled -> "автозапуск выключен в настройках"
                 !usbAlive -> "USB отключён"
-                !lastLocked -> "прошлая попытка не упёрлась в блокировку"
+                !lastLocked && !startPending -> "прошлая попытка не упёрлась в блокировку"
                 else -> null
             }
         }
