@@ -172,9 +172,12 @@ class RadioRow(val ctx: Context, title: String, sub: String, val onPick: () -> U
         isFocusable = false
     }
     private val titleView = ctx.text(title, 17f, 500)
-    private val subView = ctx.text(sub, 14f, 400, ctx.clr(R.color.on2))
+    /** Пустой подзаголовок скрыт: иначе пустая строка сдвигает заголовок вверх (выбор языка). */
+    private val subView = ctx.text(sub, 14f, 400, ctx.clr(R.color.on2)).apply {
+        visibility = if (sub.isBlank()) View.GONE else View.VISIBLE
+    }
     val view: LinearLayout = ctx.hbox(10).apply {
-        minimumHeight = ctx.dp(72)
+        minimumHeight = ctx.dp(if (sub.isBlank()) 56 else 72)
         pad(ctx, 12, 12, 16, 12)
         addView(radio, lp(WRAP, WRAP))
         val col = ctx.vbox(2)
@@ -187,6 +190,7 @@ class RadioRow(val ctx: Context, title: String, sub: String, val onPick: () -> U
 
     fun setSub(text: String) {
         subView.text = text
+        subView.visibility = if (text.isBlank()) View.GONE else View.VISIBLE
     }
 
     fun setSelected(sel: Boolean) {
