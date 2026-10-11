@@ -235,9 +235,11 @@ class MainActivity : Activity() {
         const val EXTRA_CMD = "cmd"
         private const val STATE_SCREENS = "screens"
 
-        /** Все поля аксессуара одной строкой. */
-        fun describe(a: UsbAccessory) =
-            "manufacturer=\"${a.manufacturer}\" model=\"${a.model}\" description=\"${a.description}\" " +
-                "version=\"${a.version}\" uri=\"${a.uri}\" serial=\"${a.serial}\""
+        /** Все поля аксессуара одной строкой. Серийник без разрешения на аксессуар бросает SecurityException. */
+        fun describe(a: UsbAccessory): String {
+            val serial = try { "\"${a.serial}\"" } catch (_: SecurityException) { "(нет разрешения)" }
+            return "manufacturer=\"${a.manufacturer}\" model=\"${a.model}\" description=\"${a.description}\" " +
+                "version=\"${a.version}\" uri=\"${a.uri}\" serial=$serial"
+        }
     }
 }
