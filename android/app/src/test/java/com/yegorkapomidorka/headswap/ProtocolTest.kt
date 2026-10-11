@@ -394,6 +394,52 @@ class ProtocolTest {
     }
 
     @Test
+    fun assemblerSplitsTailOfBodyWithFollowingMessages() {
+        // VW Tharu XR 2026, лог 2026-10-11 15:02:46: заголовок MODULE_CONTROL отдельно, следом 154 байта =
+        // тело MODULE_CONTROL + HU_AUTHEN_RESULT + STATISTIC_INFO + HU_INFO; раньше всё после тела терялось
+        val rest = hex(
+            "08 06 10 00 00 02 00 68 00 01 80 4A 08 01 00 31 00 68 00 01 80 27 0A 14 " +
+                "56 57 58 39 47 45 30 31 30 32 34 36 31 20 20 20 20 20 20 20 12 03 32 2E 31 18 02 22 08 32 30 30 " +
+                "38 32 31 32 32 28 01 30 01 38 F1 AC 01 42 00 00 4B 00 68 00 01 80 03 0A 05 4C 69 6E 75 78 12 00 " +
+                "1A 00 22 00 2A 00 32 00 42 00 4A 00 52 00 5A 00 62 00 6A 0A 56 6F 6C 6B 73 77 61 67 65 6E 72 04 " +
+                "43 4E 53 33 7A 00 82 01 00 8A 01 00 92 01 00 9A 01 04 30 38 37 35 A2 01 00 A8 01 08 B2 01 00 BA 01 00",
+        )
+        assertEquals(154, rest.size)
+        val all = frame(Ch.CMD, hex("00 04 00 68 00 01 80 28")) + frame(Ch.CMD, rest)
+        for (step in listOf(1, 7, 16, 1000)) {
+            val got = runAssembler(all, step)
+            assertEquals(
+                "step=$step",
+                listOf(Msg.MODULE_CONTROL, Msg.HU_AUTHEN_RESULT, Msg.STATISTIC_INFO, Msg.HU_INFO),
+                got.map { it.msg.type },
+            )
+            assertTrue(got.none { it.msg.truncated })
+            assertArrayEquals(hex("08 01"), got[1].msg.body)
+            assertEquals("2.1", PbReader.str(PbReader.parse(got[2].msg.body)!!, 2))
+        }
+    }
+
+    @Test
+    fun assemblerSplitsWholeMessageWithTrailingHeader() {
+        // тот же ГУ, 15:03:06: кадр = MODULE_CONTROL целиком + заголовок HU_AUTHEN_RESULT, тело следующим кадром
+        val all = frame(Ch.CMD, hex("00 04 00 68 00 01 80 28 08 06 10 00 00 02 00 68 00 01 80 4A")) +
+            frame(Ch.CMD, hex("08 01")) +
+            frame(Ch.CMD, Wire.cmdInner(Msg.STATISTIC_INFO, null))
+        val got = runAssembler(all, 1000)
+        assertEquals(listOf(Msg.MODULE_CONTROL, Msg.HU_AUTHEN_RESULT, Msg.STATISTIC_INFO), got.map { it.msg.type })
+        assertArrayEquals(hex("08 01"), got[1].msg.body)
+    }
+
+    @Test
+    fun assemblerKeepsFrameWithForeignTailWhole() {
+        // хвост после первого inner не похож на заголовок этого канала -> кадр как есть, ничего не удерживается
+        val whole = Wire.cmdInner(Msg.HU_PROTOCOL_VERSION, Msgs.protocolVersion(2, 0)) + hex("01 02 03 04 05 06 07 08 09")
+        val got = runAssembler(frame(Ch.CMD, whole), 1000)
+        assertEquals(1, got.size)
+        assertEquals(Msg.HU_PROTOCOL_VERSION, got[0].msg.type)
+    }
+
+    @Test
     fun assemblerJoinsBodyInSeveralFramesAndKeepsChannelsApart() {
         val body = ByteArray(10) { (it + 1).toByte() }
         val hdr = hex("00 0A 00 00 00 01 80 01")

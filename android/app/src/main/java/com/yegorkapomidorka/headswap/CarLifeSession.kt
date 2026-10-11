@@ -437,6 +437,17 @@ class CarLifeSession(
         CarLifeState.video = "ГУ просит $requested, кодирую ${w}x$h"
         sendCmd(Msg.VIDEO_ENCODER_INIT_DONE, Msgs.videoEncoderInfo(w, h, fps))
         sendCmd(Msg.FOREGROUND, null)
+        // VW Tharu XR 2026 (CarLife 2.1) после INIT_DONE START не шлёт, ждёт видео и через ~5.5 с рвёт USB
+        try {
+            sched.schedule({
+                if (!closed.get() && !carlifeStarted) {
+                    AppLog.i("== START не пришёл за ${Handshake.START_FALLBACK_MS} мс после INIT_DONE: стартую видео сам")
+                    onVideoStart()
+                }
+            }, Handshake.START_FALLBACK_MS, TimeUnit.MILLISECONDS)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // сессия уже закрывается
+        }
     }
 
     private fun onFeatureConfig(m: CmdMsg) {

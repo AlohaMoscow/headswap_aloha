@@ -74,6 +74,12 @@ object Handshake {
     /** MODULE_STATUS уходит через 500 мс после стартовой пачки (CarlifeConnectHsgHandler.boxDelayProtocolMatchStatus, :752-758). */
     const val MODULE_STATUS_DELAY_MS = 500L
 
+    /**
+     * Нет VIDEO_ENCODER_START через столько мс после INIT_DONE -> видео стартует само. VW Tharu XR 2026 (CarLife 2.1) START
+     * не шлёт и рвёт USB через ~5.5 с без видео; Baidu HU шлёт START сразу после initDecoder (CarlifeActivity :486-497).
+     */
+    const val START_FALLBACK_MS = 1500L
+
     const val MD_VERSION = "8.6.7"
 
     /** carlifeType: 1 = приложение CarLife (MixConfig.isCarLifeApp, CarlifeDeviceInfoManager :109-113). */

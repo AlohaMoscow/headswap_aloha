@@ -372,36 +372,74 @@ class FrameParser {
  * Сборка inner-сообщений по каналам. Часть ГУ (VW Tharu XR 2026) шлёт заголовок inner (8 байт для CMD/TOUCH,
  * 12 для data-каналов) и тело отдельными внешними кадрами. Если кадр - ровно заголовок с declared len > 0,
  * он удерживается, и кадры этого же канала дописываются, пока не наберётся declared len; потом уходит одно inner.
+ * Тот же ГУ режет поток и в другую сторону: кадр = хвост тела + следующие inner целиком + заголовок следующего
+ * (154 байта: конец MODULE_CONTROL, HU_AUTHEN_RESULT, STATISTIC_INFO). Поэтому после удержания канал разбирается
+ * как поток по declared len, а кадр без удержания режется на несколько inner, если он целиком складывается
+ * в цепочку заголовков с правильным типом (старшие 16 бит типа = номер канала).
  * Сообщения целиком в одном кадре (Honda Vezel) проходят как есть, в том числе с неверным declared len.
  */
 class InnerAssembler {
-    private class Pending(val declared: Int, val buf: java.io.ByteArrayOutputStream, val hdrLen: Int)
-
-    private val pending = HashMap<Int, Pending>()
+    private val pending = HashMap<Int, ByteArray>()
 
     fun feed(chan: Int, inner: ByteArray, sink: (chan: Int, inner: ByteArray) -> Unit) {
-        val p = pending[chan]
+        val hdrLen = hdrLen(chan)
+        val p = pending.remove(chan)
         if (p != null) {
-            p.buf.write(inner, 0, inner.size)
-            if (p.buf.size() - p.hdrLen >= p.declared) {
-                pending.remove(chan)
-                sink(chan, p.buf.toByteArray())
-            }
+            drain(chan, p + inner, sink)
             return
         }
-        val cmd = Ch.isCmdStyle(chan)
-        val hdrLen = if (cmd) 8 else 12
-        if (inner.size == hdrLen) {
-            val declared = if (cmd) Wire.u16(inner, 0) else Wire.u32(inner, 0)
-            val limit = if (cmd) MAX_CMD_DECLARED else Wire.MAX_OUTER_LEN
-            if (declared in 1..limit) {
-                val buf = java.io.ByteArrayOutputStream(hdrLen + declared.coerceAtMost(65536))
-                buf.write(inner, 0, inner.size)
-                pending[chan] = Pending(declared, buf, hdrLen)
+        if (inner.size >= hdrLen && headerOk(chan, inner, 0)) {
+            val declared = declared(chan, inner, 0)
+            if (inner.size == hdrLen && declared > 0) {
+                pending[chan] = inner
+                return
+            }
+            if (inner.size > hdrLen + declared && chainOk(chan, inner)) {
+                drain(chan, inner, sink)
                 return
             }
         }
         sink(chan, inner)
+    }
+
+    /** Отдать все целые inner из buf; неполный хвост удержать. Битый заголовок посреди потока: остаток уходит как есть. */
+    private fun drain(chan: Int, buf: ByteArray, sink: (chan: Int, inner: ByteArray) -> Unit) {
+        val hdrLen = hdrLen(chan)
+        var off = 0
+        while (buf.size - off >= hdrLen) {
+            if (!headerOk(chan, buf, off)) {
+                sink(chan, buf.copyOfRange(off, buf.size))
+                return
+            }
+            val end = off + hdrLen + declared(chan, buf, off)
+            if (end > buf.size) break
+            sink(chan, buf.copyOfRange(off, end))
+            off = end
+        }
+        if (off < buf.size) pending[chan] = buf.copyOfRange(off, buf.size)
+    }
+
+    /** Кадр - цепочка inner с правильными заголовками; последний может быть неполным (или обрывком заголовка). */
+    private fun chainOk(chan: Int, buf: ByteArray): Boolean {
+        val hdrLen = hdrLen(chan)
+        var off = 0
+        while (buf.size - off >= hdrLen) {
+            if (!headerOk(chan, buf, off)) return false
+            off += hdrLen + declared(chan, buf, off)
+        }
+        return true
+    }
+
+    private fun hdrLen(chan: Int) = if (Ch.isCmdStyle(chan)) 8 else 12
+
+    private fun declared(chan: Int, b: ByteArray, o: Int) = if (Ch.isCmdStyle(chan)) Wire.u16(b, o) else Wire.u32(b, o)
+
+    private fun headerOk(chan: Int, b: ByteArray, o: Int): Boolean {
+        val cmd = Ch.isCmdStyle(chan)
+        val declared = declared(chan, b, o)
+        val limit = if (cmd) MAX_CMD_DECLARED else Wire.MAX_OUTER_LEN
+        val type = Wire.u32(b, o + if (cmd) 4 else 8)
+        return declared in 0..limit && type ushr 16 == chan
     }
 
     /** Сколько каналов сейчас ждут тело. */
