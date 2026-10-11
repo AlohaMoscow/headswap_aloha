@@ -148,7 +148,9 @@ class VideoSource(
         var next = SystemClock.elapsedRealtime()
         try {
             while (running) {
-                val canvas = s.lockHardwareCanvas()
+                // программный Canvas: lockHardwareCanvas на Surface энкодера валит media.codec на Xiaomi с vndk v30
+                // (Redmi 9T/9S, POCO X3 Pro: SIGSEGV в FenceTime::Snapshot::getFlattenedSize, за ним abort нашего процесса)
+                val canvas = s.lockCanvas(null)
                 try {
                     draw(canvas)
                 } finally {

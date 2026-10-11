@@ -73,6 +73,24 @@ object TranscodeSelfCheck {
         }
 
         val out = Out()
+        // "placeholder": параллельно второй энкодер заглушки, как в живой сессии (VideoSource + транскодер)
+        val ph = if (tuning.contains("placeholder")) try {
+            com.yegorkapomidorka.headswap.VideoSource(1280, 720, 30, 4_000_000, object : com.yegorkapomidorka.headswap.VideoSource.Listener {
+                override fun onConfig(csd: ByteArray) {}
+                override fun onFrame(data: ByteArray, key: Boolean) {}
+                override fun onError(msg: String, t: Throwable?) {
+                    AppLog.e("transcode_test: ОШИБКА заглушки $msg", t)
+                }
+            }).also { it.banner = "test"; it.start(); AppLog.i("transcode_test: заглушка ${it.encoderName} запущена") }
+        } catch (e: Exception) {
+            AppLog.e("transcode_test: заглушка не создана", e)
+            null
+        } else null
+        if (tuning.contains("phonly")) {
+            Thread.sleep(TOTAL_MS)
+            ph?.let { AppLog.i("transcode_test: только заглушка, отрисовала ${it.framesRendered} кадров"); it.stop() }
+            return
+        }
         val t = try {
             AaTranscoder(1280, 720, 30, 4_000_000, out, { AppLog.i("transcode_test: $it") }, tuning).also { it.start() }
         } catch (e: Exception) {
@@ -116,5 +134,6 @@ object TranscodeSelfCheck {
                 "декодировано=${t.totalDecoded.get()}, первые NAL выхода (SPS+PPS склеены с первым кадром)=${out.firstNals}, ошибок=${out.errors}, энкодер=${t.encoderName}"
         )
         t.stop()
+        ph?.let { AppLog.i("transcode_test: заглушка отрисовала ${it.framesRendered} кадров"); it.stop() }
     }
 }
