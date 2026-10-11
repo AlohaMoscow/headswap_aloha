@@ -37,6 +37,7 @@ object AppLog {
             Log.e(TAG, "не открыть файл лога $f", e)
         }
         i("лог: ${f.absolutePath}")
+        CrashLog.install(ctx)
     }
 
     /** Строка для всех приёмников (экран тоже, если ui=true). */
