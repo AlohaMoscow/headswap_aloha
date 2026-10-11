@@ -32,6 +32,9 @@ interface CarlifeLink {
      * false = сообщение не ушло (сессия закрыта).
      */
     fun requestMicRecord(start: Boolean): Boolean = false
+
+    /** Состояние видео-очереди (слив, бэклог, длина) для статистики моста; null = нет данных. */
+    fun videoStats(): LinkVideoStats? = null
 }
 
 /** Ссылка на мёртвую CarLife-сессию (USB оборван): всё отбрасывает. */
@@ -91,6 +94,9 @@ class AaBridgeCore(
     private var transcoder: VideoTranscoder? = null
     private var encCsd: ByteArray? = null
     private var outGotIdr = false
+    private val idrThrottle = IdrThrottle()            // запросы IDR при переполнении очереди CarLife
+    private var overflowIdrRequests = 0L
+    private var lastStatsIdrRequests = 0L
     private var outputEnabled = false
     private var lastAaFrameAt = 0L
     private var lastStatsAt = 0L
@@ -795,7 +801,7 @@ class AaBridgeCore(
             }
             if (!link.sendVideo(payload)) {
                 encDropped++
-                transcoder?.requestSyncFrame()
+                requestIdrOnOverflow()
                 return
             }
             outGotIdr = true
@@ -812,14 +818,42 @@ class AaBridgeCore(
             return
         }
         if (!link.sendVideo(data)) {
+            // кадр не принят (очередь CarLife переполнена): дальше P нельзя, до следующего IDR всё выбрасывается выше
             outGotIdr = false
             encDropped++
-            transcoder?.requestSyncFrame()
+            requestIdrOnOverflow()
             return
         }
         sent++
         if (idr) idrSent++
         AaState.bridgeSent = sent
+    }
+
+    /**
+     * IDR у энкодера после отказа очереди CarLife - не чаще раза в 1.5 с (IdrThrottle). Иначе большие IDR (30-160 КБ)
+     * сами забивают медленный канал. Отказали - ждём уже запрошенный или ближайший естественный IDR (интервал 1 с).
+     */
+    private fun requestIdrOnOverflow() {
+        val t = transcoder ?: return
+        if (!idrThrottle.tryRequest(clockMs())) return
+        overflowIdrRequests++
+        t.requestSyncFrame()
+    }
+
+    /** Битрейт энкодера на лету (адаптация под слив ГУ). false = транскодера нет (passthrough или ещё не создан). */
+    @Synchronized
+    fun setEncoderBitrate(bps: Int): Boolean {
+        val t = transcoder ?: return false
+        t.setBitrate(bps)
+        return true
+    }
+
+    /** Целевой fps транскодера на лету (FRAME_RATE_CHANGE от ГУ). false = транскодера нет (passthrough или ещё не создан). */
+    @Synchronized
+    fun setTargetFps(fps: Int): Boolean {
+        val t = transcoder ?: return false
+        t.setTargetFps(fps)
+        return true
     }
 
     @Synchronized
@@ -866,13 +900,20 @@ class AaBridgeCore(
         val aaFps = (aaFrames - lastStatsAaFrames) / sec
         val t = transcoder
         val idle = if (lastAaFrameAt > 0 && now - lastAaFrameAt > 1000) " простой AA ${(now - lastAaFrameAt) / 1000.0} с" else ""
+        val target = if (t != null) "цель ${t.targetFps} fps" else "fps не регулируется"
+        val idrReq = overflowIdrRequests - lastStatsIdrRequests
+        val ls = link.videoStats()
+        val channel = if (ls == null) "" else
+            "; канал: ${if (t != null) "энкодер ${t.currentBitrate / 1000} кбит/с, " else ""}слив %.0f КиБ/с, бэклог ${ls.backlogMs} мс, очередь ${ls.queueFrames} кадр/${ls.queueBytes / 1024} КБ, запросов IDR из-за переполнения $idrReq за окно"
+                .format(ls.drainBytesPerSec / 1024)
         log(
-            "BRIDGE видео[${if (t != null) "перекодирование" else "passthrough"}]: AA вход %.1f fps, выход в CarLife %.1f fps, отброшено энкодер/гейт $encDropped/$dropped$idle".format(aaFps, fps) +
-                (if (t != null) "; ${t.statsLine()}" else ""), true
+            "BRIDGE видео[${if (t != null) "перекодирование" else "passthrough"}]: AA вход %.1f fps, выход в CarLife %.1f fps ($target), отброшено энкодер/гейт $encDropped/$dropped$idle".format(aaFps, fps) +
+                channel + (if (t != null) "; ${t.statsLine()}" else ""), true
         )
         lastStatsAt = now
         lastStatsSent = sent
         lastStatsAaFrames = aaFrames
+        lastStatsIdrRequests = overflowIdrRequests
     }
 
     companion object {

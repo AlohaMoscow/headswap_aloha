@@ -12,6 +12,7 @@ import android.widget.TextView
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaPrefs
+import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
@@ -36,6 +37,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private val aa = AaPrefs(ctx)
     private val micRows = HashMap<MicMode, RadioRow>()
     private val modeRows = LinkedHashMap<VideoMode, RadioRow>()
+    private val fpsRows = LinkedHashMap<FpsSetting, RadioRow>()
     private lateinit var modeNote: TextView
     private lateinit var transcodeRow: RadioRow
     private lateinit var directRow: RadioRow
@@ -70,6 +72,18 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         modeNote = c.text("Применится при следующем подключении.", 13f, 400, c.clr(R.color.on2))
         body.addView(modeNote, lp(WRAP, WRAP).margins(c, 8, 2, 8, 0))
         refreshVideoMode()
+
+        body.addView(c.sectionTitle("Частота кадров"))
+        for (f in FpsSetting.values()) {
+            val row = RadioRow(c, f.title, f.sub) { setFps(f) }
+            fpsRows[f] = row
+            body.addView(row.view, lp(MATCH, WRAP))
+        }
+        body.addView(
+            c.text("Применится при следующем подключении. В прямом пробросе частота не регулируется.", 13f, 400, c.clr(R.color.on2)),
+            lp(WRAP, WRAP).margins(c, 8, 2, 8, 0),
+        )
+        refreshFps()
 
         body.addView(c.sectionTitle("Сертификат ГУ"))
         body.addView(certCard())
@@ -159,6 +173,15 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             row.setSub(if (blocked) "Нужно перекодирование" else m.sub)
             row.view.alpha = if (blocked) 0.45f else 1f
         }
+    }
+
+    private fun setFps(f: FpsSetting) {
+        aa.fpsSetting = f
+        refreshFps()
+    }
+
+    private fun refreshFps() {
+        for ((f, row) in fpsRows) row.setSelected(aa.fpsSetting == f)
     }
 
     private fun certCard(): View {

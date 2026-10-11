@@ -31,6 +31,11 @@ class AaPrefs(ctx: Context) {
         get() = VideoMode.parse(sp.getString("videoMode", VideoMode.DEFAULT.name))
         set(v) = sp.edit().putString("videoMode", v.name).apply()
 
+    /** Частота кадров (имя FpsSetting, по умолчанию Авто). Читается один раз на подключение. */
+    var fpsSetting: FpsSetting
+        get() = FpsSetting.parse(sp.getString("fpsSetting", FpsSetting.DEFAULT.name))
+        set(v) = sp.edit().putString("fpsSetting", v.name).apply()
+
     /** Автозапуск сервера ГУ (USB подключён / сессия AA закончилась); работает, только если включена служба спецвозможностей. */
     var autoServer: Boolean
         get() = sp.getBoolean("autoServer", true)

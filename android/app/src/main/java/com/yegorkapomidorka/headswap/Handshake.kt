@@ -1,5 +1,7 @@
 package com.yegorkapomidorka.headswap
 
+import com.yegorkapomidorka.headswap.aa.FpsSetting
+
 /** Исходящее CMD-сообщение: тип и тело (null = пустое). */
 class OutCmd(val type: Int, val body: ByteArray?)
 
@@ -110,4 +112,16 @@ object Handshake {
 
     /** Допустимый ответ на VIDEO_ENCODER_FRAME_RATE_CHANGE: 3..30 (VideoMsgHandler.changeFrameRate). */
     fun frameRateChangeAllowed(fps: Int) = fps in 3..30
+
+    const val DEFAULT_FPS = 30
+
+    /** Нижняя граница частоты, которую применяем по FRAME_RATE_CHANGE (ниже энкодер/ГУ уже не успевают обновлять статику). */
+    const val MIN_APPLIED_FPS = 10
+
+    /**
+     * fps для INIT_DONE. Авто: как у Baidu (fps из INIT, если в 1..30, иначе 30); 15 и 30 - фиксированно.
+     * Honda шлёт fps=0, Kia 15, Mazda 30.
+     */
+    fun chooseFps(setting: FpsSetting, requested: Int): Int =
+        setting.fixed ?: if (requested in 1..30) requested else DEFAULT_FPS
 }

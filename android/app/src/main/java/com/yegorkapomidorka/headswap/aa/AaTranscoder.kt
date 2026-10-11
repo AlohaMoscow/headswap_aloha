@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
 class AaTranscoder(
     private val width: Int,
     private val height: Int,
+    /** Начальная целевая частота: KEY_FRAME_RATE энкодера и гейт GL-реле; дальше меняется через [setTargetFps]. */
     private val fps: Int,
     private val bitrate: Int,
     private val out: TranscodeOutput,
@@ -38,6 +39,11 @@ class AaTranscoder(
     private var surface: Surface? = null
     private var relay: GlRelay? = null
     private var lastRedraws = 0L
+    private var lastGated = 0L
+    @Volatile private var target = fps
+    @Volatile private var curBitrate = bitrate
+    private var bitrateMode = -1                       // режим, с которым сконфигурирован энкодер (-1 = не задан/неизвестен)
+    @Volatile private var bitrateFailed = false
     private var encThread: Thread? = null
     @Volatile private var running = false
     private var encoderNote = ""
@@ -99,10 +105,16 @@ class AaTranscoder(
         surface = c.createInputSurface()
         c.start()
         encoder = c
+        // режим битрейта: CBR/VBR принимают PARAMETER_KEY_VIDEO_BITRATE на лету, CQ - нет; на уровне 2 режим не задавался
+        bitrateMode = try {
+            c.inputFormat.getInteger(MediaFormat.KEY_BITRATE_MODE)
+        } catch (_: Exception) {
+            -1
+        }
         if (!tuning.contains("nogl")) {
             // декодер -> GL-реле -> Surface энкодера: реле перерисовывает последний кадр на статике (>= 10 fps)
             try {
-                relay = GlRelay(surface!!, width, height, REDRAW_IDLE_MS, log, srcWidth, srcHeight, crop).also { it.start() }
+                relay = GlRelay(surface!!, width, height, REDRAW_IDLE_MS, log, srcWidth, srcHeight, crop, target).also { it.start() }
             } catch (e: Exception) {
                 log("транскодер: GL-реле не поднялось (${e.message}), декодер пишет прямо в энкодер")
                 relay = null
@@ -112,6 +124,37 @@ class AaTranscoder(
         running = true
         encThread = Thread({ encodeLoop(c) }, "aa-trans-enc").also { it.start() }
         log("транскодер: энкодер $encoderName ${width}x$height (вход AA ${srcWidth}x$srcHeight${if (crop.isNone) "" else ", кроп $crop"}) ${fps}fps ${bitrate / 1000}kbps ($encoderNote)")
+    }
+
+    override val targetFps: Int get() = target
+
+    /** Целевая частота на лету: только гейт GL-реле, кодек не пересоздаётся (KEY_FRAME_RATE остаётся начальным). */
+    override fun setTargetFps(fps: Int) {
+        val old = target
+        target = fps
+        val r = relay
+        if (r != null) r.setTargetFps(fps) else log("транскодер: без GL-реле частоту не ограничить, целевой fps $fps только в статистике")
+        log("транскодер: целевой fps $old -> $fps")
+    }
+
+    override val currentBitrate: Int get() = curBitrate
+
+    /** Битрейт на лету через setParameters (без пересоздания). CQ или исключение кодека: один раз в лог, дальше не пробуем. */
+    override fun setBitrate(bps: Int) {
+        if (bitrateFailed || bps == curBitrate) return
+        val c = encoder ?: return
+        if (bitrateMode == MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CQ) {
+            bitrateFailed = true
+            log("транскодер: энкодер в BITRATE_MODE_CQ, битрейт на лету не меняется")
+            return
+        }
+        try {
+            c.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bps) })
+            curBitrate = bps
+        } catch (e: Exception) {
+            bitrateFailed = true
+            log("транскодер: setParameters(VIDEO_BITRATE=$bps) не прошёл, битрейт больше не меняю: ${e.javaClass.simpleName}: ${e.message}")
+        }
     }
 
     private fun format(level: Int): MediaFormat {
@@ -367,8 +410,11 @@ class AaTranscoder(
         val redrawsNow = r?.redraws?.get() ?: 0L
         val repeats = if (r != null) redrawsNow - lastRedraws else maxOf(outN - dec, 0)
         lastRedraws = redrawsNow
-        return "транскод за %.1f с: вход AA %d, декодировано %d, выход энкодера %d (%.1f fps), повторов (перерисовок GL) %d, потеряно %d; задержка декодер %.1f мс + энкодер %.1f мс = %.1f мс"
-            .format(sec, inN, dec, outN, outN / sec, repeats, drop, decMs, encMs, decMs + encMs)
+        val gatedNow = r?.gated?.get() ?: 0L
+        val gatedWin = gatedNow - lastGated
+        lastGated = gatedNow
+        return "транскод за %.1f с: вход AA %d, декодировано %d, выход энкодера %d (%.1f fps), повторов (перерисовок GL) %d, задержано гейтом fps %d, потеряно %d; задержка декодер %.1f мс + энкодер %.1f мс = %.1f мс"
+            .format(sec, inN, dec, outN, outN / sec, repeats, gatedWin, drop, decMs, encMs, decMs + encMs)
     }
 
     @Synchronized

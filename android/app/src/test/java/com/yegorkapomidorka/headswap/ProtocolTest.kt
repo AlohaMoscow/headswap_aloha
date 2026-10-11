@@ -1,5 +1,6 @@
 package com.yegorkapomidorka.headswap
 
+import com.yegorkapomidorka.headswap.aa.FpsSetting
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -539,6 +540,31 @@ class ProtocolTest {
         assertTrue(Handshake.frameRateChangeAllowed(3))
         assertFalse(Handshake.frameRateChangeAllowed(2))
         assertFalse(Handshake.frameRateChangeAllowed(31))
+    }
+
+    @Test
+    fun chooseFpsAutoFollowsRequestInRange() {
+        // Авто: как Baidu - fps из INIT в 1..30, иначе 30 (Honda шлёт 0, Kia 15, Mazda 30)
+        val auto = FpsSetting.AUTO
+        assertEquals(30, Handshake.chooseFps(auto, 0))
+        assertEquals(15, Handshake.chooseFps(auto, 15))
+        assertEquals(30, Handshake.chooseFps(auto, 30))
+        assertEquals(30, Handshake.chooseFps(auto, 31))
+        assertEquals(30, Handshake.chooseFps(auto, 60))
+        assertEquals(1, Handshake.chooseFps(auto, 1))
+        assertEquals(30, Handshake.chooseFps(auto, -1))
+    }
+
+    @Test
+    fun chooseFpsFixedIgnoresRequest() {
+        for (req in listOf(0, 15, 30, 31, 60)) {
+            assertEquals(15, Handshake.chooseFps(FpsSetting.FPS15, req))
+            assertEquals(30, Handshake.chooseFps(FpsSetting.FPS30, req))
+        }
+        assertEquals(FpsSetting.AUTO, FpsSetting.DEFAULT)
+        assertEquals(FpsSetting.FPS15, FpsSetting.parse("FPS15"))
+        assertEquals(FpsSetting.AUTO, FpsSetting.parse(null))
+        assertEquals(FpsSetting.AUTO, FpsSetting.parse("мусор"))
     }
 
     @Test

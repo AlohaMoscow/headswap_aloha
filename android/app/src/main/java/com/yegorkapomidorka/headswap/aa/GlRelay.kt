@@ -36,7 +36,10 @@ class GlRelay(
     private val srcWidth: Int = width,
     private val srcHeight: Int = height,
     crop: VideoCrop = VideoCrop.NONE,
+    /** Целевая частота выхода: гейт не отдаёт кадр в энкодер чаще (0 = без ограничения). */
+    targetFps: Int = 0,
 ) {
+    private val gate = FrameGate(targetFps)
     private val thread = HandlerThread("aa-gl-relay")
     private lateinit var handler: Handler
     private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
@@ -58,6 +61,10 @@ class GlRelay(
         position(0)
     }
     @Volatile private var haveFrame = false
+
+    /** Последний кадр в текстуре гейт пропустил и он ещё не показан: tick отдаст его, как только гейт откроется. Только GL-нить. */
+    private var skipped = false
+    private var lastFreshNs = 0L
     @Volatile private var released = false
     private var lastDrawNs = 0L
     @Volatile private var initError: Throwable? = null
@@ -68,6 +75,16 @@ class GlRelay(
 
     val fresh = AtomicLong()
     val redraws = AtomicLong()
+
+    /** Сколько свежих кадров AA гейт не пустил в энкодер сразу (показаны позже перерисовкой или заменены следующим). */
+    val gated = AtomicLong()
+
+    val targetFps: Int get() = gate.targetFps
+
+    /** Целевая частота на лету, без пересоздания кодека. Любая нить. */
+    fun setTargetFps(fps: Int) {
+        gate.targetFps = fps
+    }
 
     fun start() {
         thread.start()
@@ -89,9 +106,13 @@ class GlRelay(
     private val tick = object : Runnable {
         override fun run() {
             if (released) return
-            if (haveFrame && SystemClock.elapsedRealtimeNanos() - lastDrawNs >= idleRedrawMs * 1_000_000) {
-                draw()
-                redraws.incrementAndGet()
+            if (haveFrame) {
+                val now = SystemClock.elapsedRealtimeNanos()
+                // перерисовка: статика (нет новых кадров idleRedrawMs) или последний кадр, который задержал гейт и за период новых не пришло
+                // (пока поток идёт, задержанный кадр заменяется свежим и tick его не трогает: частота выхода остаётся ровной)
+                val idle = now - lastDrawNs >= idleRedrawMs * 1_000_000
+                val lateSkipped = skipped && now - lastFreshNs >= gate.periodNs()
+                if ((idle || lateSkipped) && drawGated()) redraws.incrementAndGet()
             }
             handler.postDelayed(this, 20)
         }
@@ -100,6 +121,18 @@ class GlRelay(
     /** Новая AA-сессия: старый кадр больше не повторять до первого нового. */
     fun clear() {
         haveFrame = false
+    }
+
+    /** Кадр в энкодер только если гейт пускает; иначе он остаётся в текстуре (updateTexImage уже сделан) до следующей перерисовки. */
+    private fun drawGated(fresh: Boolean = false): Boolean {
+        if (!gate.shouldEmit(SystemClock.elapsedRealtimeNanos())) {
+            skipped = true
+            if (fresh) gated.incrementAndGet()      // повторные отказы tick-а одного кадра не считаем
+            return false
+        }
+        skipped = false
+        draw()
+        return true
     }
 
     fun stop() {
@@ -170,7 +203,8 @@ class GlRelay(
             st?.getTransformMatrix(tm)
             haveFrame = true
             fresh.incrementAndGet()
-            draw()
+            lastFreshNs = SystemClock.elapsedRealtimeNanos()
+            drawGated(fresh = true)
         } catch (t: Throwable) {
             log("GlRelay.onFrame: ${t.javaClass.simpleName}: ${t.message}")
         }

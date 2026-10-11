@@ -121,7 +121,7 @@ class BridgeService : Service() {
 
         val aaPrefs = AaPrefs(this)
         val screenOn = getSystemService(PowerManager::class.java).isInteractive
-        val cfg = SessionConfig(screenOn, aaPrefs.micVrStatus)
+        val cfg = SessionConfig(screenOn, aaPrefs.micVrStatus, aaPrefs.fpsSetting)
 
         // AA-сессия к серверу ГУ на 127.0.0.1:5277 живёт на уровне сервиса (BridgeHost), а не этой USB-сессии
         var h = host

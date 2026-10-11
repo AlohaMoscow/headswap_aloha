@@ -6,9 +6,15 @@ import android.os.SystemClock
 import com.yegorkapomidorka.headswap.aa.AaBridgeCore
 import com.yegorkapomidorka.headswap.aa.CarlifeAudio
 import com.yegorkapomidorka.headswap.aa.AaTranscoder
+import com.yegorkapomidorka.headswap.aa.BitratePolicy
 import com.yegorkapomidorka.headswap.aa.CarlifeLink
+import com.yegorkapomidorka.headswap.aa.DrainMeter
+import com.yegorkapomidorka.headswap.aa.FpsSetting
+import com.yegorkapomidorka.headswap.aa.IdrThrottle
+import com.yegorkapomidorka.headswap.aa.LinkVideoStats
 import com.yegorkapomidorka.headswap.aa.TranscodeOutput
 import com.yegorkapomidorka.headswap.aa.VideoMode
+import com.yegorkapomidorka.headswap.aa.VideoQueueLimit
 import com.yegorkapomidorka.headswap.aa.VideoTranscoder
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -17,12 +23,16 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /** Настройки сессии, снятые в момент старта. */
 class SessionConfig(
     val screenOn: Boolean = true,
     /** Вместе с MIC_RECORD_* слать MODULE_STATUS VR 1/0, как Baidu (prepareShowVr / prepareCloseVr). */
     val micVrStatus: Boolean = true,
+    /** Частота кадров: Авто (как просит ГУ) или фиксированная. В passthrough не действует. */
+    val fpsSetting: FpsSetting = FpsSetting.DEFAULT,
 )
 
 /**
@@ -46,6 +56,15 @@ class CarLifeSession(
     private val input = FileInputStream(pfd.fileDescriptor)
     private val output = FileOutputStream(pfd.fileDescriptor)
     private val queue = LinkedBlockingQueue<Out>()
+
+    // видео-очередь: считаем только видео (в queue ещё звук и команды); слив измеряет writeLoop
+    private val queuedVideoBytes = AtomicLong()
+    private val queuedVideoFrames = AtomicInteger()
+    private val drain = DrainMeter()
+    private val bitratePolicy = BitratePolicy(mode.bitrate)
+    private val placeholderIdr = IdrThrottle()
+    @Volatile private var lastOverflowMs = NEVER_MS
+    private var passthroughBitrateLogged = false
     private val parser = FrameParser()
     private val assembler = InnerAssembler()
     private val closed = AtomicBoolean(false)
@@ -65,6 +84,9 @@ class CarLifeSession(
     private var pendingW = 0
     private var pendingH = 0
     private var pendingFps = FPS
+
+    /** Целевой fps транскодера: из INIT (по настройке), в Авто меняется по FRAME_RATE_CHANGE; новый транскодер стартует с него. */
+    @Volatile private var targetFps = FPS
     private var videoInited = false
     private var source: VideoSource? = null
     @Volatile private var csd: ByteArray? = null
@@ -117,6 +139,7 @@ class CarLifeSession(
         writer = Thread({ writeLoop() }, "cl-writer").also { it.start() }
         reader = Thread({ readLoop() }, "cl-reader").also { it.start() }
         sched.scheduleWithFixedDelay({ tick() }, 1, 1, TimeUnit.SECONDS)
+        sched.scheduleWithFixedDelay({ adaptBitrate() }, 1000, BITRATE_POLL_MS, TimeUnit.MILLISECONDS)
     }
 
     fun close(reason: String) {
@@ -337,9 +360,10 @@ class CarLifeSession(
                 bridge.onCarlifeKeyFrameRequest()
             }
             Msg.VIDEO_ENCODER_FRAME_RATE_CHANGE -> {
-                // как VideoMsgHandler.changeFrameRate: вне 3..30 молча игнор, иначе DONE (fps энкодера не меняем)
+                // как VideoMsgHandler.changeFrameRate: вне 3..30 молча игнор, иначе DONE с тем же fps
                 val fps = PbReader.parse(m.body)?.let { PbReader.int(it, 1) } ?: -1
                 if (Handshake.frameRateChangeAllowed(fps)) {
+                    onFrameRateChange(fps)
                     sendCmd(Msg.VIDEO_ENCODER_FRAME_RATE_CHANGE_DONE, Msgs.frameRate(fps))
                 } else {
                     AppLog.i("видео: FRAME_RATE_CHANGE fps=$fps вне 3..30, игнор (как Baidu)")
@@ -369,6 +393,24 @@ class CarLifeSession(
         }
     }
 
+    /** Авто: целевой fps транскодера = max(fps ГУ, 10) на лету; фиксированная настройка: только ответ DONE. Passthrough не трогаем (выброс P-кадров ломает поток). */
+    private fun onFrameRateChange(fps: Int) {
+        if (!bridge.transcodeEnabled) {
+            AppLog.i("видео: FRAME_RATE_CHANGE fps=$fps, passthrough: частота не регулируется, энкодер AA не трогаю")
+            return
+        }
+        val fixed = cfg.fpsSetting.fixed
+        if (fixed != null) {
+            AppLog.i("видео: FRAME_RATE_CHANGE fps=$fps, настройка фиксирована на $fixed: отвечаю DONE, частоту не меняю")
+            return
+        }
+        val applied = maxOf(fps, Handshake.MIN_APPLIED_FPS)
+        val old = targetFps
+        targetFps = applied
+        val live = bridge.setTargetFps(applied)
+        AppLog.i("видео: FRAME_RATE_CHANGE fps=$fps, целевой fps $old -> $applied${if (live) "" else " (транскодер ещё не создан, применится при старте)"}")
+    }
+
     private fun onVideoInit(m: CmdMsg) {
         val f = PbReader.parse(m.body)
         val rw = f?.let { PbReader.int(it, 1) } ?: 0
@@ -384,13 +426,14 @@ class CarLifeSession(
         }
         // размер задаёт видео-режим (по умолчанию 1280x720 fps 30: ГУ Honda принимает и показывает целиком, проверено в машине)
         val (w, h, why) = Triple(mode.outW, mode.outH, "мост: режим ${mode.name}")
-        val fps = FPS
+        val fps = Handshake.chooseFps(cfg.fpsSetting, rf)
         pendingW = w
         pendingH = h
         pendingFps = fps
+        targetFps = fps
         videoInited = true
         chosen = "${w}x$h ($why)"
-        AppLog.i("== ОТВЕЧАЮ INIT_DONE ${w}x$h fps=$fps ($why)")
+        AppLog.i("== ОТВЕЧАЮ INIT_DONE ${w}x$h fps=$fps ($why; ГУ просит fps=$rf, настройка ${cfg.fpsSetting.name}${if (bridge.transcodeEnabled) "" else ", passthrough: частота не регулируется"})")
         CarLifeState.video = "ГУ просит $requested, кодирую ${w}x$h"
         sendCmd(Msg.VIDEO_ENCODER_INIT_DONE, Msgs.videoEncoderInfo(w, h, fps))
         sendCmd(Msg.FOREGROUND, null)
@@ -457,17 +500,63 @@ class CarLifeSession(
     override fun sendVideo(payload: ByteArray): Boolean {
         if (closed.get() || paused) return false
         synchronized(videoLock) {
-            if (queue.size > MAX_QUEUE) return false
+            if (videoOverflow()) return false
             lastVideoTx = SystemClock.elapsedRealtime()
             send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), payload))
             return true
         }
     }
 
+    /**
+     * Видео-очередь переполнена: уже стоящих кадров больше 30 или их байт больше ~500 мс слива (пока слив не измерен - 512 КБ).
+     * Проверяется до добавления нового кадра: в пустую очередь IDR принимается всегда. Отказ = вызывающий выбрасывает кадр
+     * и ждёт IDR (мост: outGotIdr=false; заглушка: csdPending=true), P после потерянного кадра слать нельзя.
+     */
+    private fun videoOverflow(): Boolean {
+        val over = VideoQueueLimit.overflow(queuedVideoFrames.get(), queuedVideoBytes.get(), drain.bytesPerSec)
+        if (over) lastOverflowMs = SystemClock.elapsedRealtime()
+        return over
+    }
+
+    override fun videoStats(): LinkVideoStats {
+        val bytes = queuedVideoBytes.get()
+        val rate = drain.bytesPerSec
+        return LinkVideoStats(rate, VideoQueueLimit.backlogMs(bytes, rate), queuedVideoFrames.get(), bytes)
+    }
+
+    /**
+     * Адаптация битрейта энкодера (раз в 100 мс): бэклог и слив -> BitratePolicy -> MediaCodec.setParameters на лету.
+     * Только перекодирование: в passthrough H.264 AA идёт как есть, битрейт не менялся бы.
+     */
+    private fun adaptBitrate() {
+        try {
+            if (closed.get() || !carlifeStarted) return
+            if (!bridge.transcodeEnabled) {
+                if (!passthroughBitrateLogged) {
+                    passthroughBitrateLogged = true
+                    AppLog.i("видео: passthrough, адаптация битрейта недоступна (H.264 AA идёт как есть)")
+                }
+                return
+            }
+            if (!bridge.isTranscoding) return
+            val now = SystemClock.elapsedRealtime()
+            val rate = drain.bytesPerSec
+            val real = VideoQueueLimit.backlogMs(queuedVideoBytes.get(), rate)
+            val sinceOverflow = lastOverflowMs.let { if (it == NEVER_MS) -1L else now - it }
+            val old = bitratePolicy.current
+            val bps = bitratePolicy.update(now, VideoQueueLimit.policyBacklogMs(real, sinceOverflow), rate) ?: return
+            if (bridge.setEncoderBitrate(bps)) {
+                AppLog.i("видео: битрейт энкодера ${old / 1000} -> ${bps / 1000} кбит/с (${bitratePolicy.lastReason}; потолок ${bitratePolicy.ceilingBps / 1000})")
+            }
+        } catch (e: Exception) {
+            AppLog.e("адаптация битрейта", e)
+        }
+    }
+
     /** Аудио моста: канал MEDIA/TTS, заголовок 12 байт; time = millis & 0xFFFFFFFF в DATA, 0 в INIT/STOP (как Baidu). */
     override fun sendAudio(channel: Int, type: Int, payload: ByteArray): Boolean {
         if (closed.get()) return false
-        if (payload.isNotEmpty() && queue.size > MAX_QUEUE * 2) return false   // звук не должен душить видео в очереди
+        if (payload.isNotEmpty() && queue.size > MAX_AUDIO_QUEUE) return false   // звук не должен душить видео в очереди
         val isData = type == CarlifeAudio.MEDIA_DATA || type == CarlifeAudio.TTS_DATA
         val time = if (isData) (System.currentTimeMillis() and 0xFFFFFFFFL).toInt() else 0
         send(channel, Wire.dataInner(type, time, payload))
@@ -507,7 +596,7 @@ class CarLifeSession(
     /** Транскодер моста: декодер AA (кадр режима) -> кроп -> Surface энкодера (выход режима). null, если MediaCodec не поднялся. */
     override fun createTranscoder(out: TranscodeOutput): VideoTranscoder? = try {
         AaTranscoder(
-            mode.outW, mode.outH, FPS, mode.bitrate, out, { AppLog.i(it, false) },
+            mode.outW, mode.outH, targetFps, bitratePolicy.current, out, { AppLog.i(it, false) },
             srcWidth = mode.aaW, srcHeight = mode.aaH, crop = mode.crop,
         ).also { it.start() }
     } catch (e: Exception) {
@@ -590,6 +679,10 @@ class CarLifeSession(
 
     private fun send(chan: Int, inner: ByteArray) {
         if (closed.get()) return
+        if (chan == Ch.VIDEO) {
+            queuedVideoBytes.addAndGet(inner.size.toLong())
+            queuedVideoFrames.incrementAndGet()
+        }
         queue.put(Out(chan, inner))
     }
 
@@ -597,9 +690,16 @@ class CarLifeSession(
         try {
             while (!closed.get()) {
                 val o = queue.take()
+                val video = o.chan == Ch.VIDEO
+                if (video) {
+                    queuedVideoBytes.addAndGet(-o.inner.size.toLong())
+                    queuedVideoFrames.decrementAndGet()
+                }
                 // заголовок отдельным write, тело следом кусками <= 16384 (спека §1.4)
+                val t0 = System.nanoTime()
                 for (part in Wire.writeSequence(o.chan, o.inner)) output.write(part)
                 output.flush()
+                drain.onWrite(SystemClock.elapsedRealtime(), video, o.inner.size, System.nanoTime() - t0)
                 logTx(o)
             }
         } catch (_: InterruptedException) {
@@ -667,19 +767,22 @@ class CarLifeSession(
     }
 
     private fun onEncoderFrame(data: ByteArray, key: Boolean) {
+        if (!key && csdPending) {
+            vDropped++
+            return // до первого IDR ничего не шлём (первый пакет обязан начинаться с SPS)
+        }
+        if (videoOverflow()) {
+            // кадр потерян: P после него слать нельзя, снова ждём IDR (csdPending), запрос IDR не чаще раза в 1.5 с
+            vDropped++
+            csdPending = true
+            if (placeholderIdr.tryRequest(SystemClock.elapsedRealtime())) source?.requestKeyFrame()
+            return
+        }
         var payload = data
         if (key) {
             val c = csd
             if (csdPending && c != null && !AnnexB.startsWithSps(data)) payload = AnnexB.glue(c, data)
             csdPending = false
-        } else if (csdPending) {
-            vDropped++
-            return // до первого IDR ничего не шлём (первый пакет обязан начинаться с SPS)
-        }
-        if (queue.size > MAX_QUEUE) {
-            vDropped++
-            source?.requestKeyFrame()
-            return
         }
         lastVideoTx = SystemClock.elapsedRealtime()
         send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), payload))
@@ -760,8 +863,10 @@ class CarLifeSession(
     }
 
     companion object {
-        const val FPS = 30
-        private const val MAX_QUEUE = 90
+        const val FPS = Handshake.DEFAULT_FPS
+        private const val MAX_AUDIO_QUEUE = 180       // звук не принимается, если в общей очереди больше пакетов
+        private const val BITRATE_POLL_MS = 100L
+        private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
         private const val FEATURE_CONTENT_ENCRYPTION = "CONTENT_ENCRYPTION"
 
