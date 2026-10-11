@@ -30,6 +30,10 @@ import com.yegorkapomidorka.headswap.ui.UiPrefs
  * (`--es cmd ...`). Вся работа с сервисами и USB - в ui.Actions, экраны - в пакете ui.
  */
 class MainActivity : Activity() {
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(AppLocale.wrap(base))
+    }
+
     private lateinit var root: FrameLayout
     private val stack = ArrayList<Screen>()
     private val keys = ArrayList<String>()

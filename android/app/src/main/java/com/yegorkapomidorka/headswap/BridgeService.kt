@@ -42,6 +42,10 @@ import java.util.concurrent.ScheduledExecutorService
  * Всё состояние сервиса (session, host, stopRequested) трогает только главная нить.
  */
 class BridgeService : Service() {
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(AppLocale.wrap(base))
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private var session: CarLifeSession? = null
     private var host: BridgeHost? = null

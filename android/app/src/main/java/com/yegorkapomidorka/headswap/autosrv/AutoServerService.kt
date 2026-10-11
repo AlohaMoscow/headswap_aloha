@@ -3,10 +3,12 @@ package com.yegorkapomidorka.headswap.autosrv
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.yegorkapomidorka.headswap.AppLocale
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.AppLog
 
@@ -15,6 +17,10 @@ import com.yegorkapomidorka.headswap.AppLog
  * Сама ничего не делает; сценарий (ServerAutomation) гоняет AutoServer на своей нити через AccessibilityServerUi.
  */
 class AutoServerService : AccessibilityService() {
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(AppLocale.wrap(base))
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         AppLog.init(this)

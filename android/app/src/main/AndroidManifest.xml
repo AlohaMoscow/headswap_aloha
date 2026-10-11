@@ -19,10 +19,16 @@
     <!-- онбординг: запрос исключения из оптимизации батареи (HyperOS убивает фон) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- автозапуск сервера ГУ читает подписи меню из ресурсов самого Android Auto (на языке AA); без queries на API 30+ пакет не виден -->
+    <queries>
+        <package android:name="com.google.android.projection.gearhead" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
         android:enableOnBackInvokedCallback="false"
         android:theme="@style/Theme.Headswap">
 
