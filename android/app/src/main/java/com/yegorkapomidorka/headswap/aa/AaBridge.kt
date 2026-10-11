@@ -905,6 +905,9 @@ class AaBridgeCore(
             0x17 to 19,     // MOVE_UP -> DPAD_UP
             0x18 to 20,     // MOVE_DOWN -> DPAD_DOWN
             0x21 to KEYCODE_SEARCH, // VR_START -> голосовой ассистент
+            0x1E to 3,      // MAIN -> HOME (панель приложений)
+            0x09 to 209,    // MEDIA -> MUSIC (медиаплеер)
+            0x0B to 65538,  // NAVI -> AA NAVIGATION (код из KEY_BINDING_REQUEST AA)
         )
 
         /** Поворот шайбы (Mazda Commander и т.п.) -> rotary AA: фокус по спискам, выбор — OK (DPAD_CENTER). */
