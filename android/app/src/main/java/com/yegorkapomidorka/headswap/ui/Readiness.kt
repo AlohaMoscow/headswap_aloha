@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import com.yegorkapomidorka.headswap.AppLog
+import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
 
 /** Всё, что надо включить перед поездкой: порядок, тексты, автоопределение «уже сделано». Общее для онбординга и чеклиста. */
@@ -26,64 +27,69 @@ enum class StepId(val key: String) {
     FIRST("first"),
 }
 
+/** Тексты шага - id строковых ресурсов (hint/extra могут отсутствовать); в строку превращает UI через ctx.getString, тело - через [bodyText]. */
 class StepInfo(
     val id: StepId,
-    val title: String,
-    val body: String,
-    val hint: String?,
-    val primary: String,
-    val extra: String?,
-    val skip: String,
+    val title: Int,
+    val body: Int,
+    val hint: Int?,
+    val primary: Int,
+    val extra: Int?,
+    val skip: Int,
     /** Короткое название для чеклиста. */
-    val short: String,
-)
+    val short: Int,
+) {
+    /** Тело шага: в тексте службы автозапуска подставляется её название из настроек спецвозможностей. */
+    fun bodyText(ctx: Context): String =
+        if (id == StepId.AUTOSTART) ctx.getString(body, ctx.getString(R.string.autosrv_label)) else ctx.getString(body)
+}
 
 object Readiness {
     val STEPS: List<StepInfo> = listOf(
         StepInfo(
-            StepId.AA_DEV, "Режим разработчика Android Auto",
-            "Откройте настройки Android Auto, пролистайте вниз и 10 раз нажмите «Сведения о версиях и разрешениях», подтвердите. Без этого не будет пункта «Сервер головного устройства».",
-            "В HyperOS этих настроек нет в обычных Настройках — открывайте их кнопкой ниже.",
-            "Открыть Android Auto", null, "Уже сделано", "Режим разработчика AA",
+            StepId.AA_DEV, R.string.step_aa_dev_title,
+            R.string.step_aa_dev_body,
+            R.string.step_aa_dev_hint,
+            R.string.step_aa_dev_primary, null, R.string.onb_already_done, R.string.step_aa_dev_short,
         ),
         StepInfo(
-            StepId.AUTOSTART, "Автозапуск сервера ГУ",
-            "Включите службу спецвозможностей «Headswap: автозапуск сервера ГУ»: она сама запускает сервер ГУ при подключении кабеля. Служба видит только окна Android Auto.",
-            "Если пункт серый: Настройки → Приложения → Headswap → ⋮ → «Разрешить ограниченные настройки». Без службы сервер придётся запускать вручную перед каждой поездкой: Android Auto → ⋮ → «Вкл. сервер головного устр-ва».",
-            "Открыть спецвозможности", "Разрешить ограниченные настройки", "Пропустить", "Автозапуск сервера ГУ",
+            StepId.AUTOSTART, R.string.step_autostart_title,
+            R.string.step_autostart_body,
+            R.string.step_autostart_hint,
+            R.string.step_autostart_primary, R.string.step_autostart_extra, R.string.onb_skip, R.string.step_autostart_title,
         ),
         StepInfo(
-            StepId.NOTIF, "Уведомления",
-            "Покажу статус в шторке, и система не выгрузит мост, пока экран погашен.",
-            null, "Разрешить", null, "Позже", "Уведомления",
+            StepId.NOTIF, R.string.step_notif_title,
+            R.string.step_notif_body,
+            null, R.string.onb_allow, null, R.string.onb_later, R.string.step_notif_title,
         ),
         StepInfo(
-            StepId.BACKGROUND, "Работа в фоне",
-            "HyperOS убивает фоновые приложения. Снимите ограничение батареи, иначе мост может отключиться при погашенном экране.",
-            "Xiaomi: Настройки → Приложения → Headswap → «Автозапуск» включить, «Контроль активности» → «Нет ограничений».",
-            "Снять ограничение батареи", "Автозапуск и контроль активности", "Уже сделано", "Работа в фоне",
+            StepId.BACKGROUND, R.string.step_background_title,
+            R.string.step_background_body,
+            R.string.step_background_hint,
+            R.string.step_background_primary, R.string.step_background_extra, R.string.onb_already_done, R.string.step_background_title,
         ),
         StepInfo(
-            StepId.MIC, "Микрофон",
-            "Нужен для «Окей, Google» и голосового ввода, если микрофон машины недоступен: голос возьму с микрофона телефона.",
-            null, "Разрешить", null, "Позже", "Микрофон",
+            StepId.MIC, R.string.step_mic_title,
+            R.string.step_mic_body,
+            null, R.string.onb_allow, null, R.string.onb_later, R.string.step_mic_title,
         ),
         StepInfo(
-            StepId.BLUETOOTH, "Bluetooth для звонков",
-            "Звонки в Android Auto всегда идут через Bluetooth: один раз сопрягите телефон с магнитолой как телефон или гарнитуру. Музыка и навигация идут по кабелю.",
-            null, "Открыть Bluetooth", null, "Уже сделано", "Bluetooth для звонков",
+            StepId.BLUETOOTH, R.string.step_bluetooth_title,
+            R.string.step_bluetooth_body,
+            null, R.string.step_bluetooth_primary, null, R.string.onb_already_done, R.string.step_bluetooth_title,
         ),
         StepInfo(
-            StepId.LOCATION, "Геопозиция для Карт",
-            "Google Картам и 2ГИС в Android Auto нужен доступ к местоположению, иначе на экране машины будет «требуется доступ к геоданным».",
-            "Включите геолокацию и разрешите её приложениям карт.",
-            "Открыть геолокацию", null, "Уже сделано", "Геопозиция для Карт",
+            StepId.LOCATION, R.string.step_location_title,
+            R.string.step_location_body,
+            R.string.step_location_hint,
+            R.string.step_location_primary, null, R.string.onb_already_done, R.string.step_location_title,
         ),
         StepInfo(
-            StepId.FIRST, "Первое подключение",
-            "Подключите кабель к магнитоле, телефон разблокирован. На запрос «Открыть Headswap для USB-аксессуара» отметьте «По умолчанию» и нажмите «ОК».",
-            "Если на магнитоле экран «启动CarLife» — нажмите эту кнопку. В машине телефон должен быть разблокирован в момент подключения, иначе на ГУ будет «Разблокируйте телефон».",
-            "Понятно", null, "Назад", "Первое подключение",
+            StepId.FIRST, R.string.step_first_title,
+            R.string.step_first_body,
+            R.string.step_first_hint,
+            R.string.step_first_primary, null, R.string.onb_back, R.string.step_first_title,
         ),
     )
 

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings screen -->
+    <string name="set_title">Настройки</string>
+    <string name="set_back">Назад</string>
+
+    <string name="set_sound">Звук</string>
+    <string name="set_usb_audio_title">Звук через USB</string>
+    <string name="set_usb_audio_sub">В динамики машины</string>
+
+    <string name="set_video">Видео</string>
+    <string name="set_transcode_title">Перекодирование</string>
+    <string name="set_transcode_sub">Надёжнее · +60 мс</string>
+    <string name="set_direct_title">Прямой проброс</string>
+    <string name="set_direct_sub">Быстрее · подходит не всем ГУ</string>
+
+    <string name="set_resolution">Разрешение видео</string>
+    <string name="set_apply_next">Применится при следующем подключении.</string>
+    <string name="set_needs_transcode">Нужно перекодирование</string>
+
+    <string name="set_fps">Частота кадров</string>
+    <string name="set_fps_note">Применится при следующем подключении. В прямом пробросе частота не регулируется.</string>
+
+    <string name="set_cert">Сертификат ГУ</string>
+    <string name="set_cert_hint">Смените, если Android Auto не подключается</string>
+
+    <string name="set_autostart">Автозапуск сервера ГУ</string>
+    <string name="set_autostart_sub">При подключении кабеля и после сессии AA</string>
+    <string name="set_autostart_enable">Включить</string>
+    <string name="set_svc_connected">Служба спецвозможностей подключена</string>
+    <string name="set_svc_not_connected">Служба включена, но не подключена</string>
+    <string name="set_svc_off">Служба спецвозможностей выключена</string>
+
+    <string name="set_mic">Микрофон</string>
+    <string name="mic_car_title">Машина</string>
+    <string name="mic_car_sub">Микрофон магнитолы</string>
+    <string name="mic_phone_title">Телефон</string>
+    <string name="mic_phone_sub">Микрофон телефона, нужен доступ к записи звука</string>
+    <string name="mic_auto_title">Авто</string>
+    <string name="mic_auto_sub">Сначала машина, при молчании 2 с — телефон</string>
+    <string name="mic_no_permission">Нет доступа к записи звука: микрофон телефона не заработает.</string>
+
+    <string name="set_report_title">Сообщить о проблеме</string>
+    <string name="set_report_note">лог + отчёт</string>
+    <string name="set_rerun_setup">Пройти настройку заново</string>
+    <string name="set_check_ready">Проверить готовность</string>
+    <string name="set_for_devs">Для разработчиков</string>
+    <string name="set_footer">Headswap %1$s · мост для ГУ с CarLife</string>
+
+    <!-- Video modes (VideoMode) -->
+    <string name="video_r800_title">800×480</string>
+    <string name="video_r800_sub">Для небольших экранов</string>
+    <string name="video_r720_title">1280×720 (стандарт)</string>
+    <string name="video_r720_sub">Подходит большинству ГУ</string>
+    <string name="video_r1080_title">1920×1080</string>
+    <string name="video_r1080_sub">Чётче, но тяжелее для телефона и ГУ</string>
+    <string name="video_wide_title">Широкий 8:3 (обрезка)</string>
+    <string name="video_wide_sub">Для вытянутых экранов: 1280×480, крупно</string>
+    <string name="video_wide_mid_title">Широкий 8:3 средний (обрезка)</string>
+    <string name="video_wide_mid_sub">1728×648: родное разрешение экрана Мазды</string>
+    <string name="video_wide_hd_title">Широкий 8:3 HD (обрезка)</string>
+    <string name="video_wide_hd_sub">1920×720: чётче и мельче, больше влезает на экран</string>
+
+    <!-- Frame rate (FpsSetting) -->
+    <string name="fps_auto_title">Авто</string>
+    <string name="fps_auto_sub">Как просит ГУ</string>
+    <string name="fps_15_title">15 кадров/с</string>
+    <string name="fps_15_sub">Легче для слабых ГУ и канала</string>
+    <string name="fps_30_title">30 кадров/с</string>
+    <string name="fps_30_sub">Плавнее, но тяжелее</string>
+</resources>

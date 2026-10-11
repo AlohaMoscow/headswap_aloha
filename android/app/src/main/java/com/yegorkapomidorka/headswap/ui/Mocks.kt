@@ -11,21 +11,21 @@ import com.yegorkapomidorka.headswap.R
 object Mocks {
     fun build(ctx: Context, id: StepId): View = when (id) {
         StepId.AA_DEV -> ctx.vbox(10).apply {
-            addView(ctx.label("Настройки Android Auto"))
+            addView(ctx.label(ctx.getString(R.string.mock_aa_title)))
             addView(
                 ctx.list(
-                    ctx.row("Уведомления"),
-                    ctx.row("Подключённые автомобили"),
-                    ctx.row("Сведения о версиях", hi = true, h = 56, trailing = ctx.badge("×10")),
+                    ctx.row(ctx.getString(R.string.mock_aa_notifications)),
+                    ctx.row(ctx.getString(R.string.mock_aa_cars)),
+                    ctx.row(ctx.getString(R.string.mock_aa_version), hi = true, h = 56, trailing = ctx.badge("×10")),
                 ),
             )
         }
         StepId.AUTOSTART -> ctx.vbox(10).apply {
-            addView(ctx.label("Специальные возможности"))
+            addView(ctx.label(ctx.getString(R.string.mock_a11y_title)))
             addView(
                 ctx.list(
-                    ctx.row("Загруженные службы"),
-                    ctx.row("Headswap: автозапуск сервера ГУ", hi = true, h = 64, trailing = ctx.fakeSwitch()),
+                    ctx.row(ctx.getString(R.string.mock_a11y_downloaded)),
+                    ctx.row(ctx.getString(R.string.autosrv_label), hi = true, h = 64, trailing = ctx.fakeSwitch()),
                 ),
             )
         }
@@ -44,9 +44,9 @@ object Mocks {
                     )
                     addView(
                         ctx.vbox(2).apply {
-                            addView(ctx.text("Headswap · сейчас", 13f, 400, ctx.clr(R.color.on2)))
-                            addView(ctx.text("Всё работает", 16f, 600))
-                            addView(ctx.text("Видео · звук по USB", 14f, 400, ctx.clr(R.color.on2)))
+                            addView(ctx.text(ctx.getString(R.string.mock_notif_now), 13f, 400, ctx.clr(R.color.on2)))
+                            addView(ctx.text(ctx.getString(R.string.home_title_ok), 16f, 600))
+                            addView(ctx.text(ctx.getString(R.string.notif_video_usb), 14f, 400, ctx.clr(R.color.on2)))
                         },
                         lp(0, WRAP, 1f),
                     )
@@ -56,17 +56,17 @@ object Mocks {
                 ctx.hbox(10).apply {
                     pad(ctx, 4, 0, 4, 0)
                     addView(ctx.icon(R.drawable.ic_bell, 20, ctx.clr(R.color.on2)))
-                    addView(ctx.text("Статус в шторке, даже с погашенным экраном", 14f, 400, ctx.clr(R.color.on2)))
+                    addView(ctx.text(ctx.getString(R.string.mock_notif_hint), 14f, 400, ctx.clr(R.color.on2)))
                 },
             )
         }
         StepId.BACKGROUND -> ctx.vbox(10).apply {
-            addView(ctx.label("Headswap · сведения о приложении"))
+            addView(ctx.label(ctx.getString(R.string.mock_bg_title)))
             addView(
                 ctx.list(
-                    ctx.row("Батарея: без ограничений", hi = true, trailing = ctx.tick()),
-                    ctx.row("Автозапуск", trailing = ctx.fakeSwitch()),
-                    ctx.row("Контроль активности: нет ограничений"),
+                    ctx.row(ctx.getString(R.string.mock_bg_battery), hi = true, trailing = ctx.tick()),
+                    ctx.row(ctx.getString(R.string.mock_bg_autostart), trailing = ctx.fakeSwitch()),
+                    ctx.row(ctx.getString(R.string.mock_bg_saver)),
                 ),
             )
         }
@@ -76,8 +76,8 @@ object Mocks {
                     background = ctx.shape(ctx.clr(R.color.surf), 24)
                     pad(ctx, 20, 18, 20, 16)
                     addView(ctx.icon(R.drawable.ic_mic, 22, ctx.clr(R.color.acc)))
-                    addView(ctx.text("Разрешить Headswap записывать аудио?", 15f, 400).apply { lineHeight = ctx.dp(21) })
-                    addView(ctx.text("При использовании приложения", 15f, 600, ctx.clr(R.color.onpric)).apply {
+                    addView(ctx.text(ctx.getString(R.string.mock_mic_question), 15f, 400).apply { lineHeight = ctx.dp(21) })
+                    addView(ctx.text(ctx.getString(R.string.mock_mic_while_using), 15f, 600, ctx.clr(R.color.onpric)).apply {
                         background = ctx.shape(ctx.clr(R.color.pric), 12)
                         pad(ctx, 12, 8, 12, 8)
                     })
@@ -85,27 +85,27 @@ object Mocks {
             )
         }
         StepId.BLUETOOTH -> ctx.vbox(10).apply {
-            addView(ctx.label("Bluetooth · сопряжённые устройства"))
+            addView(ctx.label(ctx.getString(R.string.mock_bt_title)))
             addView(
                 ctx.list(
-                    ctx.row("Магнитола · звонки и аудио", hi = true, trailing = ctx.tick()),
-                    ctx.row("Наушники"),
+                    ctx.row(ctx.getString(R.string.mock_bt_headunit), hi = true, trailing = ctx.tick()),
+                    ctx.row(ctx.getString(R.string.mock_bt_headphones)),
                 ),
             )
         }
         StepId.LOCATION -> ctx.vbox(10).apply {
-            addView(ctx.label("Местоположение"))
+            addView(ctx.label(ctx.getString(R.string.mock_loc_title)))
             addView(
                 ctx.list(
-                    ctx.row("Использовать геолокацию", hi = true, trailing = ctx.fakeSwitch()),
-                    ctx.row("Карты: разрешено"),
+                    ctx.row(ctx.getString(R.string.mock_loc_use), hi = true, trailing = ctx.fakeSwitch()),
+                    ctx.row(ctx.getString(R.string.mock_loc_maps)),
                 ),
             )
         }
         StepId.FIRST -> ctx.vbox(14).apply {
             background = ctx.shape(ctx.clr(R.color.surf), 24)
             pad(ctx, 20, 20, 20, 20)
-            addView(ctx.text("Открыть «Headswap» для работы с USB-аксессуаром?", 15f, 400).apply { lineHeight = ctx.dp(21) })
+            addView(ctx.text(ctx.getString(R.string.mock_usb_question), 15f, 400).apply { lineHeight = ctx.dp(21) })
             addView(
                 ctx.hbox(10).apply {
                     addView(
@@ -115,14 +115,14 @@ object Mocks {
                         },
                         lp(ctx.dp(20), ctx.dp(20)),
                     )
-                    addView(ctx.text("Использовать по умолчанию", 14f, 400, ctx.clr(R.color.on2)))
+                    addView(ctx.text(ctx.getString(R.string.mock_usb_default), 14f, 400, ctx.clr(R.color.on2)))
                 },
             )
             addView(
                 ctx.hbox(20).apply {
                     gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                    addView(ctx.text("Отмена", 15f, 600, ctx.clr(R.color.acc)).apply { alpha = 0.6f })
-                    addView(ctx.text("ОК", 15f, 600, ctx.clr(R.color.acc)).apply {
+                    addView(ctx.text(ctx.getString(R.string.mock_cancel), 15f, 600, ctx.clr(R.color.acc)).apply { alpha = 0.6f })
+                    addView(ctx.text(ctx.getString(R.string.mock_ok), 15f, 600, ctx.clr(R.color.acc)).apply {
                         background = ctx.shape(ctx.clr(R.color.pric), 12)
                         pad(ctx, 10, 2, 10, 2)
                     })

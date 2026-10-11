@@ -11,6 +11,7 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import com.yegorkapomidorka.headswap.AppLocale
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.CarLifeState
 import com.yegorkapomidorka.headswap.R
@@ -34,11 +35,12 @@ object HeadswapNotification {
     }
 
     private fun from(ctx: Context, channel: String, st: HomeState): Notification {
+        val loc = AppLocale.wrap(ctx)       // applicationContext не знает выбранного языка на Android 10-12
         val b = Notification.Builder(ctx, channel)
             .setSmallIcon(R.drawable.ic_stat_headswap)
             .setColor(0xFFF2B33D.toInt())
-            .setContentTitle(st.notifTitle)
-            .setContentText(st.notifText)
+            .setContentTitle(st.notifTitle.get(loc))
+            .setContentText(st.notifText.get(loc))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_SERVICE)
@@ -58,12 +60,12 @@ object HeadswapNotification {
                 ctx, 1, Intent().setComponent(ComponentName(AA_PACKAGE, AA_SETTINGS_ACTIVITY)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
-            b.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_open), ctx.getString(R.string.action_open_aa), open).build())
+            b.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_open), loc.getString(R.string.action_open_aa), open).build())
         }
         val stop = PendingIntent.getBroadcast(
             ctx, 2, Intent(ctx, StopReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        b.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_stop), ctx.getString(R.string.action_stop), stop).build())
+        b.addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_stop), loc.getString(R.string.action_stop), stop).build())
         return b.build()
     }
 
@@ -79,7 +81,8 @@ object HeadswapNotification {
                     lastKey = ""
                     return
                 }
-                val key = "${st.notifTitle}|${st.notifText}|${st.graceLeftS}|${st.phase}"
+                val loc = AppLocale.wrap(app)
+                val key = "${st.notifTitle.get(loc)}|${st.notifText.get(loc)}|${st.graceLeftS}|${st.phase}"
                 if (key != lastKey) {
                     lastKey = key
                     nm.notify(notifId, from(app, channel, st))

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Onboarding steps and readiness checklist. -->
+    <string name="step_aa_dev_title">Android Auto developer mode</string>
+    <string name="step_aa_dev_body">Open Android Auto settings, scroll down and tap “Version” 10 times, then confirm. Without this, there is no “Start head unit server” item.</string>
+    <string name="step_aa_dev_hint">On HyperOS these settings are not in the normal Settings app. Open them with the button below.</string>
+    <string name="step_aa_dev_primary">Open Android Auto</string>
+    <string name="step_aa_dev_short">Android Auto developer mode</string>
+
+    <string name="step_autostart_title">Auto-start head unit server</string>
+    <string name="step_autostart_body">Turn on the accessibility service “%1$s”. It starts the head unit server by itself when you plug in the USB cable. The service sees only Android Auto windows.</string>
+    <string name="step_autostart_hint">If the item is grayed out: Settings → Apps → Headswap → ⋮ → “Allow restricted settings”. Without the service you must start the server by hand before every trip: Android Auto → ⋮ → “Start head unit server”.</string>
+    <string name="step_autostart_primary">Open Accessibility</string>
+    <string name="step_autostart_extra">Allow restricted settings</string>
+
+    <string name="step_notif_title">Notifications</string>
+    <string name="step_notif_body">Headswap shows its status in the notification shade, and the system keeps the bridge running while the screen is off.</string>
+
+    <string name="step_background_title">Background work</string>
+    <string name="step_background_body">HyperOS kills background apps. Remove the battery limit, or the bridge may disconnect while the screen is off.</string>
+    <string name="step_background_hint">Xiaomi: Settings → Apps → Headswap → turn on “Autostart”, then set battery saver to “No restrictions”.</string>
+    <string name="step_background_primary">Remove battery limit</string>
+    <string name="step_background_extra">Autostart and battery saver</string>
+
+    <string name="step_mic_title">Microphone</string>
+    <string name="step_mic_body">Needed for “Hey Google” and voice input when the car microphone is not available. Headswap then takes your voice from the phone microphone.</string>
+
+    <string name="step_bluetooth_title">Bluetooth for calls</string>
+    <string name="step_bluetooth_body">Calls in Android Auto always go through Bluetooth. Pair your phone with the head unit once, as a phone or a headset. Music and navigation go through the USB cable.</string>
+    <string name="step_bluetooth_primary">Open Bluetooth</string>
+
+    <string name="step_location_title">Location for Maps</string>
+    <string name="step_location_body">Google Maps and other map apps in Android Auto need location access. Otherwise the car screen shows “location access required”.</string>
+    <string name="step_location_hint">Turn on location and allow it for map apps.</string>
+    <string name="step_location_primary">Open location settings</string>
+
+    <string name="step_first_title">First connection</string>
+    <string name="step_first_body">Connect the USB cable to the head unit with the phone unlocked. When Android asks “Open Headswap when this USB accessory is connected?”, check “Use by default for this USB accessory” and tap “OK”.</string>
+    <string name="step_first_hint">If the head unit shows a “启动CarLife” screen, tap that button. The phone must be unlocked when you plug it in, or the head unit shows “Unlock your phone”.</string>
+    <string name="step_first_primary">Got it</string>
+
+    <string name="onb_already_done">Already done</string>
+    <string name="onb_skip">Skip</string>
+    <string name="onb_allow">Allow</string>
+    <string name="onb_later">Later</string>
+    <string name="onb_back">Back</string>
+    <string name="onb_next">Next</string>
+    <string name="onb_step_progress">Step %1$d of %2$d</string>
+    <string name="onb_xiaomi_only">Xiaomi / HyperOS only</string>
+    <string name="onb_done_chip">Already completed</string>
+
+    <string name="onb_checklist_title">Readiness check</string>
+    <string name="onb_all_ready">Everything is ready for the trip</string>
+    <string name="onb_ready_count">Ready %1$d of %2$d</string>
+    <string name="onb_checklist_hint">Tap an item to open its step.</string>
+    <string name="onb_done">Done</string>
+    <string name="onb_status_marked">marked</string>
+    <string name="onb_status_ready">ready</string>
+    <string name="onb_status_unmarked">not marked</string>
+    <string name="onb_status_off">not turned on</string>
+</resources>

@@ -88,7 +88,7 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
 
         root.pad(c, 20, 20, 20, 24)
         val top = c.hbox().apply {
-            addView(c.text("Шаг $n из $total", 14f, 600, c.clr(R.color.on2)), lp(0, WRAP, 1f))
+            addView(c.text(c.getString(R.string.onb_step_progress, n, total), 14f, 600, c.clr(R.color.on2)), lp(0, WRAP, 1f))
             val dots = c.hbox(6)
             for (i in 1..total) {
                 dots.addView(View(c).apply { background = c.shape(c.clr(if (i <= n) R.color.pri else R.color.line), 3) }, lp(c.dp(if (total > 6) 18 else 28), c.dp(6)))
@@ -109,14 +109,14 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
             )
             val text = c.vbox(10).apply { pad(c, 0, 18, 0, 36) }     // нижний отступ больше затемнения края: конец текста не тонет в fade
             if (s.id == StepId.BACKGROUND && Readiness.isXiaomi()) {
-                text.addView(chipLabel("Только Xiaomi / HyperOS"), lp(WRAP, WRAP))
+                text.addView(chipLabel(c.getString(R.string.onb_xiaomi_only)), lp(WRAP, WRAP))
             }
             if (done) text.addView(doneChip(), lp(WRAP, WRAP))
-            text.addView(c.text(s.title, 28f, 600).apply { letterSpacing = -0.01f; lineHeight = c.dp(34) })
-            text.addView(c.text(s.body, 17f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(24) })
+            text.addView(c.text(c.getString(s.title), 28f, 600).apply { letterSpacing = -0.01f; lineHeight = c.dp(34) })
+            text.addView(c.text(s.bodyText(c), 17f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(24) })
             s.hint?.let {
                 text.addView(
-                    c.text(it, 14f, 400, c.clr(R.color.on2)).apply {
+                    c.text(c.getString(it), 14f, 400, c.clr(R.color.on2)).apply {
                         lineHeight = c.dp(20)
                         background = c.shape(c.clr(R.color.surf), 16)
                         pad(c, 14, 12, 14, 12)
@@ -129,13 +129,13 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
         root.addView(fadingScroll(body), lp(MATCH, 0, 1f))
 
         val buttons = c.vbox(4)
-        val primaryLabel = if (done && s.id != StepId.FIRST) "Дальше" else s.primary
+        val primaryLabel = if (done && s.id != StepId.FIRST) c.getString(R.string.onb_next) else c.getString(s.primary)
         buttons.addView(c.primaryButton(primaryLabel).apply { setOnClickListener { onPrimary(s, done) } })
         val showExtra = s.extra != null && !done && (s.id != StepId.BACKGROUND || Readiness.isXiaomi())
         if (showExtra) {
-            buttons.addView(c.outlineButton(s.extra!!, 0, 48, 15f).apply { setOnClickListener { onExtra(s) } })
+            buttons.addView(c.outlineButton(c.getString(s.extra!!), 0, 48, 15f).apply { setOnClickListener { onExtra(s) } })
         }
-        val skipLabel = if (done && s.id != StepId.FIRST) "Назад" else s.skip
+        val skipLabel = if (done && s.id != StepId.FIRST) c.getString(R.string.onb_back) else c.getString(s.skip)
         buttons.addView(c.linkButton(skipLabel, 48).apply { setOnClickListener { onSkip(s, done) } })
         root.addView(buttons, lp(MATCH, WRAP))
     }
@@ -161,7 +161,7 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
             background = c.shape(c.clr(R.color.okc), 10)
             pad(c, 10, 4, 12, 4)
             addView(c.icon(R.drawable.ic_check, 14, c.clr(R.color.ok)))
-            addView(c.text("Уже выполнено", 13f, 600, c.clr(R.color.ok)))
+            addView(c.text(c.getString(R.string.onb_done_chip), 13f, 600, c.clr(R.color.ok)))
         }
     }
 
@@ -239,23 +239,24 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
         val c = ctx
         root.pad(c, 20, 20, 20, 24)
         val top = c.hbox().apply {
-            addView(c.text("Проверка готовности", 14f, 600, c.clr(R.color.on2)), lp(0, WRAP, 1f))
+            addView(c.text(c.getString(R.string.onb_checklist_title), 14f, 600, c.clr(R.color.on2)), lp(0, WRAP, 1f))
         }
         root.addView(top, c.lpDp(MATCH, 48))
 
         val list = c.vbox(12).apply { pad(c, 0, 8, 0, 8) }
         val doneCount = Readiness.STEPS.count { Readiness.isDone(c, it.id) }
-        list.addView(c.text(if (doneCount == Readiness.STEPS.size) "Всё готово к поездке" else "Готово $doneCount из ${Readiness.STEPS.size}", 28f, 600).apply {
+        val heading = if (doneCount == Readiness.STEPS.size) c.getString(R.string.onb_all_ready) else c.getString(R.string.onb_ready_count, doneCount, Readiness.STEPS.size)
+        list.addView(c.text(heading, 28f, 600).apply {
             letterSpacing = -0.01f
             lineHeight = c.dp(34)
         })
-        list.addView(c.text("Нажмите на пункт, чтобы открыть его шаг.", 17f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(24) })
+        list.addView(c.text(c.getString(R.string.onb_checklist_hint), 17f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(24) })
         val card = c.card(24).apply { pad(c, 0, 6, 0, 6) }
         for (s in Readiness.STEPS) card.addView(checkRow(s), c.lpDp(MATCH, 60))
         list.addView(card, lp(MATCH, WRAP).margins(c, 0, 8, 0, 0))
         root.addView(fadingScroll(list), lp(MATCH, 0, 1f))
 
-        root.addView(c.primaryButton("Готово").apply {
+        root.addView(c.primaryButton(c.getString(R.string.onb_done)).apply {
             setOnClickListener {
                 ui.onboardingDone = true
                 host.back()
@@ -270,9 +271,9 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
         val statusText: String
         val statusColor: Int
         when {
-            done -> { statusText = if (auto == null) "отмечено" else "готово"; statusColor = R.color.ok }
-            auto == null -> { statusText = "не отмечено"; statusColor = R.color.on2 }
-            else -> { statusText = "не включено"; statusColor = R.color.warn }
+            done -> { statusText = c.getString(if (auto == null) R.string.onb_status_marked else R.string.onb_status_ready); statusColor = R.color.ok }
+            auto == null -> { statusText = c.getString(R.string.onb_status_unmarked); statusColor = R.color.on2 }
+            else -> { statusText = c.getString(R.string.onb_status_off); statusColor = R.color.warn }
         }
         return c.hbox(14).apply {
             pad(c, 20, 0, 16, 0)
@@ -301,7 +302,7 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
             }
             addView(mark, lp(c.dp(28), c.dp(28)))
             addView(c.vbox(1).apply {
-                addView(c.text(s.short, 16f, 500))
+                addView(c.text(c.getString(s.short), 16f, 500))
                 addView(c.text(statusText, 13f, 500, c.clr(statusColor)))
             }, lp(0, WRAP, 1f))
             addView(c.icon(R.drawable.ic_chevron, 20, c.clr(R.color.on2)))

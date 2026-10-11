@@ -35,19 +35,19 @@ class DevScreen(host: MainActivity) : Screen(host) {
         val c = ctx
         val body = c.vbox(6).apply { pad(c, 16, 4, 16, 24) }
 
-        body.addView(c.sectionTitle("Микрофон ГУ"))
+        body.addView(c.sectionTitle(c.getString(R.string.dev_section_mic)))
         body.addView(
-            group(listOf(row("MODULE_STATUS VR", "Слать VR 1/0 вместе с MIC_RECORD_* (как Baidu)", aa.micVrStatus) { aa.micVrStatus = it })),
+            group(listOf(row(c.getString(R.string.dev_mic_vr_title), c.getString(R.string.dev_mic_vr_sub), aa.micVrStatus) { aa.micVrStatus = it })),
         )
 
-        body.addView(c.sectionTitle("Действия"))
+        body.addView(c.sectionTitle(c.getString(R.string.dev_section_actions)))
         val actions = listOf(
-            "Сканировать" to { Actions.scan(c, "кнопка") },
-            "Стоп моста" to { Actions.stopBridge(c) },
-            "Перезапуск сервера ГУ" to { Actions.restartServer(c) },
-            "Настройки AA" to { Actions.openAaSettings(c) },
-            "AA selftest" to { Actions.aaSelftest(c) },
-            "Mic test" to { Actions.micTest(c) },
+            c.getString(R.string.dev_action_scan) to { Actions.scan(c, "кнопка") },
+            c.getString(R.string.dev_action_stop_bridge) to { Actions.stopBridge(c) },
+            c.getString(R.string.dev_action_restart_server) to { Actions.restartServer(c) },
+            c.getString(R.string.dev_action_aa_settings) to { Actions.openAaSettings(c) },
+            c.getString(R.string.dev_action_aa_selftest) to { Actions.aaSelftest(c) },
+            c.getString(R.string.dev_action_mic_test) to { Actions.micTest(c) },
         )
         for (pair in actions.chunked(2)) {
             val r = c.hbox(8)
@@ -57,10 +57,10 @@ class DevScreen(host: MainActivity) : Screen(host) {
             if (pair.size == 1) r.addView(View(c), lp(0, c.dp(52), 1f))
             body.addView(r, lp(MATCH, WRAP))
         }
-        enableSvc = c.tonalButton("Включить автозапуск сервера").apply { setOnClickListener { Actions.enableServiceDialog(c) } }
+        enableSvc = c.tonalButton(c.getString(R.string.dev_action_enable_autostart)).apply { setOnClickListener { Actions.enableServiceDialog(c) } }
         body.addView(enableSvc, lp(MATCH, c.dp(52)))
 
-        body.addView(c.sectionTitle("Статус"))
+        body.addView(c.sectionTitle(c.getString(R.string.dev_section_status)))
         statusView = c.text("", 12f, 400, c.clr(R.color.on), monospace = true).apply {
             lineHeight = c.dp(18)
             background = c.shape(c.clr(R.color.surf), 16)
@@ -70,7 +70,7 @@ class DevScreen(host: MainActivity) : Screen(host) {
         body.addView(statusView, lp(MATCH, WRAP))
 
         val logHead = c.hbox().apply { pad(c, 8, 12, 8, 4) }
-        logHead.addView(c.text("Лог", 14f, 600, c.clr(R.color.acc)), lp(0, WRAP, 1f))
+        logHead.addView(c.text(c.getString(R.string.dev_section_log), 14f, 600, c.clr(R.color.acc)), lp(0, WRAP, 1f))
         logMeta = c.text("", 13f, 400, c.clr(R.color.on2))
         logHead.addView(logMeta)
         body.addView(logHead, lp(MATCH, WRAP))
@@ -89,36 +89,36 @@ class DevScreen(host: MainActivity) : Screen(host) {
         body.addView(logScroll, c.lpDp(MATCH, 330))
 
         body.addView(
-            c.primaryButton("Поделиться логом", R.drawable.ic_share, 56, 17f).apply { setOnClickListener { LogShare.shareLog(c) } },
+            c.primaryButton(c.getString(R.string.dev_log_share), R.drawable.ic_share, 56, 17f).apply { setOnClickListener { LogShare.shareLog(c) } },
             lp(MATCH, c.dp(56)).margins(c, 0, 8),
         )
         val bottom = c.hbox(8)
-        bottom.addView(c.outlineButton("Сохранить .zip", 0, 48, 15f).apply { setOnClickListener { LogShare.saveZip(c) } }, lp(0, c.dp(48), 1f))
-        bottom.addView(c.outlineButton("Очистить", 0, 48, 15f).apply { setOnClickListener { confirmClear() } }, lp(0, c.dp(48), 1f))
+        bottom.addView(c.outlineButton(c.getString(R.string.dev_log_save_zip), 0, 48, 15f).apply { setOnClickListener { LogShare.saveZip(c) } }, lp(0, c.dp(48), 1f))
+        bottom.addView(c.outlineButton(c.getString(R.string.dev_log_clear), 0, 48, 15f).apply { setOnClickListener { confirmClear() } }, lp(0, c.dp(48), 1f))
         body.addView(bottom, lp(MATCH, WRAP))
         body.addView(
-            c.text("В архив: лог, модель и версия Android, настройки моста, данные ГУ. Без контактов и геопозиции.", 13f, 400, c.clr(R.color.on2))
+            c.text(c.getString(R.string.dev_log_archive_note), 13f, 400, c.clr(R.color.on2))
                 .apply { lineHeight = c.dp(18) },
             lp(MATCH, WRAP).margins(c, 8, 4, 8, 0),
         )
 
-        body.addView(c.sectionTitle("Заметки"))
+        body.addView(c.sectionTitle(c.getString(R.string.dev_section_notes)))
         body.addView(
             c.vbox(10).apply {
                 background = c.shape(c.clr(R.color.surf), 20)
                 pad(c, 16, 14, 16, 14)
                 addView(
                     c.text(
-                        "Для adb на HyperOS включите в параметрах разработчика «Установка через USB» и «Отладка по USB (настройки безопасности)». Для работы моста они не нужны.",
+                        c.getString(R.string.dev_notes_adb),
                         14f, 400, c.clr(R.color.on2),
                     ).apply { lineHeight = c.dp(20) },
                 )
-                addView(c.tonalButton("Открыть параметры разработчика").apply {
+                addView(c.tonalButton(c.getString(R.string.dev_open_dev_settings)).apply {
                     setOnClickListener {
                         try {
                             c.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         } catch (e: Exception) {
-                            Toast.makeText(c, "Не открыть: ${e.javaClass.simpleName}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(c, c.getString(R.string.dev_open_failed, e.javaClass.simpleName), Toast.LENGTH_SHORT).show()
                         }
                     }
                 }, lp(MATCH, c.dp(52)))
@@ -126,7 +126,7 @@ class DevScreen(host: MainActivity) : Screen(host) {
             lp(MATCH, WRAP),
         )
 
-        view = scaffold(c, "Для разработчиков", { host.back() }, body)
+        view = scaffold(c, c.getString(R.string.dev_title), { host.back() }, body)
     }
 
     private fun row(title: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit) =
@@ -145,16 +145,16 @@ class DevScreen(host: MainActivity) : Screen(host) {
 
     private fun confirmClear() {
         AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Очистить лог?")
-            .setMessage("Строки на экране сотрутся, старые файлы headswap-*.log удалятся. Текущий файл останется.")
-            .setPositiveButton("Очистить") { _, _ ->
+            .setTitle(R.string.dev_clear_title)
+            .setMessage(R.string.dev_clear_message)
+            .setPositiveButton(R.string.dev_clear_confirm) { _, _ ->
                 AppLog.clearRing()
                 val n = LogShare.deleteOldLogs(ctx)
                 lastLog = "\u0000"
-                Toast.makeText(ctx, "Удалено старых файлов: $n", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, ctx.resources.getQuantityString(R.plurals.dev_deleted_old_files, n, n), Toast.LENGTH_SHORT).show()
                 tick()
             }
-            .setNegativeButton("Отмена", null)
+            .setNegativeButton(R.string.dev_clear_cancel, null)
             .show()
     }
 
@@ -171,7 +171,11 @@ class DevScreen(host: MainActivity) : Screen(host) {
         val joined = lines.joinToString("\n")
         if (joined == lastLog) return
         lastLog = joined
-        logMeta.text = "${lines.size} строк · ${LogShare.sizeText(AppLog.file)}"
+        logMeta.text = c.getString(
+            R.string.dev_log_meta,
+            c.resources.getQuantityString(R.plurals.dev_log_lines, lines.size, lines.size),
+            LogShare.sizeText(c, AppLog.file),
+        )
         val atBottom = logScroll.scrollY + logScroll.height + c.dp(40) >= logView.height
         logView.text = colorize(lines)
         if (atBottom) logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }

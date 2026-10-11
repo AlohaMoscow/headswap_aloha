@@ -1,13 +1,15 @@
 package com.yegorkapomidorka.headswap.aa
 
+import com.yegorkapomidorka.headswap.R
+
 /**
  * Настройка «Частота кадров»: Авто (как просит ГУ в VIDEO_ENCODER_INIT) или фиксированная.
  * Читается один раз на подключение (SessionConfig), в passthrough не действует.
  */
-enum class FpsSetting(val title: String, val sub: String, val fixed: Int?) {
-    AUTO("Авто", "Как просит ГУ", null),
-    FPS15("15 кадров/с", "Легче для слабых ГУ и канала", 15),
-    FPS30("30 кадров/с", "Плавнее, но тяжелее", 30);
+enum class FpsSetting(val titleRes: Int, val subRes: Int, val fixed: Int?) {
+    AUTO(R.string.fps_auto_title, R.string.fps_auto_sub, null),
+    FPS15(R.string.fps_15_title, R.string.fps_15_sub, 15),
+    FPS30(R.string.fps_30_title, R.string.fps_30_sub, 30);
 
     companion object {
         val DEFAULT = AUTO

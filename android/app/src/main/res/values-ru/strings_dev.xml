@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dev_title">Для разработчиков</string>
+
+    <string name="dev_section_mic">Микрофон ГУ</string>
+    <string name="dev_mic_vr_sub">Слать VR 1/0 вместе с MIC_RECORD_* (как Baidu)</string>
+
+    <string name="dev_section_actions">Действия</string>
+    <string name="dev_action_scan">Сканировать</string>
+    <string name="dev_action_stop_bridge">Стоп моста</string>
+    <string name="dev_action_restart_server">Перезапуск сервера ГУ</string>
+    <string name="dev_action_aa_settings">Настройки AA</string>
+    <string name="dev_action_enable_autostart">Включить автозапуск сервера</string>
+
+    <string name="dev_section_status">Статус</string>
+    <string name="dev_section_log">Лог</string>
+    <plurals name="dev_log_lines">
+        <item quantity="one">%d строка</item>
+        <item quantity="few">%d строки</item>
+        <item quantity="many">%d строк</item>
+        <item quantity="other">%d строк</item>
+    </plurals>
+    <string name="dev_log_meta">%1$s · %2$s</string>
+
+    <string name="dev_log_share">Поделиться логом</string>
+    <string name="dev_log_save_zip">Сохранить .zip</string>
+    <string name="dev_log_clear">Очистить</string>
+    <string name="dev_log_archive_note">В архив: лог, модель и версия Android, настройки моста, данные ГУ. Без контактов и геопозиции.</string>
+
+    <string name="dev_section_notes">Заметки</string>
+    <string name="dev_notes_adb">Для adb на HyperOS включите в параметрах разработчика «Установка через USB» и «Отладка по USB (настройки безопасности)». Для работы моста они не нужны.</string>
+    <string name="dev_open_dev_settings">Открыть параметры разработчика</string>
+    <string name="dev_open_failed">Не открыть: %1$s</string>
+
+    <string name="dev_clear_title">Очистить лог?</string>
+    <string name="dev_clear_message">Строки на экране сотрутся, старые файлы headswap-*.log удалятся. Текущий файл останется.</string>
+    <string name="dev_clear_confirm">Очистить</string>
+    <string name="dev_clear_cancel">Отмена</string>
+    <plurals name="dev_deleted_old_files">
+        <item quantity="one">Удалено старых файлов: %d</item>
+        <item quantity="few">Удалено старых файлов: %d</item>
+        <item quantity="many">Удалено старых файлов: %d</item>
+        <item quantity="other">Удалено старых файлов: %d</item>
+    </plurals>
+</resources>

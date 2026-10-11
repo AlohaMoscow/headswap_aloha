@@ -210,7 +210,7 @@ class BridgeService : Service() {
             null
         } catch (e: Throwable) {
             AppLog.e("BRIDGE не стартовал (сертификаты AA)", e)
-            AaState.setupError = "Мост не стартовал: ${e.javaClass.simpleName}: ${e.message}"
+            AaState.setupError = getString(R.string.svc_bridge_failed, "${e.javaClass.simpleName}: ${e.message}")
             AaState.status = "ошибка: мост не стартовал"
             null
         }

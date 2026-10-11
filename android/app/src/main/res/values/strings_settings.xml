@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings screen -->
+    <string name="set_title">Settings</string>
+    <string name="set_back">Back</string>
+
+    <string name="set_sound">Sound</string>
+    <string name="set_usb_audio_title">Sound over USB</string>
+    <string name="set_usb_audio_sub">To the car speakers</string>
+
+    <string name="set_video">Video</string>
+    <string name="set_transcode_title">Re-encoding</string>
+    <string name="set_transcode_sub">More reliable · +60 ms</string>
+    <string name="set_direct_title">Direct passthrough</string>
+    <string name="set_direct_sub">Faster · does not work with every head unit</string>
+
+    <string name="set_resolution">Video resolution</string>
+    <string name="set_apply_next">Applies on the next connection.</string>
+    <string name="set_needs_transcode">Needs re-encoding</string>
+
+    <string name="set_fps">Frame rate</string>
+    <string name="set_fps_note">Applies on the next connection. In direct passthrough the frame rate cannot be changed.</string>
+
+    <string name="set_cert">Head unit certificate</string>
+    <string name="set_cert_hint">Change it if Android Auto does not connect</string>
+
+    <string name="set_autostart">Auto-start head unit server</string>
+    <string name="set_autostart_sub">When the USB cable is connected and after an Android Auto session</string>
+    <string name="set_autostart_enable">Turn on</string>
+    <string name="set_svc_connected">Accessibility service is connected</string>
+    <string name="set_svc_not_connected">Service is on, but not connected</string>
+    <string name="set_svc_off">Accessibility service is off</string>
+
+    <string name="set_mic">Microphone</string>
+    <string name="mic_car_title">Car</string>
+    <string name="mic_car_sub">Head unit microphone</string>
+    <string name="mic_phone_title">Phone</string>
+    <string name="mic_phone_sub">Phone microphone, needs permission to record audio</string>
+    <string name="mic_auto_title">Auto</string>
+    <string name="mic_auto_sub">Car first, phone after 2 s of silence</string>
+    <string name="mic_no_permission">No permission to record audio: the phone microphone will not work.</string>
+
+    <string name="set_report_title">Report a problem</string>
+    <string name="set_report_note">log + report</string>
+    <string name="set_rerun_setup">Run setup again</string>
+    <string name="set_check_ready">Check readiness</string>
+    <string name="set_for_devs">For developers</string>
+    <string name="set_footer">Headswap %1$s · bridge for CarLife head units</string>
+
+    <!-- Video modes (VideoMode) -->
+    <string name="video_r800_title">800×480</string>
+    <string name="video_r800_sub">For small screens</string>
+    <string name="video_r720_title">1280×720 (standard)</string>
+    <string name="video_r720_sub">Fits most head units</string>
+    <string name="video_r1080_title">1920×1080</string>
+    <string name="video_r1080_sub">Sharper, but heavier for the phone and head unit</string>
+    <string name="video_wide_title">Wide 8:3 (crop)</string>
+    <string name="video_wide_sub">For wide screens: 1280×480, larger</string>
+    <string name="video_wide_mid_title">Wide 8:3 medium (crop)</string>
+    <string name="video_wide_mid_sub">1728×648: native resolution of the Mazda screen</string>
+    <string name="video_wide_hd_title">Wide 8:3 HD (crop)</string>
+    <string name="video_wide_hd_sub">1920×720: sharper and smaller, more fits on the screen</string>
+
+    <!-- Frame rate (FpsSetting) -->
+    <string name="fps_auto_title">Auto</string>
+    <string name="fps_auto_sub">As the head unit asks</string>
+    <string name="fps_15_title">15 fps</string>
+    <string name="fps_15_sub">Lighter for weak head units and the link</string>
+    <string name="fps_30_title">30 fps</string>
+    <string name="fps_30_sub">Smoother, but heavier</string>
+</resources>

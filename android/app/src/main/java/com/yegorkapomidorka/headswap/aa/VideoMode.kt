@@ -1,5 +1,6 @@
 package com.yegorkapomidorka.headswap.aa
 
+import com.yegorkapomidorka.headswap.R
 import java.util.Locale
 
 /** Центральный прямоугольник исходного кадра в долях (u вправо, v вверх; кроп симметричный, поэтому ориентация v не важна). */
@@ -16,8 +17,8 @@ data class VideoCrop(val u0: Float, val v0: Float, val u1: Float, val v1: Float)
  * Режим снимается один раз на подключение (AaBridgeCore.videoMode) и дальше везде берётся оттуда, prefs не читаются.
  */
 enum class VideoMode(
-    val title: String,
-    val sub: String,
+    val titleRes: Int,
+    val subRes: Int,
     /** Разрешение AA в SDR (SDR-строка AapMessages.serviceDiscoveryResponse). */
     val aaResolution: String,
     /** Поля margin_width / margin_height в VideoConfiguration SDR (суммарно, делятся пополам по краям). */
@@ -29,13 +30,13 @@ enum class VideoMode(
     val outH: Int,
     val bitrate: Int,
 ) {
-    R800("800×480", "Для небольших экранов", "800x480", 0, 0, 120, 800, 480, 4_000_000),
-    R720("1280×720 (стандарт)", "Подходит большинству ГУ", "1280x720", 0, 0, 160, 1280, 720, 4_000_000),
-    R1080("1920×1080", "Чётче, но тяжелее для телефона и ГУ", "1920x1080", 0, 0, 240, 1920, 1080, 8_000_000),
-    WIDE("Широкий 8:3 (обрезка)", "Для вытянутых экранов: 1280×480, крупно", "1280x720", 0, 240, 160, 1280, 480, 4_000_000),
+    R800(R.string.video_r800_title, R.string.video_r800_sub, "800x480", 0, 0, 120, 800, 480, 4_000_000),
+    R720(R.string.video_r720_title, R.string.video_r720_sub, "1280x720", 0, 0, 160, 1280, 720, 4_000_000),
+    R1080(R.string.video_r1080_title, R.string.video_r1080_sub, "1920x1080", 0, 0, 240, 1920, 1080, 8_000_000),
+    WIDE(R.string.video_wide_title, R.string.video_wide_sub, "1280x720", 0, 240, 160, 1280, 480, 4_000_000),
     /** 1728×648 - нативный экран Desay SV G6S (Мазда): из кадра AA 1920×1080 вырезается центр, поля по обеим осям. */
-    WIDE_MID("Широкий 8:3 средний (обрезка)", "1728×648: родное разрешение экрана Мазды", "1920x1080", 192, 432, 160, 1728, 648, 5_000_000),
-    WIDE_HD("Широкий 8:3 HD (обрезка)", "1920×720: чётче и мельче, больше влезает на экран", "1920x1080", 0, 360, 160, 1920, 720, 6_000_000);
+    WIDE_MID(R.string.video_wide_mid_title, R.string.video_wide_mid_sub, "1920x1080", 192, 432, 160, 1728, 648, 5_000_000),
+    WIDE_HD(R.string.video_wide_hd_title, R.string.video_wide_hd_sub, "1920x1080", 0, 360, 160, 1920, 720, 6_000_000);
 
     val aaW: Int = aaResolution.substringBefore('x').toInt()
     val aaH: Int = aaResolution.substringAfter('x').toInt()

@@ -38,7 +38,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
             addView(chip, lp(c.dp(32), c.dp(32)))
             addView(c.text("Headswap", 22f, 600).apply { letterSpacing = -0.01f }, lp(WRAP, WRAP).margins(c, 10))
             addView(View(c), lp(0, 1, 1f))
-            addView(c.iconButton(R.drawable.ic_settings, c.clr(R.color.on2), "Настройки").apply {
+            addView(c.iconButton(R.drawable.ic_settings, c.clr(R.color.on2), c.getString(R.string.home_settings)).apply {
                 setOnClickListener { host.showSettings() }
             })
         }
@@ -81,7 +81,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
     }
 
     private fun updateGrace(st: HomeState) {
-        graceLeftText?.text = "ещё ${st.graceLeftS} с"
+        graceLeftText?.text = ctx.getString(R.string.home_grace_left, st.graceLeftS)
         val total = st.graceTotalS.coerceAtLeast(1)
         val f = (st.graceLeftS.toFloat() / total).coerceIn(0f, 1f)
         graceFill?.layoutParams = lp(0, MATCH, f.coerceAtLeast(0.001f))
@@ -114,29 +114,33 @@ class HomeScreen(host: MainActivity) : Screen(host) {
             addView(c.icon(iconRes, 32, c.clr(onFgRes)), FrameLayout.LayoutParams(c.dp(32), c.dp(32), Gravity.CENTER))
         }, lp(c.dp(64), c.dp(64)))
         heroBox.addView(c.vbox(6).apply {
-            addView(c.text(st.title, 28f, 600, c.clr(textRes)).apply { letterSpacing = -0.01f; lineHeight = c.dp(34) })
-            addView(c.text(st.sub, 16f, 400).apply { lineHeight = c.dp(22) })
+            addView(c.text(st.title.get(c), 28f, 600, c.clr(textRes)).apply { letterSpacing = -0.01f; lineHeight = c.dp(34) })
+            addView(c.text(st.sub.get(c), 16f, 400).apply { lineHeight = c.dp(22) })
         }, lp(MATCH, WRAP))
         if (st.showChain) heroBox.addView(chain(), lp(MATCH, WRAP))
         if (st.phase == Phase.RECONNECTING) heroBox.addView(graceBlock(st), lp(MATCH, WRAP))
 
         stagesBox.removeAllViews()
-        for ((label, sm) in st.stages) stagesBox.addView(stageRow(label, sm.first, sm.second), c.lpDp(MATCH, 52))
+        for ((label, sm) in st.stages) stagesBox.addView(stageRow(label.get(c), sm.first, sm.second.get(c)), c.lpDp(MATCH, 52))
 
         footer.removeAllViews()
         st.primary?.let { p ->
-            val (label, icon) = if (p == PrimaryAction.START_SERVER) "Запустить сервер ГУ" to R.drawable.ic_play else "Перезапустить сервер ГУ" to R.drawable.ic_refresh_btn
+            val (label, icon) = if (p == PrimaryAction.START_SERVER) {
+                c.getString(R.string.home_btn_start) to R.drawable.ic_play
+            } else {
+                c.getString(R.string.home_btn_restart) to R.drawable.ic_refresh_btn
+            }
             footer.addView(c.primaryButton(label, icon).apply { setOnClickListener { Actions.startServerFromUi(c) } })
         }
         st.outline?.let { o ->
             val b = when (o) {
-                OutlineAction.STOP -> c.outlineButton("Остановить", R.drawable.ic_stop).apply { setOnClickListener { Actions.stopBridge(c) } }
-                OutlineAction.OPEN_AA -> c.outlineButton("Открыть настройки AA", R.drawable.ic_open).apply { setOnClickListener { Actions.openAaSettings(c) } }
+                OutlineAction.STOP -> c.outlineButton(c.getString(R.string.home_btn_stop), R.drawable.ic_stop).apply { setOnClickListener { Actions.stopBridge(c) } }
+                OutlineAction.OPEN_AA -> c.outlineButton(c.getString(R.string.home_btn_open_aa), R.drawable.ic_open).apply { setOnClickListener { Actions.openAaSettings(c) } }
             }
             footer.addView(b)
         }
         if (st.logLink) {
-            footer.addView(c.linkButton("Отправить лог разработчикам").apply { setOnClickListener { LogShare.shareReport(c) } })
+            footer.addView(c.linkButton(c.getString(R.string.home_btn_send_log)).apply { setOnClickListener { LogShare.shareReport(c) } })
         }
         if (st.phase == Phase.RECONNECTING) updateGrace(st)
     }
@@ -154,7 +158,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
         flow.addView(sep())
         flow.addView(chip("⋮", true))
         flow.addView(sep())
-        flow.addView(chip("Запустить сервер ГУ"))
+        flow.addView(chip(c.getString(R.string.home_btn_start)))
         return flow
     }
 
@@ -170,8 +174,8 @@ class HomeScreen(host: MainActivity) : Screen(host) {
         graceRest = rest
         box.addView(bar, c.lpDp(MATCH, 8))
         val row = c.hbox()
-        row.addView(c.text("Жду переподключения", 14f, 400, c.clr(R.color.on2)), lp(0, WRAP, 1f))
-        val left = c.text("ещё ${st.graceLeftS} с", 14f, 600)
+        row.addView(c.text(c.getString(R.string.home_grace_waiting), 14f, 400, c.clr(R.color.on2)), lp(0, WRAP, 1f))
+        val left = c.text(c.getString(R.string.home_grace_left, st.graceLeftS), 14f, 600)
         graceLeftText = left
         row.addView(left)
         box.addView(row, lp(MATCH, WRAP))

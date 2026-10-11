@@ -16,6 +16,7 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import com.yegorkapomidorka.headswap.AppLog
 import com.yegorkapomidorka.headswap.CarLifeState
+import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
@@ -95,7 +96,7 @@ object LogShare {
             ctx.startActivity(Intent.createChooser(send, subject).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
             AppLog.e("не открыть меню «Поделиться»", e)
-            Toast.makeText(ctx, "Не открыть «Поделиться»: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, ctx.getString(R.string.share_failed, e.message), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -103,10 +104,10 @@ object LogShare {
     fun shareLog(ctx: Context) {
         val f = AppLog.file?.takeIf { it.isFile } ?: logFiles(ctx).firstOrNull()
         if (f == null) {
-            Toast.makeText(ctx, "Файла лога пока нет", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(R.string.share_no_log), Toast.LENGTH_SHORT).show()
             return
         }
-        shareFile(ctx, f, "text/plain", "Headswap: лог ${f.name}")
+        shareFile(ctx, f, "text/plain", ctx.getString(R.string.share_subject_log, f.name))
     }
 
     /** Архив: логи + сведения об устройстве и настройках. Без контактов и геопозиции. */
@@ -115,10 +116,10 @@ object LogShare {
             buildZip(ctx)
         } catch (e: Exception) {
             AppLog.e("не собрать архив отчёта", e)
-            Toast.makeText(ctx, "Не собрать отчёт: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, ctx.getString(R.string.share_report_failed, e.message), Toast.LENGTH_LONG).show()
             return
         }
-        shareFile(ctx, zip, "application/zip", "Headswap: отчёт о проблеме")
+        shareFile(ctx, zip, "application/zip", ctx.getString(R.string.share_subject_report))
     }
 
     /** Архив в «Загрузки» (MediaStore, без разрешений); при неудаче - меню «Поделиться». */
@@ -127,7 +128,7 @@ object LogShare {
             buildZip(ctx)
         } catch (e: Exception) {
             AppLog.e("не собрать архив", e)
-            Toast.makeText(ctx, "Не собрать архив: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, ctx.getString(R.string.share_zip_failed, e.message), Toast.LENGTH_LONG).show()
             return
         }
         try {
@@ -140,10 +141,10 @@ object LogShare {
                 ?: throw java.io.IOException("MediaStore не создал файл")
             ctx.contentResolver.openOutputStream(dst)!!.use { out -> zip.inputStream().use { it.copyTo(out) } }
             AppLog.i("архив сохранён в Загрузки: ${zip.name}")
-            Toast.makeText(ctx, "Сохранено в Загрузки: ${zip.name}", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, ctx.getString(R.string.share_saved, zip.name), Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             AppLog.e("не сохранить в Загрузки, делюсь файлом", e)
-            shareFile(ctx, zip, "application/zip", "Headswap: архив логов")
+            shareFile(ctx, zip, "application/zip", ctx.getString(R.string.share_subject_archive))
         }
     }
 
@@ -198,7 +199,7 @@ object LogShare {
             appendLine("Настройки моста")
             appendLine("  видео: ${if (aa.transcode) "перекодирование" else "passthrough"}")
             appendLine("  разрешение видео: выбрано ${aa.videoMode.name}, в сессии: ${CarLifeState.videoMode?.describe() ?: "сессии не было"}")
-            appendLine("  частота кадров: ${aa.fpsSetting.title}")
+            appendLine("  частота кадров: ${aa.fpsSetting.name}")
             appendLine("  звук по USB: ${aa.usbAudio}")
             appendLine("  сертификат: ${aa.certSet}")
             appendLine("  автозапуск сервера ГУ: ${aa.autoServer}")
@@ -219,8 +220,9 @@ object LogShare {
         return n
     }
 
-    fun sizeText(f: File?): String {
+    fun sizeText(ctx: Context, f: File?): String {
         val b = f?.length() ?: return "—"
-        return if (b >= 1024 * 1024) "%.1f МиБ".format(Locale.US, b / 1048576.0) else "${b / 1024} КиБ"
+        return if (b >= 1024 * 1024) ctx.getString(R.string.share_size_mib, "%.1f".format(Locale.US, b / 1048576.0))
+        else ctx.getString(R.string.share_size_kib, b / 1024)
     }
 }

@@ -15,6 +15,7 @@ import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.AppLog
 import com.yegorkapomidorka.headswap.BridgeService
 import com.yegorkapomidorka.headswap.CarLifeState
+import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaCreds
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.PhoneMicCapture
@@ -89,7 +90,7 @@ object Actions {
             AppLog.i("открыты настройки Android Auto")
         } catch (e: Exception) {
             AppLog.e("не открыть настройки Android Auto", e)
-            Toast.makeText(ctx, "Не открыть настройки AA: ${e.javaClass.simpleName}: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, ctx.getString(R.string.act_open_aa_failed, "${e.javaClass.simpleName}: ${e.message}"), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -98,7 +99,7 @@ object Actions {
         if (!AutoServer.isConnected) {
             AppLog.i("AUTOSRV: служба спецвозможностей не подключена, перезапускать нечем")
             if (fromCmd || ctx !is Activity) {
-                Toast.makeText(ctx, "Служба спецвозможностей не включена", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, ctx.getString(R.string.act_service_off), Toast.LENGTH_LONG).show()
             } else {
                 enableServiceDialog(ctx)
             }
@@ -117,7 +118,7 @@ object Actions {
             restartServer(ctx)
         } else {
             if (AaPrefs(ctx).autoServer) {
-                Toast.makeText(ctx, "Служба автозапуска не включена: запустите сервер в Android Auto вручную", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, ctx.getString(R.string.act_autostart_off), Toast.LENGTH_LONG).show()
             }
             HeadswapStatus.markServerRequested()
             openAaSettings(ctx)
@@ -134,15 +135,10 @@ object Actions {
 
     fun enableServiceDialog(ctx: Context) {
         AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Автозапуск сервера ГУ")
-            .setMessage(
-                "Откроются настройки спецвозможностей. Найдите «Headswap: автозапуск сервера ГУ» " +
-                    "(Установленные приложения / Загруженные службы) и включите. Служба видит только окна Android Auto.\n\n" +
-                    "Если пункт серый («ограниченные настройки»): Настройки → Приложения → Headswap → ⋮ → " +
-                    "«Разрешить ограниченные настройки», потом снова сюда.",
-            )
-            .setPositiveButton("Открыть") { _, _ -> openAccessibilitySettings(ctx) }
-            .setNegativeButton("Отмена", null)
+            .setTitle(ctx.getString(R.string.act_enable_title))
+            .setMessage(ctx.getString(R.string.act_enable_message, ctx.getString(R.string.autosrv_label)))
+            .setPositiveButton(ctx.getString(R.string.act_open)) { _, _ -> openAccessibilitySettings(ctx) }
+            .setNegativeButton(ctx.getString(R.string.act_cancel), null)
             .show()
     }
 

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="step_aa_dev_title">Режим разработчика Android Auto</string>
+    <string name="step_aa_dev_body">Откройте настройки Android Auto, пролистайте вниз и 10 раз нажмите «Сведения о версиях и разрешениях», подтвердите. Без этого не будет пункта «Сервер головного устройства».</string>
+    <string name="step_aa_dev_hint">В HyperOS этих настроек нет в обычных Настройках — открывайте их кнопкой ниже.</string>
+    <string name="step_aa_dev_primary">Открыть Android Auto</string>
+    <string name="step_aa_dev_short">Режим разработчика AA</string>
+
+    <string name="step_autostart_title">Автозапуск сервера ГУ</string>
+    <string name="step_autostart_body">Включите службу спецвозможностей «%1$s»: она сама запускает сервер ГУ при подключении кабеля. Служба видит только окна Android Auto.</string>
+    <string name="step_autostart_hint">Если пункт серый: Настройки → Приложения → Headswap → ⋮ → «Разрешить ограниченные настройки». Без службы сервер придётся запускать вручную перед каждой поездкой: Android Auto → ⋮ → «Вкл. сервер головного устр-ва».</string>
+    <string name="step_autostart_primary">Открыть спецвозможности</string>
+    <string name="step_autostart_extra">Разрешить ограниченные настройки</string>
+
+    <string name="step_notif_title">Уведомления</string>
+    <string name="step_notif_body">Покажу статус в шторке, и система не выгрузит мост, пока экран погашен.</string>
+
+    <string name="step_background_title">Работа в фоне</string>
+    <string name="step_background_body">HyperOS убивает фоновые приложения. Снимите ограничение батареи, иначе мост может отключиться при погашенном экране.</string>
+    <string name="step_background_hint">Xiaomi: Настройки → Приложения → Headswap → «Автозапуск» включить, «Контроль активности» → «Нет ограничений».</string>
+    <string name="step_background_primary">Снять ограничение батареи</string>
+    <string name="step_background_extra">Автозапуск и контроль активности</string>
+
+    <string name="step_mic_title">Микрофон</string>
+    <string name="step_mic_body">Нужен для «Окей, Google» и голосового ввода, если микрофон машины недоступен: голос возьму с микрофона телефона.</string>
+
+    <string name="step_bluetooth_title">Bluetooth для звонков</string>
+    <string name="step_bluetooth_body">Звонки в Android Auto всегда идут через Bluetooth: один раз сопрягите телефон с магнитолой как телефон или гарнитуру. Музыка и навигация идут по кабелю.</string>
+    <string name="step_bluetooth_primary">Открыть Bluetooth</string>
+
+    <string name="step_location_title">Геопозиция для Карт</string>
+    <string name="step_location_body">Google Картам и 2ГИС в Android Auto нужен доступ к местоположению, иначе на экране машины будет «требуется доступ к геоданным».</string>
+    <string name="step_location_hint">Включите геолокацию и разрешите её приложениям карт.</string>
+    <string name="step_location_primary">Открыть геолокацию</string>
+
+    <string name="step_first_title">Первое подключение</string>
+    <string name="step_first_body">Подключите кабель к магнитоле, телефон разблокирован. На запрос «Открыть Headswap для USB-аксессуара» отметьте «По умолчанию» и нажмите «ОК».</string>
+    <string name="step_first_hint">Если на магнитоле экран «启动CarLife» — нажмите эту кнопку. В машине телефон должен быть разблокирован в момент подключения, иначе на ГУ будет «Разблокируйте телефон».</string>
+    <string name="step_first_primary">Понятно</string>
+
+    <string name="onb_already_done">Уже сделано</string>
+    <string name="onb_skip">Пропустить</string>
+    <string name="onb_allow">Разрешить</string>
+    <string name="onb_later">Позже</string>
+    <string name="onb_back">Назад</string>
+    <string name="onb_next">Дальше</string>
+    <string name="onb_step_progress">Шаг %1$d из %2$d</string>
+    <string name="onb_xiaomi_only">Только Xiaomi / HyperOS</string>
+    <string name="onb_done_chip">Уже выполнено</string>
+
+    <string name="onb_checklist_title">Проверка готовности</string>
+    <string name="onb_all_ready">Всё готово к поездке</string>
+    <string name="onb_ready_count">Готово %1$d из %2$d</string>
+    <string name="onb_checklist_hint">Нажмите на пункт, чтобы открыть его шаг.</string>
+    <string name="onb_done">Готово</string>
+    <string name="onb_status_marked">отмечено</string>
+    <string name="onb_status_ready">готово</string>
+    <string name="onb_status_unmarked">не отмечено</string>
+    <string name="onb_status_off">не включено</string>
+</resources>

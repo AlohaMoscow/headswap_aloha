@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.yegorkapomidorka.headswap.AppLocale
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaPrefs
@@ -21,7 +22,7 @@ import com.yegorkapomidorka.headswap.autosrv.AutoServer
 fun scaffold(ctx: Context, title: String, onBack: () -> Unit, body: View): LinearLayout = ctx.vbox().apply {
     val header = ctx.hbox(4).apply {
         pad(ctx, 4, 8, 8, 0)
-        addView(ctx.iconButton(R.drawable.ic_back, ctx.clr(R.color.on), "Назад").apply { setOnClickListener { onBack() } })
+        addView(ctx.iconButton(R.drawable.ic_back, ctx.clr(R.color.on), ctx.getString(R.string.set_back)).apply { setOnClickListener { onBack() } })
         addView(ctx.text(title, 22f, 600))
     }
     addView(header, ctx.lpDp(MATCH, 64))
@@ -35,6 +36,7 @@ fun scaffold(ctx: Context, title: String, onBack: () -> Unit, body: View): Linea
 /** Настройки (Settings.dc.html) + автозапуск сервера ГУ, микрофон, чеклист и ссылки. */
 class SettingsScreen(host: MainActivity) : Screen(host) {
     private val aa = AaPrefs(ctx)
+    private val langRows = LinkedHashMap<String, RadioRow>()
     private val micRows = HashMap<MicMode, RadioRow>()
     private val modeRows = LinkedHashMap<VideoMode, RadioRow>()
     private val fpsRows = LinkedHashMap<FpsSetting, RadioRow>()
@@ -53,52 +55,64 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         val c = ctx
         body = c.vbox(6).apply { pad(c, 16, 4, 16, 16) }
 
-        body.addView(c.sectionTitle("Звук"))
-        body.addView(ToggleRow(c, "Звук через USB", "В динамики машины", aa.usbAudio) { aa.usbAudio = it }.view)
+        body.addView(c.sectionTitle(c.getString(R.string.lang_title)))
+        for ((tag, titleRes) in listOf(
+            AppLocale.SYSTEM to R.string.lang_system,
+            "en" to R.string.lang_en,
+            "ru" to R.string.lang_ru,
+        )) {
+            val row = RadioRow(c, c.getString(titleRes), "") { setLang(tag) }
+            langRows[tag] = row
+            body.addView(row.view, lp(MATCH, WRAP))
+        }
+        refreshLang()
 
-        body.addView(c.sectionTitle("Видео"))
-        transcodeRow = RadioRow(c, "Перекодирование", "Надёжнее · +60 мс") { setTranscode(true) }
-        directRow = RadioRow(c, "Прямой проброс", "Быстрее · подходит не всем ГУ") { setTranscode(false) }
+        body.addView(c.sectionTitle(c.getString(R.string.set_sound)))
+        body.addView(ToggleRow(c, c.getString(R.string.set_usb_audio_title), c.getString(R.string.set_usb_audio_sub), aa.usbAudio) { aa.usbAudio = it }.view)
+
+        body.addView(c.sectionTitle(c.getString(R.string.set_video)))
+        transcodeRow = RadioRow(c, c.getString(R.string.set_transcode_title), c.getString(R.string.set_transcode_sub)) { setTranscode(true) }
+        directRow = RadioRow(c, c.getString(R.string.set_direct_title), c.getString(R.string.set_direct_sub)) { setTranscode(false) }
         body.addView(transcodeRow.view, lp(MATCH, WRAP))
         body.addView(directRow.view, lp(MATCH, WRAP))
         setTranscode(aa.transcode, save = false)
 
-        body.addView(c.sectionTitle("Разрешение видео"))
+        body.addView(c.sectionTitle(c.getString(R.string.set_resolution)))
         for (m in VideoMode.values()) {
-            val row = RadioRow(c, m.title, m.sub) { setVideoMode(m) }
+            val row = RadioRow(c, c.getString(m.titleRes), c.getString(m.subRes)) { setVideoMode(m) }
             modeRows[m] = row
             body.addView(row.view, lp(MATCH, WRAP))
         }
-        modeNote = c.text("Применится при следующем подключении.", 13f, 400, c.clr(R.color.on2))
+        modeNote = c.text(c.getString(R.string.set_apply_next), 13f, 400, c.clr(R.color.on2))
         body.addView(modeNote, lp(WRAP, WRAP).margins(c, 8, 2, 8, 0))
         refreshVideoMode()
 
-        body.addView(c.sectionTitle("Частота кадров"))
+        body.addView(c.sectionTitle(c.getString(R.string.set_fps)))
         for (f in FpsSetting.values()) {
-            val row = RadioRow(c, f.title, f.sub) { setFps(f) }
+            val row = RadioRow(c, c.getString(f.titleRes), c.getString(f.subRes)) { setFps(f) }
             fpsRows[f] = row
             body.addView(row.view, lp(MATCH, WRAP))
         }
         body.addView(
-            c.text("Применится при следующем подключении. В прямом пробросе частота не регулируется.", 13f, 400, c.clr(R.color.on2)),
+            c.text(c.getString(R.string.set_fps_note), 13f, 400, c.clr(R.color.on2)),
             lp(WRAP, WRAP).margins(c, 8, 2, 8, 0),
         )
         refreshFps()
 
-        body.addView(c.sectionTitle("Сертификат ГУ"))
+        body.addView(c.sectionTitle(c.getString(R.string.set_cert)))
         body.addView(certCard())
 
-        body.addView(c.sectionTitle("Автозапуск сервера ГУ"))
+        body.addView(c.sectionTitle(c.getString(R.string.set_autostart)))
         body.addView(autostartCard())
 
-        body.addView(c.sectionTitle("Микрофон"))
+        body.addView(c.sectionTitle(c.getString(R.string.set_mic)))
         micNote = c.text("", 13f, 400, c.clr(R.color.warn))
-        for ((m, title, sub) in listOf(
-            Triple(MicMode.CAR, "Машина", "Микрофон магнитолы"),
-            Triple(MicMode.PHONE, "Телефон", "Микрофон телефона, нужен доступ к записи звука"),
-            Triple(MicMode.AUTO, "Авто", "Сначала машина, при молчании 2 с — телефон"),
+        for ((m, titleRes, subRes) in listOf(
+            Triple(MicMode.CAR, R.string.mic_car_title, R.string.mic_car_sub),
+            Triple(MicMode.PHONE, R.string.mic_phone_title, R.string.mic_phone_sub),
+            Triple(MicMode.AUTO, R.string.mic_auto_title, R.string.mic_auto_sub),
         )) {
-            val row = RadioRow(c, title, sub) { setMic(m) }
+            val row = RadioRow(c, c.getString(titleRes), c.getString(subRes)) { setMic(m) }
             micRows[m] = row
             body.addView(row.view, lp(MATCH, WRAP))
         }
@@ -106,13 +120,13 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         refreshMic()
 
         val links = c.card().apply {
-            addView(link(R.drawable.ic_report, "Сообщить о проблеме", "лог + отчёт", false) { LogShare.shareReport(c) })
+            addView(link(R.drawable.ic_report, c.getString(R.string.set_report_title), c.getString(R.string.set_report_note), false) { LogShare.shareReport(c) })
             addView(c.divider())
-            addView(link(R.drawable.ic_refresh_btn, "Пройти настройку заново", null, false) { host.showOnboarding(rerun = true) })
+            addView(link(R.drawable.ic_refresh_btn, c.getString(R.string.set_rerun_setup), null, false) { host.showOnboarding(rerun = true) })
             addView(c.divider())
-            addView(link(R.drawable.ic_check, "Проверить готовность", null, false) { host.showOnboarding(checklist = true) })
+            addView(link(R.drawable.ic_check, c.getString(R.string.set_check_ready), null, false) { host.showOnboarding(checklist = true) })
             addView(c.divider())
-            addView(link(R.drawable.ic_terminal, "Для разработчиков", null, true) { host.showDev() })
+            addView(link(R.drawable.ic_terminal, c.getString(R.string.set_for_devs), null, true) { host.showDev() })
         }
         body.addView(links, lp(MATCH, WRAP).margins(c, 0, 12, 0, 0))
 
@@ -122,9 +136,9 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         } catch (_: Exception) {
             "?"
         }
-        body.addView(c.text("Headswap $ver · мост для ГУ с CarLife", 13f, 400, c.clr(R.color.on2)).apply { gravity = Gravity.CENTER }, lp(MATCH, WRAP))
+        body.addView(c.text(c.getString(R.string.set_footer, ver), 13f, 400, c.clr(R.color.on2)).apply { gravity = Gravity.CENTER }, lp(MATCH, WRAP))
 
-        view = scaffold(c, "Настройки", { host.back() }, body)
+        view = scaffold(c, c.getString(R.string.set_title), { host.back() }, body)
     }
 
     override fun onShow() {
@@ -151,6 +165,18 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         }
     }
 
+    private fun setLang(tag: String) {
+        if (AppLocale.get(ctx) == tag) return
+        AppLocale.set(ctx, tag)
+        refreshLang()
+        if (AppLocale.needsRecreate) host.recreate()      // на 33+ activity пересоздаёт система
+    }
+
+    private fun refreshLang() {
+        val cur = AppLocale.get(ctx)
+        for ((tag, row) in langRows) row.setSelected(cur == tag)
+    }
+
     private fun setTranscode(on: Boolean, save: Boolean = true) {
         if (save) aa.transcode = on
         transcodeRow.setSelected(on)
@@ -170,7 +196,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         for ((m, row) in modeRows) {
             val blocked = m.needsTranscode && !aa.transcode
             row.setSelected(m == shown)
-            row.setSub(if (blocked) "Нужно перекодирование" else m.sub)
+            row.setSub(if (blocked) ctx.getString(R.string.set_needs_transcode) else ctx.getString(m.subRes))
             row.view.alpha = if (blocked) 0.45f else 1f
         }
     }
@@ -205,7 +231,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         seg.addView(hur, lp(0, c.dp(48), 1f))
         refreshCert()
         card.addView(seg, lp(MATCH, WRAP))
-        card.addView(c.text("Смените, если Android Auto не подключается", 14f, 400, c.clr(R.color.on2)).apply { pad(c, 6, 0, 6, 0) })
+        card.addView(c.text(c.getString(R.string.set_cert_hint), 14f, 400, c.clr(R.color.on2)).apply { pad(c, 6, 0, 6, 0) })
         return card
     }
 
@@ -223,13 +249,13 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         val c = ctx
         val card = c.vbox().apply { background = c.shape(c.clr(R.color.surf), 20) }
         card.addView(
-            ToggleRow(c, "Автозапуск сервера ГУ", "При подключении кабеля и после сессии AA", aa.autoServer, 72, false, 17f, 14f) { aa.autoServer = it }.view,
+            ToggleRow(c, c.getString(R.string.set_autostart), c.getString(R.string.set_autostart_sub), aa.autoServer, 72, false, 17f, 14f) { aa.autoServer = it }.view,
             lp(MATCH, WRAP),
         )
         card.addView(c.divider())
         val row = c.hbox(12).apply { pad(c, 16, 10, 12, 10); minimumHeight = c.dp(64) }
         svcStatus = c.text("", 14f, 400, c.clr(R.color.on2))
-        svcButton = c.text("Включить", 15f, 600, c.clr(R.color.acc)).apply {
+        svcButton = c.text(c.getString(R.string.set_autostart_enable), 15f, 600, c.clr(R.color.acc)).apply {
             gravity = Gravity.CENTER
             pad(c, 14, 0, 14, 0)
             background = c.rippleBg(null, 20)
@@ -246,11 +272,13 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private fun refreshService() {
         val c = ctx
         val connected = AutoServer.isConnected
-        svcStatus.text = when {
-            connected -> "Служба спецвозможностей подключена"
-            AutoServer.isListed(c) -> "Служба включена, но не подключена"
-            else -> "Служба спецвозможностей выключена"
-        }
+        svcStatus.text = c.getString(
+            when {
+                connected -> R.string.set_svc_connected
+                AutoServer.isListed(c) -> R.string.set_svc_not_connected
+                else -> R.string.set_svc_off
+            },
+        )
         svcStatus.setTextColor(c.clr(if (connected) R.color.ok else R.color.warn))
         svcButton.visibility = if (connected) View.GONE else View.VISIBLE
     }
@@ -266,7 +294,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private fun refreshMic() {
         for ((m, row) in micRows) row.setSelected(aa.micMode == m)
         val missing = aa.micMode != MicMode.CAR && ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-        micNote.text = if (missing) "Нет доступа к записи звука: микрофон телефона не заработает." else ""
+        micNote.text = if (missing) ctx.getString(R.string.mic_no_permission) else ""
         micNote.visibility = if (missing) View.VISIBLE else View.GONE
     }
 }

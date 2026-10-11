@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dev_title">For developers</string>
+
+    <string name="dev_section_mic">Head unit microphone</string>
+    <string name="dev_mic_vr_title" translatable="false">MODULE_STATUS VR</string>
+    <string name="dev_mic_vr_sub">Send VR 1/0 together with MIC_RECORD_* (like Baidu)</string>
+
+    <string name="dev_section_actions">Actions</string>
+    <string name="dev_action_scan">Scan</string>
+    <string name="dev_action_stop_bridge">Stop bridge</string>
+    <string name="dev_action_restart_server">Restart head unit server</string>
+    <string name="dev_action_aa_settings">Android Auto settings</string>
+    <string name="dev_action_aa_selftest" translatable="false">AA selftest</string>
+    <string name="dev_action_mic_test" translatable="false">Mic test</string>
+    <string name="dev_action_enable_autostart">Enable server autostart</string>
+
+    <string name="dev_section_status">Status</string>
+    <string name="dev_section_log">Log</string>
+    <plurals name="dev_log_lines">
+        <item quantity="one">%d line</item>
+        <item quantity="other">%d lines</item>
+    </plurals>
+    <string name="dev_log_meta">%1$s · %2$s</string>
+
+    <string name="dev_log_share">Share log</string>
+    <string name="dev_log_save_zip">Save .zip</string>
+    <string name="dev_log_clear">Clear</string>
+    <string name="dev_log_archive_note">The archive has: log, phone model and Android version, bridge settings, head unit data. No contacts or location.</string>
+
+    <string name="dev_section_notes">Notes</string>
+    <string name="dev_notes_adb">For adb on HyperOS, turn on “Install via USB” and “USB debugging (Security settings)” in developer options. The bridge does not need them.</string>
+    <string name="dev_open_dev_settings">Open developer options</string>
+    <string name="dev_open_failed">Can\'t open: %1$s</string>
+
+    <string name="dev_clear_title">Clear log?</string>
+    <string name="dev_clear_message">Lines on the screen will be erased and old headswap-*.log files will be deleted. The current file stays.</string>
+    <string name="dev_clear_confirm">Clear</string>
+    <string name="dev_clear_cancel">Cancel</string>
+    <plurals name="dev_deleted_old_files">
+        <item quantity="one">Deleted %d old file</item>
+        <item quantity="other">Deleted %d old files</item>
+    </plurals>
+</resources>

@@ -4,6 +4,8 @@ import android.content.Context
 import android.hardware.usb.UsbManager
 import android.os.SystemClock
 import com.yegorkapomidorka.headswap.CarLifeState
+import com.yegorkapomidorka.headswap.R
+import com.yegorkapomidorka.headswap.aa.AaCreds
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.autosrv.AutoResult
@@ -26,9 +28,9 @@ data class HomeState(
     val phase: Phase,
     val tone: Tone,
     val icon: HeroIcon,
-    val title: String,
-    val sub: String,
-    val stages: List<Pair<String, Pair<StageState, String>>>,
+    val title: UiText,
+    val sub: UiText,
+    val stages: List<Pair<UiText, Pair<StageState, UiText>>>,
     /** Оставшиеся секунды grace (только RECONNECTING), иначе -1. */
     val graceLeftS: Int,
     val graceTotalS: Int,
@@ -36,8 +38,8 @@ data class HomeState(
     val outline: OutlineAction?,
     val logLink: Boolean,
     val showChain: Boolean,
-    val notifTitle: String,
-    val notifText: String,
+    val notifTitle: UiText,
+    val notifText: UiText,
 )
 
 class Inputs(
@@ -54,14 +56,19 @@ class Inputs(
     val graceTotalS: Int,
     val usbAudio: Boolean,
     /** Мост не стартует из-за настройки (нет сертификата head unit): текст для пользователя. */
-    val setupError: String? = null,
+    val setupError: UiText? = null,
     /** Размер видео на ГУ («1280×720»): фактический режим сессии. */
     val videoRes: String = "1280×720",
 )
 
 object HomeLogic {
-    val LABELS = listOf("Сервер ГУ", "Магнитола", "Android Auto", "Видео", "Звук по USB")
-    private const val TEXT_START_CHAIN = "Запускайте перед каждой поездкой: после сессии сервер выключается."
+    val LABELS = listOf(
+        UiText.res(R.string.home_stage_server), UiText.res(R.string.home_stage_headunit), UiText.res(R.string.home_stage_aa),
+        UiText.res(R.string.home_stage_video), UiText.res(R.string.home_stage_audio),
+    )
+    private val NONE = UiText.raw("")
+    private val CARLIFE = UiText.raw("CarLife 2.0")
+    private val TEXT_START_CHAIN = UiText.res(R.string.home_sub_start_chain)
 
     fun compute(i: Inputs): HomeState {
         val st = i.aaStatus
@@ -71,97 +78,101 @@ object HomeLogic {
         val total = if (i.graceTotalS > 0) i.graceTotalS else 8
         return when {
             i.setupError != null && !i.bridgeRunning -> state(
-                Phase.ERROR, Tone.ERR, HeroIcon.ALERT, "Мост не запущен", i.setupError,
+                Phase.ERROR, Tone.ERR, HeroIcon.ALERT, UiText.res(R.string.home_title_no_bridge), i.setupError,
                 listOf(
-                    StageState.ERR to "нет сертификата", StageState.PEND to "", StageState.PEND to "",
-                    StageState.PEND to "", StageState.PEND to "",
+                    StageState.ERR to UiText.res(R.string.home_stage_no_cert), StageState.PEND to NONE, StageState.PEND to NONE,
+                    StageState.PEND to NONE, StageState.PEND to NONE,
                 ),
                 logLink = true,
-                notifTitle = "Мост не запущен", notifText = i.setupError,
+                notifTitle = UiText.res(R.string.home_title_no_bridge), notifText = i.setupError,
             )
             reconnecting -> {
                 val left = i.graceLeftS.coerceAtLeast(0)
                 state(
-                    Phase.RECONNECTING, Tone.WARN, HeroIcon.REFRESH, "Восстанавливаю связь",
-                    "USB отключился. Сессия Android Auto ждёт до $total с.",
+                    Phase.RECONNECTING, Tone.WARN, HeroIcon.REFRESH, UiText.res(R.string.home_title_reconnecting),
+                    UiText.res(R.string.home_sub_reconnecting, total),
                     listOf(
-                        StageState.DONE to "держит сессию", StageState.ACTIVE to "переподключаю",
-                        StageState.PAUSE to "на паузе", StageState.PAUSE to "на паузе", StageState.PAUSE to "на паузе",
+                        StageState.DONE to UiText.res(R.string.home_stage_holds), StageState.ACTIVE to UiText.res(R.string.home_stage_reconnecting),
+                        StageState.PAUSE to UiText.res(R.string.home_stage_paused), StageState.PAUSE to UiText.res(R.string.home_stage_paused),
+                        StageState.PAUSE to UiText.res(R.string.home_stage_paused),
                     ),
                     outline = OutlineAction.STOP, graceLeft = left, graceTotal = total,
-                    notifText = "USB отключился · ещё $left с",
+                    notifText = UiText.res(R.string.notif_reconnecting, left),
                 )
             }
             connected -> state(
-                Phase.CONNECTED, Tone.OK, HeroIcon.CAR, "Всё работает",
-                "Android Auto на экране машины. Телефон можно убрать.",
+                Phase.CONNECTED, Tone.OK, HeroIcon.CAR, UiText.res(R.string.home_title_ok),
+                UiText.res(R.string.home_sub_ok),
                 listOf(
-                    StageState.DONE to "работает", StageState.DONE to "CarLife 2.0", StageState.DONE to "подключён",
-                    StageState.DONE to i.videoRes,
-                    if (i.usbAudio) StageState.DONE to "USB" else StageState.PEND to "выключен",
+                    StageState.DONE to UiText.res(R.string.home_stage_working), StageState.DONE to CARLIFE,
+                    StageState.DONE to UiText.res(R.string.home_stage_connected),
+                    StageState.DONE to UiText.raw(i.videoRes),
+                    if (i.usbAudio) StageState.DONE to UiText.raw("USB") else StageState.PEND to UiText.res(R.string.home_stage_off),
                 ),
                 outline = OutlineAction.STOP,
-                notifText = if (i.usbAudio) "Видео · звук по USB" else "Видео",
+                notifText = UiText.res(if (i.usbAudio) R.string.notif_video_usb else R.string.notif_video),
             )
             refused -> state(
-                Phase.OFF, Tone.WARN, HeroIcon.POWER, "Сервер не запущен",
-                "Кабель подключён, но сервер ГУ не отвечает. $TEXT_START_CHAIN",
+                Phase.OFF, Tone.WARN, HeroIcon.POWER, UiText.res(R.string.home_title_off),
+                UiText.res(R.string.home_sub_refused, TEXT_START_CHAIN),
                 listOf(
-                    StageState.TODO to "не запущен", StageState.DONE to "CarLife 2.0", StageState.PEND to "",
-                    StageState.PEND to "", StageState.PEND to "",
+                    StageState.TODO to UiText.res(R.string.home_stage_not_started), StageState.DONE to CARLIFE, StageState.PEND to NONE,
+                    StageState.PEND to NONE, StageState.PEND to NONE,
                 ),
                 primary = PrimaryAction.START_SERVER, showChain = true,
-                notifText = "Сервер ГУ не запущен",
+                notifText = UiText.res(R.string.notif_server_off),
             )
             i.bridgeRunning -> state(
-                Phase.WAITING, Tone.PRI, HeroIcon.PLUG, "Подключаюсь",
-                if ("отключился" in st) "Android Auto отключился, перезапускаю сервер ГУ." else "Кабель подключён. Жду Android Auto.",
+                Phase.WAITING, Tone.PRI, HeroIcon.PLUG, UiText.res(R.string.home_title_connecting),
+                UiText.res(if ("отключился" in st) R.string.home_sub_aa_dropped else R.string.home_sub_cable_ok),
                 listOf(
-                    StageState.ACTIVE to "подключаюсь",
-                    if (i.protocolKnown) StageState.DONE to "CarLife 2.0" else StageState.ACTIVE to "рукопожатие",
-                    StageState.PEND to "", StageState.PEND to "", StageState.PEND to "",
+                    StageState.ACTIVE to UiText.res(R.string.home_stage_connecting),
+                    if (i.protocolKnown) StageState.DONE to CARLIFE else StageState.ACTIVE to UiText.res(R.string.home_stage_handshake),
+                    StageState.PEND to NONE, StageState.PEND to NONE, StageState.PEND to NONE,
                 ),
                 outline = OutlineAction.STOP,
-                notifText = "Кабель подключён · жду Android Auto",
+                notifText = UiText.res(R.string.notif_cable_waiting),
             )
             i.lost -> state(
-                Phase.ERROR, Tone.ERR, HeroIcon.ALERT, "Связь потеряна",
-                "Обрыв дольше $total с. Перезапустите сервер ГУ и переподключите кабель.",
+                Phase.ERROR, Tone.ERR, HeroIcon.ALERT, UiText.res(R.string.home_title_lost),
+                UiText.res(R.string.home_sub_lost, total),
                 listOf(
-                    StageState.ERR to "закрыт", StageState.DONE to "CarLife 2.0", StageState.ERR to "отключён",
-                    StageState.PEND to "", StageState.PEND to "",
+                    StageState.ERR to UiText.res(R.string.home_stage_closed), StageState.DONE to CARLIFE,
+                    StageState.ERR to UiText.res(R.string.home_stage_disconnected),
+                    StageState.PEND to NONE, StageState.PEND to NONE,
                 ),
                 primary = PrimaryAction.RESTART_SERVER, logLink = true,
-                notifTitle = "Перезапустите сервер ГУ", notifText = "Связь потеряна дольше $total с",
+                notifTitle = UiText.res(R.string.notif_restart_title), notifText = UiText.res(R.string.notif_lost, total),
             )
             i.serverUp || i.autoReady -> state(
-                Phase.WAITING, Tone.PRI, HeroIcon.PLUG, "Готов к поездке",
-                if (i.serverUp) "Подключите телефон к магнитоле кабелем." else "Подключите телефон к магнитоле кабелем. Сервер ГУ запущу сам.",
+                Phase.WAITING, Tone.PRI, HeroIcon.PLUG, UiText.res(R.string.home_title_ready),
+                UiText.res(if (i.serverUp) R.string.home_sub_ready else R.string.home_sub_ready_auto),
                 listOf(
-                    StageState.DONE to (if (i.serverUp) "запущен" else "запущу сам"), StageState.ACTIVE to "ждём кабель",
-                    StageState.PEND to "", StageState.PEND to "", StageState.PEND to "",
+                    StageState.DONE to UiText.res(if (i.serverUp) R.string.home_stage_started else R.string.home_stage_auto),
+                    StageState.ACTIVE to UiText.res(R.string.home_stage_wait_cable),
+                    StageState.PEND to NONE, StageState.PEND to NONE, StageState.PEND to NONE,
                 ),
                 outline = OutlineAction.OPEN_AA,
-                notifText = if (i.serverUp) "Сервер ГУ запущен" else "Жду кабель",
+                notifText = UiText.res(if (i.serverUp) R.string.notif_server_started else R.string.notif_wait_cable),
             )
             else -> state(
-                Phase.OFF, Tone.WARN, HeroIcon.POWER, "Сервер не запущен", TEXT_START_CHAIN,
+                Phase.OFF, Tone.WARN, HeroIcon.POWER, UiText.res(R.string.home_title_off), TEXT_START_CHAIN,
                 listOf(
-                    StageState.TODO to "не запущен", StageState.PEND to "", StageState.PEND to "",
-                    StageState.PEND to "", StageState.PEND to "",
+                    StageState.TODO to UiText.res(R.string.home_stage_not_started), StageState.PEND to NONE, StageState.PEND to NONE,
+                    StageState.PEND to NONE, StageState.PEND to NONE,
                 ),
                 primary = PrimaryAction.START_SERVER, showChain = true,
-                notifText = "Сервер ГУ не запущен",
+                notifText = UiText.res(R.string.notif_server_off),
             )
         }
     }
 
     private fun state(
-        phase: Phase, tone: Tone, icon: HeroIcon, title: String, sub: String,
-        stages: List<Pair<StageState, String>>,
+        phase: Phase, tone: Tone, icon: HeroIcon, title: UiText, sub: UiText,
+        stages: List<Pair<StageState, UiText>>,
         primary: PrimaryAction? = null, outline: OutlineAction? = null, logLink: Boolean = false,
         showChain: Boolean = false, graceLeft: Int = -1, graceTotal: Int = 0,
-        notifTitle: String = title, notifText: String,
+        notifTitle: UiText = title, notifText: UiText,
     ) = HomeState(
         phase, tone, icon, title, sub, LABELS.zip(stages), graceLeft, graceTotal,
         primary, outline, logLink, showChain, notifTitle, notifText,
@@ -254,7 +265,8 @@ object HeadswapStatus {
             graceLeftS = left,
             graceTotalS = graceTotalS,
             usbAudio = aaPrefs.usbAudio,
-            setupError = AaState.setupError,
+            // известный текст нет-сертификата подменяем ресурсом, остальные ошибки показываем как есть
+            setupError = AaState.setupError?.let { if (it == AaCreds.MISSING_TEXT) UiText.res(R.string.home_err_no_cert) else UiText.raw(it) },
             videoRes = (CarLifeState.videoMode ?: aaPrefs.videoMode.effective(aaPrefs.transcode)).outLabel,
         )
     }
