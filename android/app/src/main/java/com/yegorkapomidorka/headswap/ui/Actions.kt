@@ -12,6 +12,7 @@ import android.hardware.usb.UsbManager
 import android.provider.Settings
 import android.widget.Toast
 import com.yegorkapomidorka.headswap.MainActivity
+import com.yegorkapomidorka.headswap.AppLocale
 import com.yegorkapomidorka.headswap.AppLog
 import com.yegorkapomidorka.headswap.BridgeService
 import com.yegorkapomidorka.headswap.CarLifeState
@@ -90,7 +91,7 @@ object Actions {
             AppLog.i("открыты настройки Android Auto")
         } catch (e: Exception) {
             AppLog.e("не открыть настройки Android Auto", e)
-            Toast.makeText(ctx, ctx.getString(R.string.act_open_aa_failed, "${e.javaClass.simpleName}: ${e.message}"), Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, AppLocale.wrap(ctx).getString(R.string.act_open_aa_failed, "${e.javaClass.simpleName}: ${e.message}"), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -99,7 +100,7 @@ object Actions {
         if (!AutoServer.isConnected) {
             AppLog.i("AUTOSRV: служба спецвозможностей не подключена, перезапускать нечем")
             if (fromCmd || ctx !is Activity) {
-                Toast.makeText(ctx, ctx.getString(R.string.act_service_off), Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, AppLocale.wrap(ctx).getString(R.string.act_service_off), Toast.LENGTH_LONG).show()
             } else {
                 enableServiceDialog(ctx)
             }
@@ -118,7 +119,7 @@ object Actions {
             restartServer(ctx)
         } else {
             if (AaPrefs(ctx).autoServer) {
-                Toast.makeText(ctx, ctx.getString(R.string.act_autostart_off), Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, AppLocale.wrap(ctx).getString(R.string.act_autostart_off), Toast.LENGTH_LONG).show()
             }
             HeadswapStatus.markServerRequested()
             openAaSettings(ctx)
