@@ -328,6 +328,7 @@ class CarLifeSession(
             Msg.VIDEO_ENCODER_START -> onVideoStart()
             Msg.VIDEO_ENCODER_PAUSE -> {
                 paused = true
+                bridge.onCarlifePause()
                 AppLog.i("видео: PAUSE, кадры не шлю")
             }
             Msg.VIDEO_ENCODER_RESET -> {

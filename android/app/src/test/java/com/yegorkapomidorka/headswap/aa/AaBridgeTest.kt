@@ -414,12 +414,35 @@ class AaBridgeAudioTest {
     }
 
     @Test
-    fun carlifeStartResetsInit() {
+    fun carlifeStartAfterPauseResetsInit() {
+        core.onCarlifeStart()
+        core.onAudioData(AapMessages.CH_AUDIO_MEDIA, pcm(100), 1)
+        core.onCarlifePause()
+        core.onCarlifeStart()
+        core.onAudioData(AapMessages.CH_AUDIO_MEDIA, pcm(100), 2)
+        assertEquals(listOf(0x30001, 0x30006, 0x30001, 0x30006), link.audio.map { it.type })
+    }
+
+    @Test
+    fun carlifeStartWithoutPauseKeepsAudio() {
+        // Desay G6S: START на каждое нажатие NAVI/MEDIA без PAUSE - повторный INIT рвал звук
         core.onCarlifeStart()
         core.onAudioData(AapMessages.CH_AUDIO_MEDIA, pcm(100), 1)
         core.onCarlifeStart()
         core.onAudioData(AapMessages.CH_AUDIO_MEDIA, pcm(100), 2)
-        assertEquals(listOf(0x30001, 0x30006, 0x30001, 0x30006), link.audio.map { it.type })
+        assertEquals(listOf(0x30001, 0x30006, 0x30006), link.audio.map { it.type })
+        assertEquals(listOf(3 to 1), link.modules.toList())
+    }
+
+    @Test
+    fun startAfterReattachResetsInit() {
+        core.onCarlifeStart()
+        core.onAudioData(AapMessages.CH_AUDIO_MEDIA, pcm(100), 1)
+        val link2 = FakeLink()
+        core.attach(link2)
+        core.onCarlifeStart()
+        core.onAudioData(AapMessages.CH_AUDIO_MEDIA, pcm(100), 2)
+        assertEquals(listOf(0x30001, 0x30006), link2.audio.map { it.type })
     }
 
     @Test

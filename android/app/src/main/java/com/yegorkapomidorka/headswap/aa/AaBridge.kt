@@ -155,6 +155,7 @@ class AaBridgeCore(
     private val ttsStopTimer = AudioTimer()
     private val mediaReleaseTimer = AudioTimer()
     private val voiceExitTimer = AudioTimer()
+    private var carlifePaused = false          // VIDEO_ENCODER_PAUSE после последнего START
     private var naviSent = false
     private var mediaPaused = false            // MEDIA на ГУ стоит на PAUSE (STOP ещё не слали)
     private var mediaGuard = false             // TTS_STOP уже ушёл, ждём +300 мс до управляющих пакетов MEDIA
@@ -230,6 +231,7 @@ class AaBridgeCore(
         this.link = link
         active = Source.PLACEHOLDER
         carlifeStarted = false
+        carlifePaused = false
         gotIdr = false
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
         link.showPlaceholder(placeholderText)
@@ -239,8 +241,13 @@ class AaBridgeCore(
     // --- события CarLife ---
     @Synchronized
     fun onCarlifeStart() {
+        // Desay G6S (Mazda) шлёт START без PAUSE на каждое нажатие NAVI/MEDIA: звук уже идёт, повторный INIT
+        // посреди трека рвёт его на ГУ (лог 2026-10-11). Звук сбрасываем только на первом START и после PAUSE.
+        val warm = carlifeStarted && !carlifePaused
         carlifeStarted = true
-        resetAudio()                           // новый START: MEDIA/TTS init заново на первом пакете
+        carlifePaused = false
+        if (warm) log("BRIDGE CarLife START без PAUSE: звук не трогаю, INIT не повторяю", true)
+        else resetAudio()                      // новый START: MEDIA/TTS init заново на первом пакете
         gotIdr = false
         waitSince = if (aaVideoSeen) clockMs() - KEYFRAME_WAIT_MS else 0L
         lastKeyframeRequest = NEVER
@@ -253,6 +260,12 @@ class AaBridgeCore(
             keyframeRequests++
             peer?.requestKeyFrame()
         }
+    }
+
+    /** VIDEO_ENCODER_PAUSE от ГУ: следующий START - полный, со сбросом звука. */
+    @Synchronized
+    fun onCarlifePause() {
+        carlifePaused = true
     }
 
     /** FEATURE_CONFIG ГУ разобран; mode = значение AUDIO_TRANSMISSION_MODE (null - ключа нет). */
