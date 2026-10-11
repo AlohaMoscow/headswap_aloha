@@ -5,6 +5,8 @@ import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.os.PowerManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -111,6 +113,7 @@ class AccessibilityServerUi(private val svc: AutoServerService) : ServerUi {
     }
 
     override fun openAaSettings(): Boolean = try {
+        AaLabels.load(svc)
         svc.startActivity(
             Intent().setComponent(ComponentName(AA_PACKAGE, AA_SETTINGS_ACTIVITY))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -135,7 +138,54 @@ class AccessibilityServerUi(private val svc: AutoServerService) : ServerUi {
                 true
             } else false
         }
-        return target?.let { click(it) } ?: false
+        target?.let {
+            moreSearchSince = 0
+            return click(it)
+        }
+        // запасной путь без языка: ⋮ = самая правая кликабельная кнопка-иконка (без текста) в полосе тулбара сверху.
+        // Только после 1,5 с безуспешного поиска по описанию, чтобы не нажать соседнюю иконку, пока тулбар дорисовывается
+        // (на ru/en описание находится сразу). Ошибка не фатальна: без пунктов сервера в меню сценарий жмёт «назад».
+        val now = System.currentTimeMillis()
+        if (moreSearchSince == 0L) moreSearchSince = now
+        if (now - moreSearchSince < 1_500) return false
+        val overflow = findOverflowByPosition() ?: return false
+        moreSearchSince = 0
+        if (!moreFallbackLogged) {
+            moreFallbackLogged = true
+            AutoServer.log("кнопка «Ещё» не найдена по описанию, нажимаю по положению: ${describe(overflow)}")
+        }
+        return click(overflow)
+    }
+
+    private var moreFallbackLogged = false
+    private var moreSearchSince = 0L
+
+    private fun findOverflowByPosition(): AccessibilityNodeInfo? {
+        val screen = svc.resources.displayMetrics
+        val topLimit = screen.heightPixels / 6
+        val r = Rect()
+        var best: AccessibilityNodeInfo? = null
+        var bestRight = -1
+        walk { n ->
+            if (n.isClickable && n.isVisibleToUser && n.text.isNullOrBlank()) {
+                val cls = n.className?.toString() ?: ""
+                if (cls.endsWith("ImageView") || cls.endsWith("ImageButton") || cls.endsWith("Button")) {
+                    n.getBoundsInScreen(r)
+                    if (r.top < topLimit && r.width() > 0 && r.width() < screen.widthPixels / 4 && r.right > bestRight) {
+                        bestRight = r.right
+                        best = n
+                    }
+                }
+            }
+            false
+        }
+        return best?.takeIf { bestRight > screen.widthPixels * 3 / 4 }
+    }
+
+    private fun describe(n: AccessibilityNodeInfo): String {
+        val r = Rect()
+        n.getBoundsInScreen(r)
+        return "${n.className?.toString()?.substringAfterLast('.')}#${n.viewIdResourceName ?: ""}[${n.contentDescription ?: ""}] $r"
     }
 
     override fun texts(): List<String> {
@@ -182,7 +232,8 @@ class AccessibilityServerUi(private val svc: AutoServerService) : ServerUi {
             val t = n.text?.toString()
             val d = n.contentDescription?.toString()
             if (!t.isNullOrBlank() || !d.isNullOrBlank() || n.isClickable) {
-                sb.add("${n.className?.toString()?.substringAfterLast('.')}[${t ?: ""}|${d ?: ""}${if (n.isClickable) "|click" else ""}]")
+                val id = n.viewIdResourceName?.substringAfterLast('/')?.let { "#$it" } ?: ""
+                sb.add("${n.className?.toString()?.substringAfterLast('.')}$id[${t ?: ""}|${d ?: ""}${if (n.isClickable) "|click" else ""}]")
             }
             sb.size >= 60
         }
@@ -199,5 +250,45 @@ class AccessibilityServerUi(private val svc: AutoServerService) : ServerUi {
         const val AA_PACKAGE = "com.google.android.projection.gearhead"
         const val AA_SETTINGS_ACTIVITY = "com.google.android.projection.gearhead.companion.settings.DefaultSettingsActivity"
         private const val MAX_NODES = 600
+    }
+}
+
+/**
+ * Подписи пунктов меню сервера ГУ и кнопки ⋮ из ресурсов самого Android Auto: на том языке, на котором AA сейчас
+ * рисует интерфейс (системный), с подтянутыми языковыми сплитами. Так автоматизация не зависит от языка телефона.
+ * Имена ресурсов из AA 17.7 (aapt2 dump strings); если Google их переименует, останутся списки в AutoServerText.
+ * Нужен <queries> на пакет AA в манифесте (API 30+).
+ */
+object AaLabels {
+    private val START = listOf("menu_action_developer_head_unit_network_server")
+    private val STOP = listOf("menu_action_developer_head_unit_network_server_stop")
+    private val MORE = listOf("abc_action_menu_overflow_description", "mtrl_action_menu_overflow_description")
+
+    fun load(ctx: Context) {
+        val res = try {
+            ctx.packageManager.getResourcesForApplication(AccessibilityServerUi.AA_PACKAGE)
+        } catch (e: PackageManager.NameNotFoundException) {
+            AutoServer.log("подписи AA: пакет не виден (${e.javaClass.simpleName}), только встроенные списки")
+            AutoServerText.setAaLabels(emptyList(), emptyList(), emptyList())
+            return
+        } catch (e: Exception) {
+            AutoServer.log("подписи AA: ресурсы не открылись (${e.javaClass.simpleName}: ${e.message}), только встроенные списки")
+            AutoServerText.setAaLabels(emptyList(), emptyList(), emptyList())
+            return
+        }
+        fun read(names: List<String>): List<String> = names.mapNotNull { name ->
+            try {
+                @Suppress("DiscouragedApi")
+                val id = res.getIdentifier(name, "string", AccessibilityServerUi.AA_PACKAGE)
+                if (id == 0) null else res.getString(id).takeIf { it.isNotBlank() }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        val start = read(START)
+        val stop = read(STOP)
+        val more = read(MORE)
+        AutoServerText.setAaLabels(start, stop, more)
+        AutoServer.log("подписи AA (${res.configuration.locales.toLanguageTags()}): запустить=$start остановить=$stop ещё=$more")
     }
 }

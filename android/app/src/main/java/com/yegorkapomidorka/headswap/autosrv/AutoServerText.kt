@@ -29,6 +29,32 @@ object AutoServerText {
         "start headunit server",
     )
 
+    /**
+     * Подписи, прочитанные из ресурсов самого Android Auto на его текущем языке (AaLabels.load): работают на любом языке.
+     * Сравниваются целиком (после norm), не по contains: у незнакомого языка «запуск» может оказаться частью «остановки».
+     * Пусто = не прочитались (нет пакета, другое имя ресурса), тогда остаются только списки выше.
+     */
+    @Volatile
+    var aaStart: List<String> = emptyList()
+
+    @Volatile
+    var aaStop: List<String> = emptyList()
+
+    @Volatile
+    var aaMore: List<String> = emptyList()
+
+    fun setAaLabels(start: List<String>, stop: List<String>, more: List<String>) {
+        aaStart = start.map { norm(it) }.filter { it.isNotEmpty() }
+        aaStop = stop.map { norm(it) }.filter { it.isNotEmpty() }
+        aaMore = more.map { norm(it).trimEnd('.', '…', ' ') }.filter { it.isNotEmpty() }
+    }
+
+    private fun equalsAny(text: CharSequence?, normalized: List<String>): Boolean {
+        if (normalized.isEmpty()) return false
+        val t = norm(text)
+        return t.isNotEmpty() && t in normalized
+    }
+
     fun norm(s: CharSequence?): String =
         (s?.toString() ?: "").lowercase(Locale.ROOT).replace('ё', 'е').replace(' ', ' ')
             .replace(Regex("\\s+"), " ").trim()
@@ -39,9 +65,9 @@ object AutoServerText {
         return list.any { t.contains(norm(it)) }
     }
 
-    fun isStop(text: CharSequence?) = containsAny(text, STOP)
+    fun isStop(text: CharSequence?) = equalsAny(text, aaStop) || containsAny(text, STOP)
 
-    fun isStart(text: CharSequence?) = containsAny(text, START)
+    fun isStart(text: CharSequence?) = equalsAny(text, aaStart) || containsAny(text, START)
 
     /**
      * Кнопка «Ещё»: описание целиком равно варианту (без хвоста «...»); «more options» допускается как часть
@@ -50,6 +76,7 @@ object AutoServerText {
     fun isMore(desc: CharSequence?): Boolean {
         val t = norm(desc).trimEnd('.', '…', ' ')
         if (t.isEmpty()) return false
+        if (aaMore.any { t == it || (it.contains(' ') && t.contains(it)) }) return true
         return MORE.any { m ->
             val n = norm(m)
             t == n || (n.contains(' ') && t.contains(n))

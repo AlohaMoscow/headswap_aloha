@@ -49,6 +49,32 @@ class AutoServerTextTest {
     }
 
     @Test
+    fun labelsFromAndroidAutoResourcesMatchAnyLanguageExactly() {
+        try {
+            // как будто AA на немецком: подписи прочитаны из его ресурсов
+            AutoServerText.setAaLabels(
+                start = listOf("Server für Haupteinheit starten"),
+                stop = listOf("Server für Haupteinheit beenden"),
+                more = listOf("Weitere Optionen"),
+            )
+            assertTrue(AutoServerText.isStart("Server für Haupteinheit starten"))
+            assertTrue(AutoServerText.isStop("SERVER FÜR HAUPTEINHEIT BEENDEN"))
+            assertFalse(AutoServerText.isStart("Server für Haupteinheit beenden"))
+            assertFalse(AutoServerText.isStop("Server für Haupteinheit starten"))
+            assertFalse("только целиком, не по contains", AutoServerText.isStart("Server für Haupteinheit starten…"))
+            assertTrue(AutoServerText.isMore("Weitere Optionen"))
+            assertTrue(AutoServerText.isMore("Weitere Optionen, Schaltfläche"))
+            // встроенные ru/en списки продолжают работать вместе с подписями AA
+            assertTrue(AutoServerText.isStart("Start head unit server"))
+            assertTrue(AutoServerText.isStop("Остановить сервер головного устройства"))
+            assertTrue(AutoServerText.isMore("More options"))
+        } finally {
+            AutoServerText.setAaLabels(emptyList(), emptyList(), emptyList())
+        }
+        assertFalse(AutoServerText.isStart("Server für Haupteinheit starten"))
+    }
+
+    @Test
     fun moreButtonByContentDescription() {
         assertTrue(AutoServerText.isMore("Ещё"))
         assertTrue(AutoServerText.isMore("ЕЩЕ"))
