@@ -2,7 +2,9 @@
 
 Описание того, как приложение (роль MD, телефон) разговаривает с ГУ (роль HU) по протоколу CarLife 2.0. Реализовано в `android/` (`CarLifeSession.kt`, `Handshake.kt`, `Protocol.kt`). Основано на наблюдениях за реальной ГУ Honda Vezel 2024 и на открытых источниках, перечисленных в [carlife-protocol.md](carlife-protocol.md). Framing не менялся относительно версии 1.0: внешний `[chan u32 BE][8+len u32 BE]`, CMD 8 байт `[len u16][reserved u16=0][type u32]`, видео 12 байт `[len u32][time u32][type u32]`.
 
-Наблюдение на ГУ: она шлёт `HU_PROTOCOL_VERSION {2.0}` дважды, затем `CARLIFE_DATA_SUBSCRIBE`, и молчит, пока MD не прислал ничего, кроме MATCH. `HU_AUTHEN_REQUEST` эта ГУ не присылает, шифрования канала нет (в `HU_FEATURE_CONFIG_RESPONSE` ключ `CONTENT_ENCRYPTION` не объявляется).
+Наблюдение на ГУ Honda Vezel: она шлёт `HU_PROTOCOL_VERSION {2.0}` дважды, затем `CARLIFE_DATA_SUBSCRIBE`, и молчит, пока MD не прислал ничего, кроме MATCH. `HU_AUTHEN_REQUEST` эта ГУ не присылает, шифрования канала нет (в `HU_FEATURE_CONFIG_RESPONSE` ключ `CONTENT_ENCRYPTION` не объявляется).
+
+VW Tharu XR 2026 шлёт `HU_AUTHEN_REQUEST` и режет сообщения иначе: заголовок inner (8 байт) и тело идут отдельными внешними кадрами (`00 00 00 01 00 00 00 08` + `00 04 00 64 00 01 80 01`, затем `00 00 00 01 00 00 00 04` + `08 02 10 01`). `InnerAssembler` держит кадр, равный одному заголовку с declared len > 0, и дописывает следующие кадры того же канала до declared len (cmd-канал: заголовок 8 байт, data-каналы: 12; declared len > 1 МБ для cmd и > `MAX_OUTER_LEN` для data не удерживается). Сообщения целиком в одном кадре проходят без изменений.
 
 ## Последовательность
 
@@ -20,7 +22,8 @@ HU -> MD  0x18027 STATISTIC_INFO
 MD -> HU  0x1004B MD_AUTHEN_RESULT {true}   `08 01`
 MD -> HU  0x10051 MD_FEATURE_CONFIG_REQUEST (пусто)
 MD -> HU  0x10031 CAR_DATA_SUBSCRIBE        (пусто)
-HU -> MD  0x18048 HU_AUTHEN_REQUEST {randomValue}  (на проверенной ГУ не приходит; если придёт, только лог)
+HU -> MD  0x18048 HU_AUTHEN_REQUEST {randomValue}  (Honda не шлёт; VW Tharu шлёт)
+MD -> HU  0x10049 MD_AUTHEN_RESPONSE {encryptValue}  (сразу в ответ: RSA-подпись приватным ключом Baidu, Base64; ветка "2.0;" без ответа)
 HU -> MD  0x1804A HU_AUTHEN_RESULT                 (лог)
 HU -> MD  0x18052 HU_FEATURE_CONFIG_RESPONSE       (лог всех ключей; CONTENT_ENCRYPTION=1 -> только предупреждение)
 HU -> MD  0x18045/0x18046 SUBSCRIBE_START/STOP     (лог, данные не шлём)
@@ -51,8 +54,8 @@ MD -> HU  VIDEO [len][time=unix-сек][0x20001] + H.264 Annex-B; keepalive пр
 | 0x1004B | MD_AUTHEN_RESULT | MD->HU | `08 01` |
 | 0x10051 | MD_FEATURE_CONFIG_REQUEST | MD->HU | пусто |
 | 0x10031 | CAR_DATA_SUBSCRIBE | MD->HU | пусто |
-| 0x18048 | HU_AUTHEN_REQUEST | HU->MD | randomValue (string); эта ГУ не шлёт |
-| 0x10049 | MD_AUTHEN_RESPONSE | MD->HU | encryptValue (string); не используется |
+| 0x18048 | HU_AUTHEN_REQUEST | HU->MD | randomValue (string); Honda не шлёт, VW Tharu шлёт |
+| 0x10049 | MD_AUTHEN_RESPONSE | MD->HU | encryptValue (string): Base64 подписи `versionVerify(randomValue)` |
 | 0x1804A | HU_AUTHEN_RESULT | HU->MD | authenResult (bool) |
 | 0x18052 | HU_FEATURE_CONFIG_RESPONSE | HU->MD | CarlifeFeatureConfigList |
 | 0x18007 | VIDEO_ENCODER_INIT | HU->MD | `{w,h,fps}` |
@@ -83,7 +86,7 @@ SDK: при `SDK_INT >= 33` шлётся `sdk="29"`, `sdk_int=29`. На Android 
 
 ## Что не реализовано
 
-- MD_AUTHEN_RESPONSE: не отправляется. Проверенная ГУ не присылает `HU_AUTHEN_REQUEST`, вместо ответа достаточно `MD_AUTHEN_RESULT {true}` после `STATISTIC_INFO`. Если ГУ начнёт требовать подписанный ответ, приложение с ней не заработает.
+- MD_AUTHEN_RESPONSE для ветки `randomValue = "2.0;<rnd>"` (нативный `EncryptionUtils.getVerifyCode` у Baidu): не отправляется, только лог. Обычный `randomValue` подписывается как у Baidu 8.6.7, см. выше.
 - Шифрование канала: проверенная ГУ его не объявляет. Если `HU_FEATURE_CONFIG_RESPONSE` содержит CONTENT_ENCRYPTION=1, в лог пишется предупреждение; цепочка 0x1006A..0x1006E (RSA public key -> AES key -> ENCRYPT_READY, описана в carlife-protocol.md, §8) не сделана.
 - Данные подписки (turn-by-turn, музыка): DONE говорит supportFlag=true для moduleID 0 и 2, но после SUBSCRIBE_START данные не шлются.
 - JPEG-режим видео не поддерживается, шлём только H.264.

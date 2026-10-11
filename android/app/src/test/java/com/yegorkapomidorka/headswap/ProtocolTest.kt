@@ -338,6 +338,174 @@ class ProtocolTest {
         assertFalse(Handshake.isAuthV2(null))
     }
 
+    // ---------------- сборка inner по каналам ----------------
+
+    private class Got(val chan: Int, val msg: CmdMsg)
+
+    private fun runAssembler(all: ByteArray, step: Int): List<Got> {
+        val p = FrameParser()
+        val a = InnerAssembler()
+        val got = ArrayList<Got>()
+        var o = 0
+        while (o < all.size) {
+            val n = minOf(step, all.size - o)
+            p.feed(all, o, n) { ch, inner -> a.feed(ch, inner) { c, i -> got.add(Got(c, Wire.parseCmd(i)!!)) } }
+            o += n
+        }
+        assertEquals("step=$step pending", 0, p.pending())
+        assertEquals("step=$step waiting", 0, a.waiting())
+        return got
+    }
+
+    @Test
+    fun splitVersionGivesMajor2AndFullModuleList() {
+        // VW Tharu XR 2026: HU_PROTOCOL_VERSION заголовком и телом в разных кадрах; раньше читалось null.null -> модули как для 1.x
+        val got = runAssembler(hex("00 00 00 01 00 00 00 08 00 04 00 64 00 01 80 01 00 00 00 01 00 00 00 04 08 02 10 01"), 3)
+        assertEquals(1, got.size)
+        val f = PbReader.parse(got[0].msg.body)!!
+        assertEquals(2, PbReader.int(f, 1))
+        assertEquals(1, PbReader.int(f, 2))
+        val ids = PbReader.parse(Msgs.moduleStatusList(PbReader.int(f, 1)!!))!!
+            .filter { it.number == 2 }.map { PbReader.int(PbReader.parse(it.data!!)!!, 1) }
+        assertEquals(listOf(1, 2, 3, 4, 6, 8, 9), ids)
+    }
+
+    @Test
+    fun assemblerJoinsSplitHeaderAndBody() {
+        val rnd = "txGaIEnzYVCaFOEArS9O_0"
+        val all = hex("00 00 00 01 00 00 00 08  00 04 00 64 00 01 80 01") +
+            hex("00 00 00 01 00 00 00 04  08 02 10 01") +
+            hex("00 00 00 01 00 00 00 08  00 18 00 64 00 01 80 48") +
+            hex("00 00 00 01 00 00 00 18  0A 16") + rnd.toByteArray(Charsets.UTF_8)
+        for (step in listOf(1, 2, 3, 7, 8, 9, 12, 16, 1000)) {
+            val got = runAssembler(all, step)
+            assertEquals("step=$step", 2, got.size)
+            assertEquals(Ch.CMD, got[0].chan)
+            assertEquals(Msg.HU_PROTOCOL_VERSION, got[0].msg.type)
+            assertEquals(100, got[0].msg.resv)
+            assertFalse(got[0].msg.truncated)
+            assertArrayEquals(hex("08 02 10 01"), got[0].msg.body)
+            assertEquals(Msg.HU_AUTHEN_REQUEST, got[1].msg.type)
+            assertFalse(got[1].msg.truncated)
+            assertEquals(24, got[1].msg.body.size)
+            assertEquals(rnd, PbReader.str(PbReader.parse(got[1].msg.body)!!, 1))
+        }
+    }
+
+    @Test
+    fun assemblerJoinsBodyInSeveralFramesAndKeepsChannelsApart() {
+        val body = ByteArray(10) { (it + 1).toByte() }
+        val hdr = hex("00 0A 00 00 00 01 80 01")
+        val touch = Wire.cmdInner(Msg.TOUCH_ACTION, Msgs.touchAction(0, 640, 360))
+        val all = frame(Ch.CMD, hdr) +
+            frame(Ch.CMD, body.copyOfRange(0, 3)) +
+            frame(Ch.TOUCH, touch) + // другой канал не мешает
+            frame(Ch.CMD, body.copyOfRange(3, 4)) +
+            frame(Ch.CMD, body.copyOfRange(4, 10))
+        val got = runAssembler(all, 5)
+        assertEquals(listOf(Ch.TOUCH, Ch.CMD), got.map { it.chan })
+        assertEquals(Msg.TOUCH_ACTION, got[0].msg.type)
+        assertArrayEquals(body, got[1].msg.body)
+        assertFalse(got[1].msg.truncated)
+    }
+
+    @Test
+    fun assemblerJoinsDataChannelHeaderAndBody() {
+        val h264 = hex("00 00 00 01 67 AA BB")
+        val full = Wire.dataInner(Msg.VIDEO_DATA, 5, h264)
+        val all = frame(Ch.VIDEO, full.copyOfRange(0, 12)) + frame(Ch.VIDEO, h264)
+        val p = FrameParser()
+        val a = InnerAssembler()
+        val got = ArrayList<ByteArray>()
+        p.feed(all, 0, all.size) { c, i -> a.feed(c, i) { _, x -> got.add(x) } }
+        assertEquals(1, got.size)
+        assertArrayEquals(full, got[0])
+        assertFalse(Wire.parseData(got[0])!!.truncated)
+    }
+
+    @Test
+    fun assemblerPassesWholeFramesAsBefore() {
+        // сообщение одним кадром; тело короче declared -> TRUNCATED как раньше; len=0 -> как есть
+        val whole = Wire.cmdInner(Msg.HU_PROTOCOL_VERSION, Msgs.protocolVersion(1, 0))
+        val bad = hex("00 05 00 00 00 01 80 01 08 01")
+        val empty = Wire.cmdInner(Msg.VIDEO_ENCODER_START, null)
+        val all = frame(Ch.CMD, whole) + frame(Ch.CMD, bad) + frame(Ch.CMD, empty)
+        val got = runAssembler(all, 1000)
+        assertEquals(3, got.size)
+        assertFalse(got[0].msg.truncated)
+        assertTrue(got[1].msg.truncated)
+        assertEquals(5, got[1].msg.declaredLen)
+        assertEquals(Msg.VIDEO_ENCODER_START, got[2].msg.type)
+        // чужой inner (меньше заголовка) тоже проходит без изменений
+        val a = InnerAssembler()
+        val seen = ArrayList<ByteArray>()
+        a.feed(Ch.CMD, hex("00 01 02"), { _, i -> seen.add(i) })
+        assertEquals(1, seen.size)
+    }
+
+    @Test
+    fun assemblerDoesNotHoldAbsurdDeclaredLen() {
+        val a = InnerAssembler()
+        val seen = ArrayList<ByteArray>()
+        // data: len = 0x7FFFFFFF > MAX_OUTER_LEN, и отрицательный (>= 2^31)
+        a.feed(Ch.VIDEO, hex("7F FF FF FF 00 00 00 01 00 02 00 01"), { _, i -> seen.add(i) })
+        a.feed(Ch.VIDEO, hex("FF FF FF FF 00 00 00 01 00 02 00 01"), { _, i -> seen.add(i) })
+        assertEquals(2, seen.size)
+        assertEquals(0, a.waiting())
+    }
+
+    // ---------------- ответ на HU_AUTHEN_REQUEST ----------------
+
+    @Test
+    fun versionVerifyLikeBaidu() {
+        assertEquals("txGaIEnzYVCaFOEArS9O_00.00.00", HuAuth.versionVerify("txGaIEnzYVCaFOEArS9O_0"))
+        // длины равны (3 и 3): версия ГУ больше нашей -> обнуляется
+        assertEquals("abc_00.00.00", HuAuth.versionVerify("abc_9.0.0"))
+        assertEquals("abc_00.00.00", HuAuth.versionVerify("abc_8.6.8"))
+        // равна или меньше -> строка как есть
+        assertEquals("abc_8.6.7", HuAuth.versionVerify("abc_8.6.7"))
+        assertEquals("abc_8.6.6", HuAuth.versionVerify("abc_8.6.6"))
+        assertEquals("abc_1.9.9", HuAuth.versionVerify("abc_1.9.9"))
+        // старшая часть меньше решает, младшие не смотрим
+        assertEquals("abc_8.5.99", HuAuth.versionVerify("abc_8.5.99"))
+        // нечисловая часть пропускается (у Baidu исключение гасится)
+        assertEquals("abc_x.6.7", HuAuth.versionVerify("abc_x.6.7"))
+        // разная длина
+        assertEquals("abc_00.00.00", HuAuth.versionVerify("abc_1.0"))
+        // replace по всем вхождениям суффикса
+        assertEquals("a_00.00.00", HuAuth.versionVerify("a_1.0.0b_1.0.0"))
+        // без "_" подписывается как есть
+        assertEquals("plain", HuAuth.versionVerify("plain"))
+    }
+
+    @Test
+    fun v2BranchDetection() {
+        assertTrue(HuAuth.isV2Branch("2.0;abcdef"))
+        assertFalse(HuAuth.isV2Branch("txGaIEnzYVCaFOEArS9O_0"))
+        assertFalse(HuAuth.isV2Branch("1.0;abc"))
+        assertFalse(HuAuth.isV2Branch("2.0;")) // split даёт одну часть
+        assertNull(HuAuth.encryptValue("2.0;abcdef"))
+    }
+
+    @Test
+    fun authSignatureDecryptsWithPublicKey() {
+        val rnd = "txGaIEnzYVCaFOEArS9O_0"
+        val enc = HuAuth.encryptValue(rnd)!!
+        assertFalse(enc.contains("\n") || enc.contains("\r"))
+        val sig = java.util.Base64.getDecoder().decode(enc)
+        assertEquals(128, sig.size)
+        val priv = HuAuth.privateKey as java.security.interfaces.RSAPrivateCrtKey
+        val pub = java.security.KeyFactory.getInstance("RSA")
+            .generatePublic(java.security.spec.RSAPublicKeySpec(priv.modulus, priv.publicExponent))
+        val c = javax.crypto.Cipher.getInstance("RSA/ECB/PKCS1Padding")
+        c.init(javax.crypto.Cipher.DECRYPT_MODE, pub)
+        assertEquals("txGaIEnzYVCaFOEArS9O_00.00.00", String(c.doFinal(sig), Charsets.UTF_8))
+        // тело ответа: поле 1, string
+        val body = Msgs.authenResponse(enc)
+        assertEquals(enc, PbReader.str(PbReader.parse(body)!!, 1))
+        assertEquals(0x00010049, Msg.MD_AUTHEN_RESPONSE)
+    }
+
     @Test
     fun featureConfigParse() {
         fun item(k: String, v: Int) = PbWriter().string(1, k).int32(2, v).toByteArray()

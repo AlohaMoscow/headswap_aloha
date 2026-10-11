@@ -369,6 +369,50 @@ class FrameParser {
 }
 
 /**
+ * Сборка inner-сообщений по каналам. Часть ГУ (VW Tharu XR 2026) шлёт заголовок inner (8 байт для CMD/TOUCH,
+ * 12 для data-каналов) и тело отдельными внешними кадрами. Если кадр - ровно заголовок с declared len > 0,
+ * он удерживается, и кадры этого же канала дописываются, пока не наберётся declared len; потом уходит одно inner.
+ * Сообщения целиком в одном кадре (Honda Vezel) проходят как есть, в том числе с неверным declared len.
+ */
+class InnerAssembler {
+    private class Pending(val declared: Int, val buf: java.io.ByteArrayOutputStream, val hdrLen: Int)
+
+    private val pending = HashMap<Int, Pending>()
+
+    fun feed(chan: Int, inner: ByteArray, sink: (chan: Int, inner: ByteArray) -> Unit) {
+        val p = pending[chan]
+        if (p != null) {
+            p.buf.write(inner, 0, inner.size)
+            if (p.buf.size() - p.hdrLen >= p.declared) {
+                pending.remove(chan)
+                sink(chan, p.buf.toByteArray())
+            }
+            return
+        }
+        val cmd = Ch.isCmdStyle(chan)
+        val hdrLen = if (cmd) 8 else 12
+        if (inner.size == hdrLen) {
+            val declared = if (cmd) Wire.u16(inner, 0) else Wire.u32(inner, 0)
+            val limit = if (cmd) MAX_CMD_DECLARED else Wire.MAX_OUTER_LEN
+            if (declared in 1..limit) {
+                val buf = java.io.ByteArrayOutputStream(hdrLen + declared.coerceAtMost(65536))
+                buf.write(inner, 0, inner.size)
+                pending[chan] = Pending(declared, buf, hdrLen)
+                return
+            }
+        }
+        sink(chan, inner)
+    }
+
+    /** Сколько каналов сейчас ждут тело. */
+    fun waiting() = pending.size
+
+    companion object {
+        const val MAX_CMD_DECLARED = 1024 * 1024
+    }
+}
+
+/**
  * Данные для MD_INFO (поля CarlifeDeviceInfo).
  * Источник: CarlifeDeviceInfoManager.getCarlifeDeviceInfoBuilder (Baidu CarLife 8.6.7, :70-114).
  */

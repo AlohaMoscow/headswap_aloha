@@ -47,6 +47,7 @@ class CarLifeSession(
     private val output = FileOutputStream(pfd.fileDescriptor)
     private val queue = LinkedBlockingQueue<Out>()
     private val parser = FrameParser()
+    private val assembler = InnerAssembler()
     private val closed = AtomicBoolean(false)
     private val sched: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "cl-sched") }
     private var reader: Thread? = null
@@ -168,7 +169,7 @@ class CarLifeSession(
                 AppLog.detail("RAW rx read=$n bytes: ${Hex.compact(buf.copyOf(minOf(n, 32)), 32)}")
                 if (desync) continue
                 try {
-                    parser.feed(buf, 0, n) { chan, inner -> dispatch(chan, inner) }
+                    parser.feed(buf, 0, n) { chan, inner -> assembler.feed(chan, inner) { c, i -> dispatch(c, i) } }
                 } catch (e: ProtocolDesync) {
                     desync = true
                     AppLog.e("РАССИНХРОН потока: ${e.message}; дальше только сырой дамп")
@@ -280,8 +281,21 @@ class CarLifeSession(
                 AppLog.i("== ГУ ШЛЁТ HU_AUTHEN_REQUEST randomValue=$authRandom")
                 AppLog.i("== AUTHEN randomValue ${if (v2) "начинается с \"2.0;\"" else "не начинается с \"2.0;\""}")
                 CarLifeState.auth = "HU_AUTHEN_REQUEST пришёл, ${if (v2) "2.0;" else "не 2.0;"}"
-                // ГУ этого типа AUTHEN не запрашивает; если запросит - ответа нет (MD_AUTHEN_RESULT{true} уходит после STATISTIC_INFO)
-                AppLog.i("на HU_AUTHEN_REQUEST не отвечаю")
+                // как Baidu 8.6.7 (PrivateKeyManager.encryptContentProcess): подпись приватным ключом Baidu сразу по запросу;
+                // MD_AUTHEN_RESULT{true} по-прежнему уходит после STATISTIC_INFO
+                val enc = if (rndStr == null) null else try {
+                    HuAuth.encryptValue(rndStr)
+                } catch (e: Exception) {
+                    AppLog.e("подпись HU_AUTHEN_REQUEST", e)
+                    null
+                }
+                if (enc == null) {
+                    AppLog.i("на HU_AUTHEN_REQUEST не отвечаю (${if (rndStr == null) "нет randomValue" else "ветка 2.0 не реализована"})")
+                } else {
+                    AppLog.i("== отвечаю MD_AUTHEN_RESPONSE encryptValue=$enc")
+                    CarLifeState.auth += ", MD_AUTHEN_RESPONSE отправлен"
+                    sendCmd(Msg.MD_AUTHEN_RESPONSE, Msgs.authenResponse(enc))
+                }
             }
             Msg.HU_FEATURE_CONFIG_RESPONSE -> onFeatureConfig(m)
             Msg.CARLIFE_DATA_SUBSCRIBE -> {

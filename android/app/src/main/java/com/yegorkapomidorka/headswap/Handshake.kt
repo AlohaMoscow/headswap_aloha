@@ -4,6 +4,67 @@ package com.yegorkapomidorka.headswap
 class OutCmd(val type: Int, val body: ByteArray?)
 
 /**
+ * Ответ на HU_AUTHEN_REQUEST, как PrivateKeyManager (Baidu CarLife 8.6.7): randomValue после versionVerify
+ * подписывается (RSA/ECB/PKCS1Padding, ENCRYPT_MODE с приватным ключом), результат в Base64 NO_WRAP.
+ * Чистая JVM-логика: java.util.Base64 и javax.crypto есть и в тестах, и на Android (minSdk 29).
+ */
+object HuAuth {
+    private const val ERROR_VERSION = "_00.00.00"
+    private const val TRANSFORMATION = "RSA/ECB/PKCS1Padding"
+
+    /** PRIVATE_KEY из PrivateKeyManager (PKCS8, Base64). */
+    private const val PRIVATE_KEY =
+        "MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBALzoBR3Io5wxQH+IMy0ekUE50s9ZOEPOI/y3bSwXSZEqU0EgDGVRnFBYhr8MSEkv2THTn5HKsUM3gHd3rpQhRG2JrcaFY+iIEJs2iueXvfKd8UqTUFQOZrc7xCz1npg4KResY4VAEN+W19ez/DsKiCS5LaxmwE844xWibTgjspY9AgMBAAECgYA7C/cVcTKaztZPRr5gWw6iKbXYNBYfM58SDi+kuX64TleJor/dJ55JivJLY0ZxAfDM304gXw/7Z6zTKui5ypA9duYu1Pohk/e5UUMFr0+cEyWzTjCJp/XaA/gEhH8g311qeWcALSo6q55vYtTJpc/OUn98nlsrOMv4XLgaBI2fwQJBAPBw7TkR4Xuvue2tfxh2Fn2x2ONJSRjckS7EipfdLSsgZCbwdQ2XL/k6VX0lMfQaLQQ6YCF/vrALlgkXFBuzFpECQQDJIWJGcoM95ms546hHBzu7DONmEpEh9b9nMEqRmOkzkitxvGApv1VjvZaX6gMrSANADmoz4lSTGXFea4nviJLtAkEA29v3H4NZMveJxWsrV5vLjx5MG/FMdP5jh2dS7/DgN5pD2lNwRYAk7vnHaErVtccluMMEWj1siZ/ejutaiMWm8QJBAIMM+4nHZ3hXwJoRmj3dmq/AMBL8GhC0nShRMOU5awmtPh13jnjlMHAywgLt+W6kF2oPemegG1dVhqbtDw1CQekCQH3xugE28LS6e29233PUBdipwoyRcbDeth70WDS3l4bl7XlWbTXOWF/D28ZZ49NSr1dRhAQwM8VVC/gHdvNpcqA="
+
+    val privateKey: java.security.PrivateKey by lazy {
+        java.security.KeyFactory.getInstance("RSA")
+            .generatePrivate(java.security.spec.PKCS8EncodedKeySpec(java.util.Base64.getDecoder().decode(PRIVATE_KEY)))
+    }
+
+    /** Ветка "2.0;<rnd>" (EncryptionUtils.getVerifyCode, нативная либа Baidu): не реализована. Условие как у Baidu. */
+    fun isV2Branch(random: String): Boolean {
+        val parts = javaSplit(random, ";")
+        return parts.size >= 2 && parts[0] == "2.0" && parts[1].isNotEmpty()
+    }
+
+    /** String.split(regex) из Java: хвостовые пустые элементы отбрасываются. */
+    private fun javaSplit(s: String, sep: String): List<String> {
+        val p = s.split(sep)
+        return if (p.size == 1) p else p.dropLastWhile { it.isEmpty() }
+    }
+
+    /**
+     * PrivateKeyManager.versionVerify при versionName = Handshake.MD_VERSION. Без "_" у Baidu падает
+     * (substring(-1)), здесь строка остаётся как есть. Нечисловые части пропускаются (у Baidu ловится исключение).
+     */
+    fun versionVerify(str: String, mdVersion: String = Handshake.MD_VERSION): String {
+        val idx = str.indexOf('_')
+        if (idx < 0) return str
+        val suffix = str.substring(idx)
+        val stripped = str.replace(suffix, "")
+        val theirs = javaSplit(suffix.replace("_", ""), ".")
+        val ours = javaSplit(mdVersion, ".")
+        if (ours.size != theirs.size) return stripped + ERROR_VERSION
+        for (i in ours.indices) {
+            val a = theirs[i].toIntOrNull() ?: continue
+            val b = ours[i].toIntOrNull() ?: continue
+            if (a > b) return stripped + ERROR_VERSION
+            if (a < b) return str
+        }
+        return str
+    }
+
+    /** encryptValue для MD_AUTHEN_RESPONSE; null для ветки 2.0 (ответа нет). */
+    fun encryptValue(random: String): String? {
+        if (isV2Branch(random)) return null
+        val cipher = javax.crypto.Cipher.getInstance(TRANSFORMATION)
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, privateKey)
+        val sig = cipher.doFinal(versionVerify(random).toByteArray(Charsets.UTF_8))
+        return java.util.Base64.getEncoder().encodeToString(sig)
+    }
+}
+
+/**
  * Последовательности MD -> HU для CarLife 2.0, повторяющие MD Baidu CarLife 8.6.7.
  * Чистая логика без android.*, чтобы проверять порядок и байты офлайн.
  */
