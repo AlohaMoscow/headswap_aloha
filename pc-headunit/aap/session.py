@@ -476,6 +476,11 @@ class Session:
         now = time.monotonic()
         for line in lines:
             parts = line.split()
+            if len(parts) == 3 and parts[0] == "focus":
+                projected = parts[1] == "projected"
+                self.log.info(f"cmd file: video focus {'PROJECTED' if projected else 'NATIVE'} unsolicited={parts[2]}")
+                self._send(M.video_focus_notification(projected=projected, unsolicited=parts[2] == "1"))
+                continue
             if len(parts) != 3 or parts[0] not in ("tap", "tap2"):
                 self.log.warn(f"cmd file: ignored {line!r}")
                 continue

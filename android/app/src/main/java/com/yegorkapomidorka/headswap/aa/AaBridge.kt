@@ -330,6 +330,11 @@ class AaBridgeCore(
         log("BRIDGE AA: «Выйти» (VIDEO_FOCUS NATIVE) -> CarLife GO_TO_DESKTOP", true)
         exitPending = true
         link.goToDesktop()
+        // AA ждёт ответа на NATIVE с чёрной областью лаунчера. Desay G6S (Mazda) не шлёт ни PAUSE на выходе, ни START
+        // на возврате (лог 2026-10-12), так что ответ сразу: цикл NATIVE -> PROJECTED возвращает AA на главный экран.
+        lastKeyframeRequest = clockMs()
+        keyframeRequests++
+        peer?.requestKeyFrame()
     }
 
     /** FEATURE_CONFIG ГУ разобран; mode = значение AUDIO_TRANSMISSION_MODE (null - ключа нет). */

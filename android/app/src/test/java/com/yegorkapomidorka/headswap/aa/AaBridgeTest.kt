@@ -311,8 +311,10 @@ class AaBridgeCoreTest {
         val peer = FakePeer()
         core.peer = peer
         core.onCarlifeStart()
+        val keyframesBefore = peer.keyframes
         core.onAaNativeFocusRequest()
         assertEquals(1, link.desktops)
+        assertEquals("AA сразу получает цикл NATIVE -> PROJECTED (Desay не шлёт PAUSE/START)", keyframesBefore + 1, peer.keyframes)
         assertEquals("NATIVE уходит в AA только когда ГУ реально вышел (PAUSE)", 0, peer.natives)
         core.onCarlifePause()
         assertEquals(1, peer.natives)
