@@ -50,6 +50,7 @@ class Options:
     touch_delay_s: float = 10.0           # after the first video DATA
     touch_x: int = 640
     touch_y: int = 360
+    cmd_file: Optional[Path] = None       # polled for "tap X Y" / "tap2 X Y" lines (tap2 = duplicated DOWN)
     idle_timeout_s: float = 20.0          # no frame from the phone at all (it pings ~1/s)
     version_attempts: int = 1
     max_unacked_video: int = 12           # AapControl.kt maxUnackedFor(): 12 wireless/socket
@@ -265,6 +266,7 @@ class Session:
             while self._frames and not self.stop_reason:
                 self._on_frame(self._frames.popleft())
             self._run_timers()
+            self._poll_cmd_file()
             now = time.monotonic()
             if self.opts.duration is not None and self._established_at is not None \
                     and now - self._established_at >= self.opts.duration:
@@ -459,6 +461,30 @@ class Session:
                              lambda: self._send(M.touch_event(down, x, y, time.monotonic_ns()))))
         self._timers.append((now + self.opts.touch_delay_s + 0.1,
                              lambda: self._send(M.touch_event(up, x, y, time.monotonic_ns()))))
+
+    def _poll_cmd_file(self) -> None:
+        path = self.opts.cmd_file
+        if path is None or not path.exists():
+            return
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            path.unlink()
+        except OSError:
+            return
+        down = input_pb2.TouchEvent.TOUCH_ACTION_DOWN
+        up = input_pb2.TouchEvent.TOUCH_ACTION_UP
+        now = time.monotonic()
+        for line in lines:
+            parts = line.split()
+            if len(parts) != 3 or parts[0] not in ("tap", "tap2"):
+                self.log.warn(f"cmd file: ignored {line!r}")
+                continue
+            x, y = int(parts[1]), int(parts[2])
+            self.log.info(f"cmd file: {parts[0]} at ({x},{y})")
+            self._send(M.touch_event(down, x, y, time.monotonic_ns()))
+            if parts[0] == "tap2":
+                self._timers.append((now + 0.01, lambda x=x, y=y: self._send(M.touch_event(down, x, y, time.monotonic_ns()))))
+            self._timers.append((now + 0.1, lambda x=x, y=y: self._send(M.touch_event(up, x, y, time.monotonic_ns()))))
 
     # ---------------------------------------------------------------------------------------------
     # shutdown
