@@ -11,6 +11,13 @@ interface CarlifeLink {
     /** Одно видео-сообщение CarLife (0x20001, Annex-B). false = не принято (очередь переполнена, сессия закрыта). */
     fun sendVideo(payload: ByteArray): Boolean
 
+    /**
+     * Первый IDR из AA вместо заглушки: отправка и отключение кадров заглушки атомарно. Иначе P-кадр заглушки,
+     * проскочивший между sendVideo и hidePlaceholder, ложится на AA-IDR и ГУ рисует полосы до следующего IDR.
+     * Заглушку останавливать всё равно через hidePlaceholder.
+     */
+    fun sendVideoTakeover(payload: ByteArray): Boolean = sendVideo(payload)
+
     /** Показывать на ГУ заглушку с текстом (кодирует VideoSource); можно звать до CarLife START - запомнится. */
     fun showPlaceholder(text: String)
 
@@ -743,7 +750,8 @@ class AaBridgeCore(
                 }
                 AnnexB.glue(cfg, b)
             }
-            if (!link.sendVideo(payload)) {
+            val takeover = active != Source.AA
+            if (!(if (takeover) link.sendVideoTakeover(payload) else link.sendVideo(payload))) {
                 drop("первый IDR не принят CarLife (очередь/закрыто)")
                 return
             }
@@ -881,7 +889,8 @@ class AaBridgeCore(
                 }
                 AnnexB.glue(cfg, data)
             }
-            if (!link.sendVideo(payload)) {
+            val takeover = active != Source.AA
+            if (!(if (takeover) link.sendVideoTakeover(payload) else link.sendVideo(payload))) {
                 encDropped++
                 requestIdrOnOverflow()
                 return

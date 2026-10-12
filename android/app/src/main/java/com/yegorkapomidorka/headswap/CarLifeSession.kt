@@ -538,6 +538,18 @@ class CarLifeSession(
         }
     }
 
+    override fun sendVideoTakeover(payload: ByteArray): Boolean {
+        if (closed.get() || paused) return false
+        synchronized(videoLock) {
+            if (videoOverflow()) return false
+            // под тем же замком, что и onFrame заглушки: после AA-IDR ни один её кадр уже не уйдёт
+            acceptEncoder = false
+            lastVideoTx = SystemClock.elapsedRealtime()
+            send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), payload))
+            return true
+        }
+    }
+
     /**
      * Видео-очередь переполнена: уже стоящих кадров больше 30 или их байт больше ~500 мс слива (пока слив не измерен - 512 КБ).
      * Проверяется до добавления нового кадра: в пустую очередь IDR принимается всегда. Отказ = вызывающий выбрасывает кадр

@@ -61,6 +61,13 @@ class TranscodeLink : CarlifeLink {
         hides++
     }
 
+    @Volatile var takeovers = 0
+    override fun sendVideoTakeover(payload: ByteArray): Boolean {
+        val ok = sendVideo(payload)
+        if (ok) takeovers++
+        return ok
+    }
+
     override fun sendAudio(channel: Int, type: Int, payload: ByteArray) = true
     override fun sendModuleStatus(module: Int, status: Int) = true
     override fun createTranscoder(out: TranscodeOutput): VideoTranscoder? {
@@ -159,6 +166,7 @@ class AaTranscodeCoreTest {
         assertEquals(listOf(7, 8, 5), AnnexB.nalTypes(link.sent[0]))
         assertEquals(AaBridgeCore.Source.AA, core.activeSource)
         assertEquals(1, link.hides)
+        assertEquals(1, link.takeovers)                       // первый AA-IDR атомарно отключает кадры заглушки
         core.onEncoderFrame(encP, false)
         assertArrayEquals(encP, link.sent[1])
     }

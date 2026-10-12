@@ -33,6 +33,13 @@ class FakeLink : CarlifeLink {
         hides++
     }
 
+    @Volatile var takeovers = 0
+    override fun sendVideoTakeover(payload: ByteArray): Boolean {
+        val ok = sendVideo(payload)
+        if (ok) takeovers++
+        return ok
+    }
+
     class Audio(val chan: Int, val type: Int, val payload: ByteArray)
 
     val audio = CopyOnWriteArrayList<Audio>()
@@ -100,6 +107,7 @@ class AaBridgeCoreTest {
         assertArrayEquals(cfg + idr, link.sent[0])            // SPS+PPS+IDR в одном сообщении
         assertEquals(listOf(7, 8, 5), types(link.sent[0]))
         assertEquals(1, link.hides)
+        assertEquals(1, link.takeovers)                       // первый AA-IDR атомарно отключает кадры заглушки
         assertEquals(AaBridgeCore.Source.AA, core.activeSource)
     }
 
