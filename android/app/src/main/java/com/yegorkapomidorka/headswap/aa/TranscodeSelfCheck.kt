@@ -41,6 +41,11 @@ object TranscodeSelfCheck {
             return
         }
 
+        // выход энкодера как он уходит на ГУ (SPS/PPS склеены только с первым IDR, как в AaBridge.onEncoderFrame):
+        // enc-out.h264 рядом, смотреть ffmpeg на ПК
+        val dump = File(dir, "enc-out.h264").outputStream().buffered()
+        var dumpGotIdr = false
+
         class Out : TranscodeOutput {
             val frames = AtomicLong()
             val keys = AtomicLong()
@@ -60,6 +65,12 @@ object TranscodeSelfCheck {
                     firstNals = AnnexB.nalTypes(if (c != null) AnnexB.glue(c, data) else data)
                 }
                 if (key) keys.incrementAndGet()
+                val c = csd
+                synchronized(dump) {
+                    if (!dumpGotIdr && !key) return
+                    dump.write(if (!dumpGotIdr && c != null && !AnnexB.startsWithSps(data)) AnnexB.glue(c, data) else data)
+                    dumpGotIdr = true
+                }
             }
 
             override fun onTranscodeError(msg: String) {
@@ -106,7 +117,7 @@ object TranscodeSelfCheck {
         var pauseEndMs = -1L
         var lastStats = t0
         while (SystemClock.elapsedRealtime() - t0 < TOTAL_MS) {
-            if (fed == PAUSE_AT_FRAME && pauseStartMs < 0) {
+            if (fed == PAUSE_AT_FRAME && pauseStartMs < 0 && !tuning.contains("nopause")) {
                 pauseStartMs = SystemClock.elapsedRealtime()
                 out.pauseStartFrames = out.frames.get()
                 AppLog.i("transcode_test: пауза входа ${PAUSE_MS / 1000} с (кадров на выходе до паузы ${out.pauseStartFrames})")
@@ -134,6 +145,8 @@ object TranscodeSelfCheck {
                 "декодировано=${t.totalDecoded.get()}, первые NAL выхода (SPS+PPS склеены с первым кадром)=${out.firstNals}, ошибок=${out.errors}, энкодер=${t.encoderName}"
         )
         t.stop()
+        synchronized(dump) { dump.close() }
+        AppLog.i("transcode_test: выход энкодера записан в ${File(dir, "enc-out.h264")}")
         ph?.let { AppLog.i("transcode_test: заглушка отрисовала ${it.framesRendered} кадров"); it.stop() }
     }
 }
