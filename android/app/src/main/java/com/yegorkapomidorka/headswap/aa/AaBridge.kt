@@ -312,32 +312,34 @@ class AaBridgeCore(
             peer?.requestKeyFrame()
         }
         if (!warm) meta.onCarlifeStart()
-        if (huPausedAa) {
-            huPausedAa = false
-            val p = peer
-            if (p != null) {
-                log("BRIDGE CarLife START после ухода ГУ на свой источник: AA KEYCODE $KEYCODE_MEDIA_PLAY", true)
-                p.sendKey(KEYCODE_MEDIA_PLAY)
-            }
-        }
+        // play на возврат не шлём: звук CarLife сразу отбирает у ГУ радио, а слушать радио под навигацию - сценарий
+        if (huPausedAa) log("BRIDGE CarLife START: AA на паузе после ухода ГУ на свой источник, музыку не запускаю", true)
     }
 
     /**
-     * MODULE_CONTROL MUSIC от ГУ; ответ - MODULE_STATUS MUSIC. Desay G6S (Mazda) при переходе на радио шлёт PAUSE,
-     * затем MUSIC status=0: ставим плеер AA на паузу, иначе ГУ видит CarLife-музыку активной и спорит с радио.
+     * MODULE_CONTROL MUSIC от ГУ; ответ - MODULE_STATUS MUSIC. status=0 - ГУ ушло на свой источник (радио): Desay G6S
+     * (Mazda) шлёт его после PAUSE, другие ГУ - без PAUSE. Плеер AA на паузу, хвост его буфера не пересылаем до
+     * следующего play, отвечаем MUSIC=0 - иначе ГУ видит CarLife-музыку активной и спорит с радио.
      */
     @Synchronized
     fun onCarlifeMusicControl(status: Int?): Boolean {
-        if (HU_MUSIC_FOLLOW_ENABLED && status == 0 && carlifeStarted && carlifePaused && meta.playing && !huPausedAa) {
+        if (HU_MUSIC_FOLLOW_ENABLED && status == 0 && carlifeStarted) {
             val p = peer
-            if (p != null) {
-                log("BRIDGE ГУ ушло на свой источник (PAUSE + MUSIC=0): AA KEYCODE $KEYCODE_MEDIA_PAUSE, MEDIA на паузу", true)
+            if (meta.playing && !huPausedAa && p != null) {
+                log("BRIDGE ГУ ушло на свой источник (MUSIC=0${if (carlifePaused) " после PAUSE" else ""}): AA KEYCODE $KEYCODE_MEDIA_PAUSE, MEDIA на паузу", true)
                 p.sendKey(KEYCODE_MEDIA_PAUSE)
                 huPausedAa = true
-                requestMediaPause("ГУ MODULE_CONTROL MUSIC=0")
             }
+            requestMediaPause("ГУ MODULE_CONTROL MUSIC=0")
         }
         return musicActive
+    }
+
+    /** AA снова заиграл сам (play пользователя): звук опять пересылаем. */
+    private fun releaseHuPause(why: String) {
+        if (!huPausedAa) return
+        huPausedAa = false
+        log("BRIDGE $why: MEDIA снова пересылаю", true)
     }
 
     /** CARLIFE_DATA_SUBSCRIBE_START (on=true) / STOP от ГУ; moduleID подписки: 0 навигация, 2 музыка. */
@@ -502,6 +504,7 @@ class AaBridgeCore(
     @Synchronized
     override fun onAudioStart(chan: Int) {
         log("BRIDGE AA audio START ch$chan (${AapMessages.channelName(chan)}) -> CarLife ${carlifeChannel(chan)?.let { chName(it) } ?: "не пересылается"}", true)
+        if (carlifeChannel(chan) == CarlifeAudio.CH_MEDIA) releaseHuPause("AA MEDIA START")
         if (carlifeChannel(chan) == CarlifeAudio.CH_TTS && ttsStopTimer.cancel()) {
             log("BRIDGE TTS STOP отменён: SPEECH START до истечения ${TTS_STOP_DELAY_MS} мс, INIT не повторяю", true)
         }
@@ -663,6 +666,7 @@ class AaBridgeCore(
     private fun admitMedia(): Boolean {
         val why = when {
             VOICE_SESSION_ENABLED && voice -> "идёт голосовая сессия"
+            huPausedAa -> "ГУ на своём источнике, AA на паузе (хвост буфера)"
             audioInited[CarlifeAudio.CH_MEDIA] != true && mediaBlocked() -> "TTS занят, MEDIA ждёт INIT"
             else -> null
         }
@@ -684,6 +688,7 @@ class AaBridgeCore(
 
     /** Плеер AA сменил состояние (ch9). MUSIC по нему - только когда звук не по USB: иначе им владеет MEDIA INIT/PAUSE. */
     private fun musicByState(playing: Boolean) {
+        if (playing) releaseHuPause("AA заиграл")
         if (audioViaUsb || !MODULE_MUSIC_ENABLED || !carlifeStarted) return
         if (link.sendModuleStatus(CarlifeAudio.MODULE_MUSIC, if (playing) 1 else 0)) {
             log("BRIDGE CarLife MODULE_STATUS MUSIC=${if (playing) 1 else 0} (плеер AA, звук не по USB)", true)

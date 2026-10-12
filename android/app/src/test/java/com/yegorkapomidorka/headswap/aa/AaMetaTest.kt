@@ -513,40 +513,115 @@ class AaMetaTest {
     }
 
     @Test
-    fun huLeavesForOwnSourcePausesAa() {
+    fun huMusicOffPausesAaWithAndWithoutPause() {
+        assertEquals(127, AaBridgeCore.KEYCODE_MEDIA_PAUSE)
+        // Desay G6S: PAUSE, затем MUSIC=0
         val r = Rig()
         val peer = FakePeer()
         r.core.peer = peer
         r.start()
         r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
-        r.core.onCarlifeMusicControl(0)
-        assertTrue("без PAUSE MUSIC=0 ничего не шлёт", peer.keys.isEmpty())
-
         r.core.onCarlifePause()
         r.core.onCarlifeMusicControl(1)
         assertTrue("MUSIC=1 не пауза", peer.keys.isEmpty())
         r.core.onCarlifeMusicControl(0)
         assertEquals(listOf(AaBridgeCore.KEYCODE_MEDIA_PAUSE), peer.keys.toList())
-        assertEquals(127, AaBridgeCore.KEYCODE_MEDIA_PAUSE)
 
-        r.start()
-        assertEquals(listOf(127, 126), peer.keys.toList())
-        r.core.onCarlifePause()
-        r.start()
-        assertEquals("play один раз", listOf(127, 126), peer.keys.toList())
+        // другие ГУ: MUSIC=0 без PAUSE
+        val q = Rig()
+        val qPeer = FakePeer()
+        q.core.peer = qPeer
+        q.start()
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        q.core.onCarlifeMusicControl(0)
+        assertEquals(listOf(AaBridgeCore.KEYCODE_MEDIA_PAUSE), qPeer.keys.toList())
     }
 
     @Test
-    fun huLeavesForOwnSourceIgnoredWhenAaNotPlaying() {
+    fun huLeavesForOwnSourceNoAutoPlayOnStartAndNoSecondPause() {
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onCarlifePause()
+        r.core.onCarlifeMusicControl(0)
+        r.core.onCarlifeMusicControl(0)
+        assertEquals("повторный MUSIC=0 не шлёт второй 127", listOf(127), peer.keys.toList())
+
+        r.start()
+        assertEquals("START не запускает музыку (126 нет)", listOf(127), peer.keys.toList())
+        r.core.onCarlifePause()
+        r.start()
+        assertEquals(listOf(127), peer.keys.toList())
+    }
+
+    @Test
+    fun huMusicOffDropsAaBufferTailUntilAaPlaysAgain() {
+        val pcm = ByteArray(640)
+        fun media(r: Rig) = r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        fun Rig.mediaPackets(type: Int) = link.audio.count { it == type }
+
+        // выход из паузы по началу медиаканала AA
+        val r = Rig()
+        r.core.peer = FakePeer()
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        media(r)
+        assertEquals(1, r.mediaPackets(CarlifeAudio.MEDIA_INIT))
+        assertEquals(1, r.mediaPackets(CarlifeAudio.MEDIA_DATA))
+        r.core.onCarlifeMusicControl(0)
+        assertEquals(1, r.mediaPackets(CarlifeAudio.MEDIA_PAUSE))
+        val sent = r.link.audio.size
+        media(r)
+        media(r)
+        assertEquals("хвост буфера на ГУ не идёт: ни INIT, ни DATA", sent, r.link.audio.size)
+        r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        media(r)
+        assertEquals("после MEDIA START данные снова идут", 2, r.mediaPackets(CarlifeAudio.MEDIA_INIT))
+        assertEquals(2, r.mediaPackets(CarlifeAudio.MEDIA_DATA))
+
+        // выход из паузы по статусу playing после paused
+        val q = Rig()
+        q.core.peer = FakePeer()
+        q.start()
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        media(q)
+        q.core.onCarlifeMusicControl(0)
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 2))!!)
+        val qSent = q.link.audio.size
+        media(q)
+        assertEquals("на паузе AA данные не идут", qSent, q.link.audio.size)
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 3))!!)
+        media(q)
+        assertEquals("заиграл: данные снова идут", 2, q.mediaPackets(CarlifeAudio.MEDIA_INIT))
+        assertEquals(2, q.mediaPackets(CarlifeAudio.MEDIA_DATA))
+    }
+
+    @Test
+    fun huMusicOffIgnoredWhenAaNotPlaying() {
         val r = Rig()
         val peer = FakePeer()
         r.core.peer = peer
         r.start()
         r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 1))!!)
+        r.core.onCarlifeMusicControl(0)
         r.core.onCarlifePause()
         r.core.onCarlifeMusicControl(0)
         r.start()
         assertTrue(peer.keys.isEmpty())
+    }
+
+    @Test
+    fun huMusicOffAnswersZeroWhenMediaPlayingOverUsb() {
+        val r = Rig()
+        r.core.peer = FakePeer()
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, ByteArray(640), 0)
+        assertTrue("MEDIA играет: MUSIC активна", r.core.musicActive)
+        assertFalse("MUSIC=0: MEDIA на паузе, ответ MUSIC=0", r.core.onCarlifeMusicControl(0))
+        assertTrue(r.link.audio.contains(CarlifeAudio.MEDIA_PAUSE))
     }
 
     @Test
