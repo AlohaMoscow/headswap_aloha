@@ -32,6 +32,9 @@ interface VideoTranscoder {
 
     fun requestSyncFrame()
 
+    /** Начать переход с кадра заглушки в картинку AA (зум-растворение) с первого следующего кадра. Без GL - ничего. */
+    fun startIntro(banner: android.graphics.Bitmap) {}
+
     /** Целевая частота выхода (0 = не ограничивается). */
     val targetFps: Int get() = 0
 

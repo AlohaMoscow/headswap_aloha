@@ -385,6 +385,10 @@ class AaTranscoder(
         }
     }
 
+    override fun startIntro(banner: android.graphics.Bitmap) {
+        relay?.startIntro(banner)
+    }
+
     override fun requestSyncFrame() {
         try {
             encoder?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) })

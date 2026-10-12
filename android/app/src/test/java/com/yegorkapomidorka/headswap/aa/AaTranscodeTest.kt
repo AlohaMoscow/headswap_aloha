@@ -251,7 +251,7 @@ class AaTranscodeCoreTest {
         core.tick()
         assertEquals(1, peer.keyframes)
         core.onCarlifeKeyFrameRequest()
-        assertEquals(2, tr.syncs.get())
+        assertEquals(3, tr.syncs.get())                        // START, первый AA-IDR в декодер, запрос ГУ
     }
 
     @Test

@@ -18,6 +18,9 @@ interface CarlifeLink {
      */
     fun sendVideoTakeover(payload: ByteArray): Boolean = sendVideo(payload)
 
+    /** Текущий кадр заглушки (null = её нет): с него перекодирование начинает переход в картинку AA. */
+    fun placeholderSnapshot(): android.graphics.Bitmap? = null
+
     /** Показывать на ГУ заглушку с текстом (кодирует VideoSource); можно звать до CarLife START - запомнится. */
     fun showPlaceholder(text: String)
 
@@ -855,7 +858,10 @@ class AaBridgeCore(
             waitSince = 0
             outputEnabled = true
             log("BRIDGE AA IDR -> декодер (${payload.size} Б, nal=${AnnexB.nalTypes(payload)})", true)
+            // переход с заглушки: энкодер начнёт с её кадра и растворит его в AA (до feedFrame, чтобы GL-нить взвела его раньше первого кадра)
+            if (active != Source.AA) link.placeholderSnapshot()?.let { t.startIntro(it) }
             t.feedFrame(payload, ptsUs)
+            t.requestSyncFrame()    // первый кадр энкодера после включения выхода сразу IDR, без ожидания до ~1 с
             return
         }
         t.feedFrame(b, ptsUs)

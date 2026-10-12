@@ -1,5 +1,6 @@
 package com.yegorkapomidorka.headswap
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -166,7 +167,17 @@ class VideoSource(
         }
     }
 
-    private fun drawBanner(c: Canvas, msg: String) {
+    /** Текущий кадр заглушки в Bitmap: с него транскодер начинает зум-растворение в картинку AA. Любая нить. */
+    fun snapshot(): Bitmap? {
+        val msg = banner ?: return null
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        drawBanner(Canvas(bmp), width, height, msg, framesRendered, Paint(text), Paint(fill))
+        return bmp
+    }
+
+    private fun drawBanner(c: Canvas, msg: String) = drawBanner(c, width, height, msg, framesRendered, text, fill)
+
+    private fun drawBanner(c: Canvas, width: Int, height: Int, msg: String, n: Long, text: Paint, fill: Paint) {
         val w = width.toFloat()
         val h = height.toFloat()
         c.drawColor(Color.rgb(16, 24, 56))
@@ -193,7 +204,6 @@ class VideoSource(
             y += lh
         }
         // живой индикатор: видно, что картинка не замерла
-        val n = framesRendered
         fill.color = Color.rgb(255, 160, 0)
         val x = w * 0.1f + (w * 0.8f) * ((n % 90) / 90f)
         c.drawRect(x - 12f, h * 0.82f, x + 12f, h * 0.82f + 10f, fill)

@@ -1,5 +1,6 @@
 package com.yegorkapomidorka.headswap.aa
 
+import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.opengl.EGL14
 import android.opengl.EGLConfig
@@ -9,6 +10,7 @@ import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
+import android.opengl.GLUtils
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -62,6 +64,19 @@ class GlRelay(
     }
     @Volatile private var haveFrame = false
 
+    // переход заглушка -> AA (зум-растворение), только GL-нить
+    private var introProgram = 0
+    private var iPos = 0
+    private var iTex = 0
+    private var iMatrix = 0
+    private var iT = 0
+    private var iBanner = 0
+    private var iVideo = 0
+    private var bannerTex = 0
+    private var introArmed = false
+    /** Время первого кадра перехода (0 = ещё не нарисован). */
+    private var introStartNs = 0L
+
     /** Последний кадр в текстуре гейт пропустил и он ещё не показан: tick отдаст его, как только гейт откроется. Только GL-нить. */
     private var skipped = false
     private var lastFreshNs = 0L
@@ -106,7 +121,10 @@ class GlRelay(
     private val tick = object : Runnable {
         override fun run() {
             if (released) return
-            if (haveFrame) {
+            if (haveFrame && introArmed) {
+                // переход: рисуем каждый период гейта, иначе на статичном AA анимация шла бы по 10 кадров в секунду
+                if (drawGated()) redraws.incrementAndGet()
+            } else if (haveFrame) {
                 val now = SystemClock.elapsedRealtimeNanos()
                 // перерисовка: статика (нет новых кадров idleRedrawMs) или последний кадр, который задержал гейт и за период новых не пришло
                 // (пока поток идёт, задержанный кадр заменяется свежим и tick его не трогает: частота выхода остаётся ровной)
@@ -116,6 +134,50 @@ class GlRelay(
             }
             handler.postDelayed(this, 20)
         }
+    }
+
+    /**
+     * Переход с кадра заглушки в AA: первый кадр после вызова = заглушка целиком, дальше за INTRO_MS она
+     * увеличивается и тает, а AA под ней «отъезжает» с лёгкого зума на место. Bitmap после загрузки в GL освобождается.
+     */
+    fun startIntro(banner: Bitmap) {
+        if (released) return
+        handler.post {
+            try {
+                if (!released) uploadIntro(banner)
+            } catch (t: Throwable) {
+                introArmed = false
+                log("GlRelay.startIntro: ${t.javaClass.simpleName}: ${t.message}")
+            } finally {
+                banner.recycle()
+            }
+        }
+    }
+
+    private fun uploadIntro(banner: Bitmap) {
+        if (introProgram == 0) {
+            introProgram = buildProgram(INTRO_VERTEX, INTRO_FRAGMENT)
+            iPos = GLES20.glGetAttribLocation(introProgram, "aPosition")
+            iTex = GLES20.glGetAttribLocation(introProgram, "aTextureCoord")
+            iMatrix = GLES20.glGetUniformLocation(introProgram, "uSTMatrix")
+            iT = GLES20.glGetUniformLocation(introProgram, "uT")
+            iBanner = GLES20.glGetUniformLocation(introProgram, "sBanner")
+            iVideo = GLES20.glGetUniformLocation(introProgram, "sTexture")
+            val t = IntArray(1)
+            GLES20.glGenTextures(1, t, 0)
+            bannerTex = t[0]
+        }
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bannerTex)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, banner, 0)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        introArmed = true
+        introStartNs = 0
+        log("GlRelay: переход заглушка -> AA взведён (${banner.width}x${banner.height})")
     }
 
     /** Новая AA-сессия: старый кадр больше не повторять до первого нового. */
@@ -212,16 +274,39 @@ class GlRelay(
 
     private fun draw() {
         GLES20.glViewport(0, 0, width, height)
-        GLES20.glUseProgram(program)
+        var pos = aPos
+        var texAttr = aTex
+        if (introArmed) {
+            val now = SystemClock.elapsedRealtimeNanos()
+            if (introStartNs == 0L) introStartNs = now
+            val t = (now - introStartNs) / (INTRO_MS * 1_000_000f)
+            if (t >= 1f) {
+                introArmed = false
+                log("GlRelay: переход заглушка -> AA завершён")
+            } else {
+                GLES20.glUseProgram(introProgram)
+                GLES20.glUniform1f(iT, t)
+                GLES20.glUniform1i(iVideo, 0)
+                GLES20.glUniform1i(iBanner, 1)
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bannerTex)
+                GLES20.glUniformMatrix4fv(iMatrix, 1, false, tm, 0)
+                pos = iPos
+                texAttr = iTex
+            }
+        }
+        if (!introArmed) {
+            GLES20.glUseProgram(program)
+            GLES20.glUniformMatrix4fv(uMatrix, 1, false, tm, 0)
+        }
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
-        GLES20.glUniformMatrix4fv(uMatrix, 1, false, tm, 0)
         quad.position(0)
-        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, quad)
-        GLES20.glEnableVertexAttribArray(aPos)
+        GLES20.glVertexAttribPointer(pos, 2, GLES20.GL_FLOAT, false, 16, quad)
+        GLES20.glEnableVertexAttribArray(pos)
         quad.position(2)
-        GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 16, quad)
-        GLES20.glEnableVertexAttribArray(aTex)
+        GLES20.glVertexAttribPointer(texAttr, 2, GLES20.GL_FLOAT, false, 16, quad)
+        GLES20.glEnableVertexAttribArray(texAttr)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         lastDrawNs = SystemClock.elapsedRealtimeNanos()
         // timestamp кадра для энкодера: монотонное время, как у surface-источников
@@ -251,6 +336,46 @@ class GlRelay(
 
     companion object {
         private const val EGL_RECORDABLE_ANDROID = 0x3142
+
+        /** Длительность перехода заглушка -> AA. Дольше - на низком CBR-битрейте растворение рассыпается на блоки. */
+        private const val INTRO_MS = 700L
+
+        // uT 0..1, e = ease-out cubic. AA: зум 1.08 -> 1 (кроп-координаты сжимаются к центру до uSTMatrix).
+        // Заглушка: зум 1 -> 1.35 и прозрачность 1 -> 0 (чуть быстрее зума, чтобы к концу не висела дымкой).
+        private const val INTRO_VERTEX = """
+            uniform mat4 uSTMatrix;
+            uniform float uT;
+            attribute vec4 aPosition;
+            attribute vec4 aTextureCoord;
+            varying vec2 vTextureCoord;
+            varying vec2 vScreen;
+            void main() {
+                gl_Position = aPosition;
+                float e = 1.0 - pow(1.0 - uT, 3.0);
+                float z = mix(1.08, 1.0, e);
+                vec2 c = vec2(0.5, 0.5);
+                vec4 tc = vec4(c + (aTextureCoord.xy - c) / z, 0.0, 1.0);
+                vTextureCoord = (uSTMatrix * tc).xy;
+                vScreen = vec2(aPosition.x * 0.5 + 0.5, 0.5 - aPosition.y * 0.5);
+            }
+        """
+        private const val INTRO_FRAGMENT = """
+            #extension GL_OES_EGL_image_external : require
+            precision mediump float;
+            varying vec2 vTextureCoord;
+            varying vec2 vScreen;
+            uniform samplerExternalOES sTexture;
+            uniform sampler2D sBanner;
+            uniform float uT;
+            void main() {
+                vec4 aa = texture2D(sTexture, vTextureCoord);
+                float e = 1.0 - pow(1.0 - uT, 3.0);
+                float s = mix(1.0, 1.35, e);
+                vec4 b = texture2D(sBanner, (vScreen - 0.5) / s + 0.5);
+                float a = 1.0 - smoothstep(0.0, 0.85, uT);
+                gl_FragColor = vec4(mix(aa.rgb, b.rgb, a), 1.0);
+            }
+        """
         private const val VERTEX = """
             uniform mat4 uSTMatrix;
             attribute vec4 aPosition;

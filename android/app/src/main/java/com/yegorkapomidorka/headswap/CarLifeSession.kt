@@ -721,6 +721,13 @@ class CarLifeSession(
         }
     }
 
+    override fun placeholderSnapshot(): android.graphics.Bitmap? = try {
+        synchronized(srcLock) { source }?.snapshot()
+    } catch (e: Exception) {
+        AppLog.e("снимок заглушки для перехода", e)
+        null
+    }
+
     override fun hidePlaceholder() {
         synchronized(videoLock) { acceptEncoder = false }
         bannerText = null
