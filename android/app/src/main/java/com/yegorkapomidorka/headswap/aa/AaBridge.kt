@@ -186,6 +186,7 @@ class AaBridgeCore(
     private val voiceExitTimer = AudioTimer()
     private var carlifePaused = false          // VIDEO_ENCODER_PAUSE после последнего START
     private var exitPending = false            // «Выйти» в AA: GO_TO_DESKTOP ушёл, ждём PAUSE от ГУ, чтобы отдать AA NATIVE
+    private var huPausedAa = false             // плеер AA поставили на паузу, когда ГУ ушло на свой источник; START вернёт play
     private var naviSent = false               // MODULE_STATUS NAVI=1 ушёл (держит TTS и/или маршрут)
     private var ttsNaviHeld = false            // NAVI=1 нужен ради TTS (до stopAllAudio)
     private var routeNaviHeld = false          // NAVI=1 нужен ради маршрута (MetaRelay)
@@ -280,6 +281,7 @@ class AaBridgeCore(
         carlifeStarted = false
         carlifePaused = false
         exitPending = false
+        huPausedAa = false
         gotIdr = false
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
         meta.onAttach()
@@ -310,6 +312,32 @@ class AaBridgeCore(
             peer?.requestKeyFrame()
         }
         if (!warm) meta.onCarlifeStart()
+        if (huPausedAa) {
+            huPausedAa = false
+            val p = peer
+            if (p != null) {
+                log("BRIDGE CarLife START после ухода ГУ на свой источник: AA KEYCODE $KEYCODE_MEDIA_PLAY", true)
+                p.sendKey(KEYCODE_MEDIA_PLAY)
+            }
+        }
+    }
+
+    /**
+     * MODULE_CONTROL MUSIC от ГУ; ответ - MODULE_STATUS MUSIC. Desay G6S (Mazda) при переходе на радио шлёт PAUSE,
+     * затем MUSIC status=0: ставим плеер AA на паузу, иначе ГУ видит CarLife-музыку активной и спорит с радио.
+     */
+    @Synchronized
+    fun onCarlifeMusicControl(status: Int?): Boolean {
+        if (HU_MUSIC_FOLLOW_ENABLED && status == 0 && carlifeStarted && carlifePaused && meta.playing && !huPausedAa) {
+            val p = peer
+            if (p != null) {
+                log("BRIDGE ГУ ушло на свой источник (PAUSE + MUSIC=0): AA KEYCODE $KEYCODE_MEDIA_PAUSE, MEDIA на паузу", true)
+                p.sendKey(KEYCODE_MEDIA_PAUSE)
+                huPausedAa = true
+                requestMediaPause("ГУ MODULE_CONTROL MUSIC=0")
+            }
+        }
+        return musicActive
     }
 
     /** CARLIFE_DATA_SUBSCRIBE_START (on=true) / STOP от ГУ; moduleID подписки: 0 навигация, 2 музыка. */
@@ -664,6 +692,11 @@ class AaBridgeCore(
 
     /** Маршрут держит / отпускает NAVI. NAVI=0 уходит, только когда его не держит и TTS. */
     private fun routeNavi(on: Boolean) {
+        if (!ROUTE_NAVI_STATUS_ENABLED) {
+            routeNaviHeld = false
+            if (on) log("BRIDGE маршрут: MODULE_STATUS NAVI=1 не шлю (только вокруг TTS)", false)
+            return
+        }
         routeNaviHeld = on
         if (on && !naviSent) {
             if (link.sendModuleStatus(CarlifeAudio.MODULE_NAVI, 1)) {
@@ -1060,6 +1093,15 @@ class AaBridgeCore(
         /** onAudioStop(MEDIA) шлёт MEDIA_PAUSE (как MD) вместо MEDIA_STOP; выключено = старое поведение. */
         @Volatile @JvmStatic var MEDIA_PAUSE_ENABLED = true
 
+        /**
+         * MODULE_STATUS NAVI=1 на весь маршрут (MetaRelay). Выключено: NAVI=1 только вокруг TTS, как в 1.0.8 -
+         * Mazda CX-5 (Desay G6S) с NAVI=1 глушит штатное радио при входе в CarLife (лог Ивана 2026-10-12).
+         */
+        @Volatile @JvmStatic var ROUTE_NAVI_STATUS_ENABLED = false
+
+        /** ГУ ушло на свой источник (PAUSE + MODULE_CONTROL MUSIC=0): AA на паузу, на следующем START - play. */
+        @Volatile @JvmStatic var HU_MUSIC_FOLLOW_ENABLED = true
+
         const val TTS_STOP_DELAY_MS = 1500L
         const val MEDIA_AFTER_TTS_MS = 300L
         const val VOICE_EXIT_DELAY_MS = 500L
@@ -1067,6 +1109,8 @@ class AaBridgeCore(
 
         /** Android KEYCODE_SEARCH: в AA запускает голосового ассистента. */
         const val KEYCODE_SEARCH = 84
+        const val KEYCODE_MEDIA_PLAY = 126
+        const val KEYCODE_MEDIA_PAUSE = 127
 
         /**
          * CarLife hard key (HUJ/CommonParams) -> Android KeyEvent; все значения есть в AapMessages.KEYCODES_SUPPORTED.

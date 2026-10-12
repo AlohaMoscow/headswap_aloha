@@ -395,7 +395,7 @@ class CarLifeSession(
                 val module = f?.let { PbReader.int(it, 1) }
                 val status = f?.let { PbReader.int(it, 2) }
                 if (module == CarlifeAudio.MODULE_MUSIC && AaBridgeCore.MODULE_MUSIC_ENABLED) {
-                    val on = bridge.musicActive
+                    val on = bridge.onCarlifeMusicControl(status)
                     AppLog.i("== MODULE_CONTROL MUSIC status=$status, отвечаю MODULE_STATUS MUSIC=${if (on) 1 else 0}", ui = false)
                     sendModuleStatus(CarlifeAudio.MODULE_MUSIC, if (on) 1 else 0)
                 } else if (module == MODULE_VR) {

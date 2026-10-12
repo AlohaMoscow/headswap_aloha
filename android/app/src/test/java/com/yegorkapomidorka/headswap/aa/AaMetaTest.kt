@@ -11,6 +11,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import com.yegorkapomidorka.headswap.aa.AapMessages as M
 
@@ -54,6 +56,17 @@ class MetaLink : CarlifeLink {
 
 class AaMetaTest {
     private val png = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte(), 1, 2, 3)
+
+    // NAVI=1 на весь маршрут по умолчанию выключен; тесты реле проверяют включённый режим, выключенный - routeNaviOffByDefault
+    @Before
+    fun routeNaviOn() {
+        AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = true
+    }
+
+    @After
+    fun routeNaviOff() {
+        AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = false
+    }
 
     private fun status(state: Int, pos: Int, source: String = "Spotify") =
         AapPb().v(1, state).str(2, source).v(3, pos).bool(4, false).bool(5, false).bool(6, false).toByteArray()
@@ -263,6 +276,7 @@ class AaMetaTest {
     fun musicSubscriptionStopSilences() {
         val r = Rig()
         r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
         r.core.onCarlifeSubscribe(listOf(2), false)
         r.core.onMediaMetadata(AaMeta.parseMediaMetadata(metadata("A"))!!)
         assertTrue(r.link.infos.isEmpty())
@@ -448,6 +462,7 @@ class AaMetaTest {
         val r = Rig()
         r.core.onCarlifeSubscribe(listOf(0), true)
         r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 10))!!)
         r.core.onMediaMetadata(AaMeta.parseMediaMetadata(metadata("A"))!!)
         r.core.onNavStatus(1)
         r.core.onNavTurn(AaMeta.parseNavState(navState(8, "Main St"))!!)
@@ -461,6 +476,77 @@ class AaMetaTest {
         assertEquals(listOf(1), link2.navi())
         assertEquals(1, link2.turns.single().action)
         assertEquals(300, link2.turns.single().remainDistance)
+    }
+
+    @Test
+    fun routeNaviOffByDefault() {
+        AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = false
+        val r = Rig()
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        r.core.onNavTurn(AaMeta.parseNavState(navState(8, "Main St"))!!)
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(300, 30))!!)
+        assertTrue("NAVI=1 на маршрут не шлём", r.link.navi().isEmpty())
+        assertEquals("а манёвры идут", 1, r.link.turns.size)
+        r.core.onAudioData(M.CH_AUDIO_SPEECH, ByteArray(640), 0)
+        assertEquals("NAVI=1 вокруг TTS остаётся", listOf(1), r.link.navi())
+    }
+
+    @Test
+    fun mediaInfoWaitsForPlaying() {
+        val r = Rig()
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 5))!!)
+        r.core.onMediaMetadata(AaMeta.parseMediaMetadata(metadata("A"))!!)
+        assertTrue("на паузе MEDIA_INFO не шлём", r.link.infos.isEmpty())
+        assertTrue("и прогресс тоже", r.link.progress.isEmpty())
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 6))!!)
+        assertEquals("заиграл: отложенный трек уходит", "A", r.link.infos.single().song)
+        assertEquals("прогресс ушёл", 1, r.link.progress.size)
+
+        // AA умерла: трек протух, после рестарта без нового metadata ничего не показываем
+        r.core.onAaEnded(true)
+        r.now += 5000
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        assertEquals(1, r.link.infos.size)
+    }
+
+    @Test
+    fun huLeavesForOwnSourcePausesAa() {
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onCarlifeMusicControl(0)
+        assertTrue("без PAUSE MUSIC=0 ничего не шлёт", peer.keys.isEmpty())
+
+        r.core.onCarlifePause()
+        r.core.onCarlifeMusicControl(1)
+        assertTrue("MUSIC=1 не пауза", peer.keys.isEmpty())
+        r.core.onCarlifeMusicControl(0)
+        assertEquals(listOf(AaBridgeCore.KEYCODE_MEDIA_PAUSE), peer.keys.toList())
+        assertEquals(127, AaBridgeCore.KEYCODE_MEDIA_PAUSE)
+
+        r.start()
+        assertEquals(listOf(127, 126), peer.keys.toList())
+        r.core.onCarlifePause()
+        r.start()
+        assertEquals("play один раз", listOf(127, 126), peer.keys.toList())
+    }
+
+    @Test
+    fun huLeavesForOwnSourceIgnoredWhenAaNotPlaying() {
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 1))!!)
+        r.core.onCarlifePause()
+        r.core.onCarlifeMusicControl(0)
+        r.start()
+        assertTrue(peer.keys.isEmpty())
     }
 
     @Test
