@@ -59,6 +59,8 @@ class Inputs(
     val setupError: UiText? = null,
     /** Размер видео на ГУ («1280×720»): фактический режим сессии. */
     val videoRes: String = "1280×720",
+    /** На телефоне висит мастер первой настройки Android Auto (согласие/разрешения): пока не пройден, AA рвёт связь. */
+    val aaConsent: Boolean = false,
 )
 
 object HomeLogic {
@@ -85,6 +87,17 @@ object HomeLogic {
                 ),
                 logLink = true,
                 notifTitle = UiText.res(R.string.home_title_no_bridge), notifText = i.setupError,
+            )
+            i.aaConsent && i.bridgeRunning -> state(
+                Phase.WAITING, Tone.WARN, HeroIcon.ALERT, UiText.res(R.string.home_title_aa_consent),
+                UiText.res(R.string.home_sub_aa_consent),
+                listOf(
+                    StageState.DONE to UiText.res(R.string.home_stage_working), StageState.DONE to CARLIFE,
+                    StageState.ACTIVE to UiText.res(R.string.home_stage_aa_consent),
+                    StageState.PEND to NONE, StageState.PEND to NONE,
+                ),
+                outline = OutlineAction.OPEN_AA,
+                notifText = UiText.res(R.string.notif_aa_consent),
             )
             reconnecting -> {
                 val left = i.graceLeftS.coerceAtLeast(0)
@@ -268,6 +281,7 @@ object HeadswapStatus {
             // известный текст нет-сертификата подменяем ресурсом, остальные ошибки показываем как есть
             setupError = AaState.setupError?.let { if (it == AaCreds.MISSING_TEXT) UiText.res(R.string.home_err_no_cert) else UiText.raw(it) },
             videoRes = (CarLifeState.videoMode ?: aaPrefs.videoMode.effective(aaPrefs.transcode)).outLabel,
+            aaConsent = AutoServer.consentPending(),
         )
     }
 

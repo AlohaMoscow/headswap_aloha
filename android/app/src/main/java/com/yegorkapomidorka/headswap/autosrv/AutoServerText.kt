@@ -65,6 +65,25 @@ object AutoServerText {
         return list.any { t.contains(norm(it)) }
     }
 
+    /** Запасные тексты экрана согласия (приветствие / разрешения), если view id не прочитались. */
+    private val CONSENT_TEXTS = listOf(
+        "добро пожаловать в android auto",
+        "welcome to android auto",
+        "эти разрешения необходимы android auto",
+        "android auto needs these permissions",     // условно: английская строка не проверялась по ресурсам AA
+    )
+
+    /**
+     * Первый запуск Android Auto: диалог «Добро пожаловать» (dialog_car_info) или «Эти разрешения необходимы»
+     * (lock_allow_switch, пара accept_button + secondary_button). ids - entry name без пакета.
+     * Один accept_button согласием не считается: такое имя может быть у обычных диалогов.
+     */
+    fun isConsent(ids: Collection<String>, texts: Collection<String>): Boolean {
+        if ("dialog_car_info" in ids || "lock_allow_switch" in ids) return true
+        if ("accept_button" in ids && "secondary_button" in ids) return true
+        return texts.any { containsAny(it, CONSENT_TEXTS) }
+    }
+
     fun isStop(text: CharSequence?) = equalsAny(text, aaStop) || containsAny(text, STOP)
 
     fun isStart(text: CharSequence?) = equalsAny(text, aaStart) || containsAny(text, START)

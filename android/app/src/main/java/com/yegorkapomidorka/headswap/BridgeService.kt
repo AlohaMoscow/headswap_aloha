@@ -259,9 +259,10 @@ class BridgeService : Service() {
         val skip = AutoServerPolicy.skipReason(
             trigger, autoPref, AutoServer.isConnected,
             usbAlive = core.hasCarlifeLink, warmAaSession = false, lastLocked = AutoServer.lastLocked,
-            startPending = serverStartPending,
+            startPending = serverStartPending, consentHold = AutoServer.consentPending(),
         )
         if (skip != null) {
+            if (skip == AutoServerPolicy.CONSENT_SKIP) core.showStatus(AaBridgeCore.TEXT_AA_CONSENT)
             if (trigger != Trigger.RETRY && !AutoServer.isConnected) serverStartPending = true
             // RETRY вызывается каждые несколько секунд и почти всегда пропускается: молча
             if (trigger != Trigger.RETRY) AutoServer.log("пропуск (${trigger.label}): $skip")

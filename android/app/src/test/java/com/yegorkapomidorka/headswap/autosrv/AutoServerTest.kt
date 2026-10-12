@@ -75,6 +75,23 @@ class AutoServerTextTest {
     }
 
     @Test
+    fun consentScreenByViewIdsOrTexts() {
+        val none = emptyList<String>()
+        // дампы первого запуска AA: приветствие и разрешения
+        assertTrue(AutoServerText.isConsent(listOf("touch_outside", "exit_button", "dialog_title", "dialog_car_info"), none))
+        assertTrue(AutoServerText.isConsent(listOf("secondary_button", "accept_button", "subtitle"), none))
+        assertTrue(AutoServerText.isConsent(listOf("lock_allow_switch"), none))
+        assertFalse("один accept_button - не согласие", AutoServerText.isConsent(listOf("accept_button", "toolbar"), none))
+        assertFalse(AutoServerText.isConsent(listOf("secondary_button"), none))
+        assertFalse(AutoServerText.isConsent(none, listOf("Android Auto", "Подключение")))
+        // запасной путь по текстам
+        assertTrue(AutoServerText.isConsent(none, listOf("Добро пожаловать в Android Auto!")))
+        assertTrue(AutoServerText.isConsent(none, listOf("Welcome to Android Auto")))
+        assertTrue(AutoServerText.isConsent(none, listOf("Эти разрешения необходимы Android Auto")))
+        assertTrue(AutoServerText.isConsent(none, listOf("Android Auto needs these permissions")))
+    }
+
+    @Test
     fun moreButtonByContentDescription() {
         assertTrue(AutoServerText.isMore("Ещё"))
         assertTrue(AutoServerText.isMore("ЕЩЕ"))
@@ -94,8 +111,8 @@ class AutoServerTextTest {
 class AutoServerPolicyTest {
     private fun skip(
         t: Trigger, pref: Boolean = true, svc: Boolean = true, usb: Boolean = true, warm: Boolean = false, locked: Boolean = false,
-        pending: Boolean = false,
-    ) = AutoServerPolicy.skipReason(t, pref, svc, usb, warm, locked, pending)
+        pending: Boolean = false, hold: Boolean = false,
+    ) = AutoServerPolicy.skipReason(t, pref, svc, usb, warm, locked, pending, hold)
 
     @Test
     fun buttonRunsRegardlessOfPrefButNeedsService() {
@@ -133,6 +150,22 @@ class AutoServerPolicyTest {
         assertTrue(skip(Trigger.RETRY, pending = true, svc = false) != null)
         assertTrue(skip(Trigger.RETRY, pending = true, pref = false) != null)
         assertTrue(skip(Trigger.RETRY, pending = true, usb = false) != null)
+    }
+
+    @Test
+    fun consentHoldSkipsAutoTriggersOnly() {
+        assertEquals(AutoServerPolicy.CONSENT_SKIP, skip(Trigger.AFTER_SESSION, hold = true))
+        assertEquals(AutoServerPolicy.CONSENT_SKIP, skip(Trigger.RETRY, locked = true, hold = true))
+        assertTrue(AutoServerPolicy.CONSENT_SKIP.contains("настройку Android Auto"))
+        assertNull(skip(Trigger.BUTTON, hold = true))
+        assertNull(skip(Trigger.USB_ATTACH, hold = true))
+        assertNull(skip(Trigger.AFTER_SESSION, hold = false))
+    }
+
+    @Test
+    fun consentResultText() {
+        for (t in Trigger.values()) assertEquals(AaBridgeCore.TEXT_AA_CONSENT, AutoServerPolicy.resultText(t, AutoResult.CONSENT))
+        assertEquals("Завершите настройку Android Auto на телефоне", AaBridgeCore.TEXT_AA_CONSENT)
     }
 
     @Test
@@ -174,6 +207,9 @@ class ServerAutomationTest {
         val menuHasItems: Boolean = true,
         var stopLagMenus: Int = 0,
         val startIgnored: Boolean = false,
+        /** Действие из actions, после которого поверх настроек появляется экран согласия AA ("open" = сразу). */
+        val consentAfter: String? = null,
+        val consentIds: List<String> = listOf("touch_outside", "exit_button", "dialog_title", "dialog_car_info"),
     ) : ServerUi {
         var t = 0L
         val actions = ArrayList<String>()
@@ -206,6 +242,11 @@ class ServerAutomationTest {
             if (!menuOpen || !menuHasItems) return page
             val showStop = serverRunning || lag > 0
             return page + if (showStop) "Остановить сервер головного устройства" else "Запустить сервер головного устройства"
+        }
+
+        override fun viewIds(): List<String> {
+            if (!opened) return emptyList()
+            return if (consentAfter != null && consentAfter in actions) consentIds else listOf("toolbar", "recycler")
         }
 
         override fun clickText(match: (CharSequence?) -> Boolean): Boolean {
@@ -317,6 +358,45 @@ class ServerAutomationTest {
         assertEquals(AutoResult.ERROR, o.result)
         assertTrue(o.detail.contains("снова предлагает «Запустить»"))
         assertEquals("Запустить нажат ещё дважды при проверке", 3, aa.actions.count { it == "start" })
+    }
+
+    @Test
+    fun consentVisibleRightAfterOpenTouchesNothing() {
+        val aa = FakeAa(serverRunning = true, consentAfter = "open")
+        val (o, log) = run(aa)
+        assertEquals(o.toString(), AutoResult.CONSENT, o.result)
+        assertEquals(listOf("open"), aa.actions)
+        assertEquals(0, aa.backs)
+        assertEquals(false, aa.returned)
+        assertEquals("дамп в лог один раз", 1, log.count { it.startsWith("дамп") })
+        assertTrue(aa.serverRunning)
+    }
+
+    @Test
+    fun consentAppearingDuringVerificationLeavesDialogOnScreen() {
+        val aa = FakeAa(serverRunning = false, consentAfter = "start")
+        var started = 0
+        val (o, _) = run(aa) { started++ }
+        assertEquals(o.toString(), AutoResult.CONSENT, o.result)
+        assertEquals(listOf("open", "more", "start"), aa.actions)
+        assertEquals(0, aa.backs)
+        assertEquals(false, aa.returned)
+        assertEquals(1, started)
+    }
+
+    @Test
+    fun consentWithPermissionsDialogAlsoRecognized() {
+        val aa = FakeAa(serverRunning = true, consentAfter = "open", consentIds = listOf("secondary_button", "accept_button", "subtitle"))
+        assertEquals(AutoResult.CONSENT, run(aa).first.result)
+        assertEquals(listOf("open"), aa.actions)
+    }
+
+    @Test
+    fun lonelyAcceptButtonIsNotConsent() {
+        val aa = FakeAa(serverRunning = false, consentAfter = "open", consentIds = listOf("accept_button", "toolbar"))
+        val (o, _) = run(aa)
+        assertEquals(AutoResult.OK, o.result)
+        assertEquals(listOf("open", "more", "start", "more", "back", "return"), aa.actions)
     }
 
     @Test

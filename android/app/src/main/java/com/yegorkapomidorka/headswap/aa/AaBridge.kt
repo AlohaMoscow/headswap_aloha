@@ -1103,6 +1103,7 @@ class AaBridgeCore(
         const val TEXT_STARTING_SERVER = "Запускаю сервер ГУ..."
         const val TEXT_RESTARTING_SERVER = "Android Auto отключился, перезапускаю сервер ГУ..."
         const val TEXT_UNLOCK_PHONE = "Разблокируйте телефон"
+        const val TEXT_AA_CONSENT = "Завершите настройку Android Auto на телефоне"
         const val KEYFRAME_WAIT_MS = 1500L
         const val KEYFRAME_RETRY_MS = 4000L
         private const val NEVER = Long.MIN_VALUE / 4

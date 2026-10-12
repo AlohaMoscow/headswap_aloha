@@ -17,7 +17,8 @@ enum class Trigger(val label: String) {
     RETRY("повтор после блокировки"),
 }
 
-enum class AutoResult { OK, LOCKED, NOT_FOUND, TIMEOUT, SERVICE_OFF, ERROR }
+/** CONSENT: на телефоне экран первой настройки Android Auto (согласие/разрешения), автоматизация ничего не трогала. */
+enum class AutoResult { OK, LOCKED, NOT_FOUND, TIMEOUT, SERVICE_OFF, ERROR, CONSENT }
 
 class AutoOutcome(val result: AutoResult, val detail: String, val tookMs: Long) {
     override fun toString() = "$result: $detail (${tookMs} мс)"
@@ -25,6 +26,9 @@ class AutoOutcome(val result: AutoResult, val detail: String, val tookMs: Long) 
 
 /** Решения «запускать ли автоматизацию» и «что показать на ГУ». Чистая логика, без Android. */
 object AutoServerPolicy {
+    /** Причина пропуска, пока на телефоне висит экран первой настройки AA (BridgeService по ней показывает подсказку). */
+    const val CONSENT_SKIP = "ждём, пока пользователь пройдёт настройку Android Auto на телефоне"
+
     /**
      * null = запускать, иначе причина пропуска. startPending: прошлый USB_ATTACH/AFTER_SESSION пропущен, потому что
      * служба ещё не была подключена (после старта процесса она подключается позже сервиса) - RETRY догоняет.
@@ -37,6 +41,7 @@ object AutoServerPolicy {
         warmAaSession: Boolean,
         lastLocked: Boolean,
         startPending: Boolean = false,
+        consentHold: Boolean = false,
     ): String? {
         if (!serviceConnected) return "служба спецвозможностей не подключена"
         return when (trigger) {
@@ -50,11 +55,13 @@ object AutoServerPolicy {
             Trigger.AFTER_SESSION -> when {
                 !prefEnabled -> "автозапуск выключен в настройках"
                 !usbAlive -> "USB отключён, сервер перезапускать некому"
+                consentHold -> CONSENT_SKIP
                 else -> null
             }
             Trigger.RETRY -> when {
                 !prefEnabled -> "автозапуск выключен в настройках"
                 !usbAlive -> "USB отключён"
+                consentHold -> CONSENT_SKIP
                 !lastLocked && !startPending -> "прошлая попытка не упёрлась в блокировку"
                 else -> null
             }
@@ -71,6 +78,7 @@ object AutoServerPolicy {
     fun resultText(trigger: Trigger, result: AutoResult): String? = when (result) {
         AutoResult.OK -> AaBridgeCore.TEXT_WAIT_FRAME
         AutoResult.LOCKED -> AaBridgeCore.TEXT_UNLOCK_PHONE
+        AutoResult.CONSENT -> AaBridgeCore.TEXT_AA_CONSENT
         else -> if (trigger == Trigger.AFTER_SESSION) AaBridgeCore.TEXT_AA_LOST else AaBridgeCore.TEXT_START_SERVER
     }
 

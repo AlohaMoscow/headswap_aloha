@@ -2,6 +2,7 @@ package com.yegorkapomidorka.headswap.autosrv
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.SystemClock
 import android.provider.Settings
 import com.yegorkapomidorka.headswap.AppLog
 import java.util.concurrent.CountDownLatch
@@ -31,8 +32,20 @@ object AutoServer {
     @Volatile var lastTrigger: Trigger? = null
         private set
 
+    /** Сколько после обнаружения экрана согласия AFTER_SESSION/RETRY не лезут в настройки AA и не перекрывают диалог. */
+    private const val CONSENT_HOLD_MS = 90_000L
+
+    /** elapsedRealtime, когда автоматизация увидела экран первой настройки AA; 0 = не видела (или потом прошла штатно). */
+    @Volatile var consentAt: Long = 0L
+
     val isConnected: Boolean get() = service != null
     val lastLocked: Boolean get() = last?.result == AutoResult.LOCKED
+
+    /** Экран первой настройки AA ждёт пользователя (липкое окно CONSENT_HOLD_MS). */
+    fun consentPending(): Boolean {
+        val t = consentAt
+        return t != 0L && SystemClock.elapsedRealtime() - t < CONSENT_HOLD_MS
+    }
 
     fun log(line: String) = AppLog.i("AUTOSRV $line", true)
 
@@ -87,6 +100,11 @@ object AutoServer {
 
     private fun finish(run: Run, outcome: AutoOutcome) {
         run.outcome = outcome
+        when (outcome.result) {
+            AutoResult.CONSENT -> consentAt = SystemClock.elapsedRealtime()
+            AutoResult.OK -> consentAt = 0L
+            else -> {}
+        }
         last = outcome
         lastTrigger = run.trigger
         run.started.countDown()

@@ -16,7 +16,8 @@ class HomeLogicTest {
         graceLeft: Int = -1,
         usbAudio: Boolean = true,
         setupError: UiText? = null,
-    ) = Inputs(running, status, protocol, serverUp, autoReady, lost, graceLeft, 8, usbAudio, setupError)
+        consent: Boolean = false,
+    ) = Inputs(running, status, protocol, serverUp, autoReady, lost, graceLeft, 8, usbAudio, setupError, aaConsent = consent)
 
     @Test
     fun errorWhenCertificateMissing() {
@@ -86,5 +87,22 @@ class HomeLogicTest {
         assertEquals(Phase.WAITING, s.phase)
         assertEquals(UiText.res(R.string.home_title_connecting), s.title)
         assertNull(s.primary)
+    }
+
+    @Test
+    fun consentOverridesConnectedAndReconnecting() {
+        for (st in listOf("мост: AA -> CarLife (перекодирование)", "мост: USB потерян, AA жива 8 с")) {
+            val s = HomeLogic.compute(inp(running = true, status = st, consent = true))
+            assertEquals(st, Phase.WAITING, s.phase)
+            assertEquals(Tone.WARN, s.tone)
+            assertEquals(UiText.res(R.string.home_title_aa_consent), s.title)
+            assertEquals(OutlineAction.OPEN_AA, s.outline)
+            assertEquals(StageState.ACTIVE, s.stages[2].second.first)
+            assertEquals(UiText.res(R.string.notif_aa_consent), s.notifText)
+        }
+        // мост не запущен - подсказка не нужна
+        assertEquals(Phase.OFF, HomeLogic.compute(inp(consent = true)).phase)
+        // ошибка настройки важнее
+        assertEquals(Phase.ERROR, HomeLogic.compute(inp(setupError = UiText.raw("x"), consent = true)).phase)
     }
 }
