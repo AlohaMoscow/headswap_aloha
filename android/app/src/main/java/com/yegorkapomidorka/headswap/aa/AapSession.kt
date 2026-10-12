@@ -20,6 +20,9 @@ interface AaVideoSink {
 
     /** DATA: один кадр (8-байтный timestamp AAP снят), ptsUs из этого timestamp. */
     fun onFrame(annexB: ByteArray, ptsUs: Long)
+
+    /** Телефон просит VIDEO_FOCUS NATIVE (плитка «Выйти» в AA). Ответ AA отправляет вызывающий позже (AaPeer.sendVideoFocusNative). */
+    fun onAaNativeFocusRequest() {}
 }
 
 class AapOptions(
@@ -64,6 +67,9 @@ interface AaPeer {
 
     /** PCM16 mono 16 кГц микрофона -> телефону, пока открыта микрофонная сессия AA. По умолчанию игнорируется. */
     fun sendMicPcm(pcm: ByteArray, capturedAtUs: Long) {}
+
+    /** VideoFocusNotification NATIVE (unsolicited = false): ГУ ушёл с проекции. По умолчанию игнорируется. */
+    fun sendVideoFocusNative() {}
 }
 
 class AapSession(
@@ -208,6 +214,16 @@ class AapSession(
         }, "aa-keyframe")
         t.isDaemon = true
         t.start()
+    }
+
+    /** VideoFocus NATIVE одним сообщением (без возврата в PROJECTED): ГУ покинул CarLife после «Выйти». */
+    override fun sendVideoFocusNative() {
+        if (!established || stopReason != null || !writerActive) {
+            log("AA VideoFocus NATIVE пропущен: сессия ${if (!established) "не готова" else "завершается"}", true)
+            return
+        }
+        log("AA VideoFocus NATIVE (ГУ вышел из CarLife)", true)
+        outQueue.offer(MsgJob(M.videoFocusNotification(projected = false, unsolicited = false), false, "exit: NATIVE"))
     }
 
     /** PCM микрофона: нарезается на кадры по 128 мс и уходит в окно maxUnacked; без открытой микрофонной сессии игнорируется. */
@@ -664,6 +680,10 @@ class AapSession(
             type == M.MEDIA_VIDEO_FOCUS_REQUEST && chan == M.CH_VIDEO -> {
                 val mode = PbReader.parse(payload)?.firstOrNull { it.number == 2 && it.wire == 0 }?.num?.toInt()
                 if (mode == 1) send(M.videoFocusNotification(projected = true, unsolicited = false))
+                else if (mode == 2) {
+                    log("AA VIDEO_FOCUS_REQUEST NATIVE («Выйти»)", true)
+                    sink.onAaNativeFocusRequest()      // не отвечаем: NATIVE уйдёт, когда ГУ реально выйдет из CarLife
+                }
             }
             type == M.MEDIA_MIC_REQUEST && chan == M.CH_MIC -> onMicRequest(payload)
             type == M.MEDIA_ACK && chan == M.CH_MIC -> onMicAck(payload)

@@ -59,6 +59,11 @@ class FakeLink : CarlifeLink {
         events.add("M$module=$status")
         return true
     }
+
+    @Volatile var desktops = 0
+    override fun goToDesktop() {
+        desktops++
+    }
 }
 
 class FakePeer : AaPeer {
@@ -80,6 +85,11 @@ class FakePeer : AaPeer {
     val rotary = CopyOnWriteArrayList<Int>()
     override fun sendRotary(delta: Int) {
         rotary.add(delta)
+    }
+
+    @Volatile var natives = 0
+    override fun sendVideoFocusNative() {
+        natives++
     }
 }
 
@@ -301,6 +311,77 @@ class AaBridgeCoreTest {
         assertEquals(1, link.sent.size)
         core.onFrame(idr, 4)
         assertEquals(2, link.sent.size)
+    }
+
+    // --- «Выйти» в AA (VIDEO_FOCUS NATIVE) -> CarLife GO_TO_DESKTOP ---
+    @Test
+    fun exitRequestSendsGoToDesktopThenNativeOnHuPause() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onCarlifeStart()
+        val keyframesBefore = peer.keyframes
+        core.onAaNativeFocusRequest()
+        assertEquals(1, link.desktops)
+        assertEquals("AA сразу получает цикл NATIVE -> PROJECTED (Desay не шлёт PAUSE/START)", keyframesBefore + 1, peer.keyframes)
+        assertEquals("NATIVE уходит в AA только когда ГУ реально вышел (PAUSE)", 0, peer.natives)
+        core.onCarlifePause()
+        assertEquals(1, peer.natives)
+        assertTrue(logs.any { it.contains("«Выйти»") })
+        core.onCarlifePause()                                 // повторный PAUSE: флаг уже снят
+        assertEquals(1, peer.natives)
+    }
+
+    @Test
+    fun huPauseWithoutExitRequestSendsNothingToAa() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onCarlifeStart()
+        core.onCarlifePause()
+        assertEquals(0, peer.natives)
+        assertEquals(0, link.desktops)
+    }
+
+    @Test
+    fun exitRequestWithoutCarlifeStartOrLinkIsIgnored() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onAaNativeFocusRequest()                         // CarLife ещё не START
+        core.onCarlifePause()
+        assertEquals(0, link.desktops)
+        assertEquals(0, peer.natives)
+        val bare = AaBridgeCore({ _, _ -> }, { now })         // ссылки на CarLife нет вовсе
+        bare.peer = peer
+        bare.onAaNativeFocusRequest()
+        bare.onCarlifePause()
+        assertEquals(0, peer.natives)
+    }
+
+    @Test
+    fun exitPendingIsClearedByCloseAndReattach() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onCarlifeStart()
+        core.onAaNativeFocusRequest()
+        core.onCarlifeClosed(link)
+        core.attach(link)
+        core.onCarlifeStart()
+        core.onCarlifePause()
+        assertEquals(0, peer.natives)
+    }
+
+    @Test
+    fun returnToCarlifeAfterExitRequestsKeyFrameCycle() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onCarlifeStart()
+        core.onCodecConfig(cfg)
+        core.onFrame(idr, 1)
+        core.onAaNativeFocusRequest()
+        core.onCarlifePause()
+        assertEquals(1, peer.natives)
+        val before = peer.keyframes
+        core.onCarlifeStart()                                 // ГУ вернулся: цикл NATIVE -> PROJECTED
+        assertEquals(before + 1, peer.keyframes)
     }
 }
 

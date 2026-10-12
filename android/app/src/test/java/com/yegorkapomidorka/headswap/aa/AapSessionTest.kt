@@ -32,6 +32,11 @@ class AapSessionTest {
         override fun onFrame(annexB: ByteArray, ptsUs: Long) {
             frames.add(annexB to ptsUs)
         }
+
+        val nativeRequests = java.util.concurrent.atomic.AtomicInteger()
+        override fun onAaNativeFocusRequest() {
+            nativeRequests.incrementAndGet()
+        }
     }
 
     /** Приёмник с микрофоном: принимает open, считает open/close. */
@@ -52,7 +57,7 @@ class AapSessionTest {
         private val sock: Socket, clientSet: String, private val tls12: Boolean, private val end: String,
         private val stress: Boolean = false, private val onBeforeFail: () -> Unit = {},
         private val externalTouch: Boolean = false, private val idleAfterVideoMs: Long = 0,
-        private val fullAudio: Boolean = false, private val mic: Boolean = false,
+        private val fullAudio: Boolean = false, private val mic: Boolean = false, private val exitTap: Boolean = false,
     ) : Thread("fake-phone") {
         val micFrames = CopyOnWriteArrayList<Pair<Long, Int>>()
         @Volatile var micFlags = -1
@@ -223,6 +228,9 @@ class AapSessionTest {
             }
             sendMsg(2, M.MEDIA_VIDEO_FOCUS_REQUEST, AapPb().v(2, 1).toByteArray())
             assertArrayEquals(Golden["video_focus_sol"], expect(2, M.MEDIA_VIDEO_FOCUS_NOTIFICATION))
+            // mode=2 (NATIVE, «Выйти»): HU не отвечает (иначе следующим пришло бы не ch5 MEDIA_CONFIG), а зовёт sink
+            // (только с голым sink: мост на него отвечает keyframe-циклом, это проверяет AaBridgeTest)
+            if (exitTap) sendMsg(2, M.MEDIA_VIDEO_FOCUS_REQUEST, AapPb().v(2, 2).v(3, 0).toByteArray())
 
             // сторож тишины работает только до VIDEO MEDIA_START: пауза дольше его таймаута сессию не убивает
             if (idleAfterVideoMs > 0) Thread.sleep(idleAfterVideoMs)
@@ -368,7 +376,7 @@ class AapSessionTest {
             lateinit var phone: Phone
             Thread {
                 phoneSock.set(server.accept())
-                phone = Phone(phoneSock.get(), clientSet, tls12, end, stress, idleAfterVideoMs = idleMs, mic = mic)
+                phone = Phone(phoneSock.get(), clientSet, tls12, end, stress, idleAfterVideoMs = idleMs, mic = mic, exitTap = true)
                 accepted.countDown()
             }.start()
             val ended = CountDownLatch(1)
@@ -409,6 +417,7 @@ class AapSessionTest {
             assertArrayEquals(Phone.SMALL, sink.frames[1].first)
             assertEquals(1_033_000L, sink.frames[1].second)
             assertEquals(1L, session.stats.videoCodecConfig)
+            assertEquals("VIDEO_FOCUS_REQUEST mode=2 -> один вызов sink, mode=1 не считается", 1, (sink as Sink).nativeRequests.get())
             if (stress) {
                 assertEquals(302, sink.frames.size)
                 assertEquals(302L, session.stats.videoData)

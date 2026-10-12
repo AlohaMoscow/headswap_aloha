@@ -54,6 +54,9 @@ interface CarlifeLink {
 
     /** CMD NAVI_NEXT_TURN_INFO (0x10030); поле 6 (иконка / time) по настройке реализации. */
     fun sendNaviTurn(info: NaviTurnInfo): Boolean = false
+
+    /** CMD GO_TO_DESKTOP (0x10021): ГУ уходит на свой рабочий стол (плитка «Выйти» в AA). */
+    fun goToDesktop() {}
 }
 
 /** Ссылка на мёртвую CarLife-сессию (USB оборван): всё отбрасывает. */
@@ -63,6 +66,7 @@ private object NoLink : CarlifeLink {
     override fun hidePlaceholder() {}
     override fun sendAudio(channel: Int, type: Int, payload: ByteArray) = false
     override fun sendModuleStatus(module: Int, status: Int) = false
+    override fun goToDesktop() {}
 }
 
 /**
@@ -181,6 +185,7 @@ class AaBridgeCore(
     private val mediaReleaseTimer = AudioTimer()
     private val voiceExitTimer = AudioTimer()
     private var carlifePaused = false          // VIDEO_ENCODER_PAUSE после последнего START
+    private var exitPending = false            // «Выйти» в AA: GO_TO_DESKTOP ушёл, ждём PAUSE от ГУ, чтобы отдать AA NATIVE
     private var naviSent = false               // MODULE_STATUS NAVI=1 ушёл (держит TTS и/или маршрут)
     private var ttsNaviHeld = false            // NAVI=1 нужен ради TTS (до stopAllAudio)
     private var routeNaviHeld = false          // NAVI=1 нужен ради маршрута (MetaRelay)
@@ -274,6 +279,7 @@ class AaBridgeCore(
         active = Source.PLACEHOLDER
         carlifeStarted = false
         carlifePaused = false
+        exitPending = false
         gotIdr = false
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
         meta.onAttach()
@@ -316,6 +322,29 @@ class AaBridgeCore(
     @Synchronized
     fun onCarlifePause() {
         carlifePaused = true
+        if (exitPending) {
+            // ГУ ушёл с CarLife после нашего GO_TO_DESKTOP: говорим AA, что проекции нет (NATIVE), возврат - через START
+            exitPending = false
+            log("BRIDGE ГУ вышел из CarLife (PAUSE) после «Выйти»: AA VideoFocus NATIVE", true)
+            peer?.sendVideoFocusNative()
+        }
+    }
+
+    /** Плитка «Выйти» в AA: VIDEO_FOCUS_REQUEST NATIVE. Просим ГУ на рабочий стол; NATIVE для AA - когда ГУ пришлёт PAUSE. */
+    @Synchronized
+    override fun onAaNativeFocusRequest() {
+        if (link === NoLink || !carlifeStarted) {
+            log("BRIDGE AA: «Выйти» (VIDEO_FOCUS NATIVE) проигнорирован: CarLife ${if (link === NoLink) "не подключён" else "ещё не START"}", true)
+            return
+        }
+        log("BRIDGE AA: «Выйти» (VIDEO_FOCUS NATIVE) -> CarLife GO_TO_DESKTOP", true)
+        exitPending = true
+        link.goToDesktop()
+        // AA ждёт ответа на NATIVE с чёрной областью лаунчера. Desay G6S (Mazda) не шлёт ни PAUSE на выходе, ни START
+        // на возврате (лог 2026-10-12), так что ответ сразу: цикл NATIVE -> PROJECTED возвращает AA на главный экран.
+        lastKeyframeRequest = clockMs()
+        keyframeRequests++
+        peer?.requestKeyFrame()
     }
 
     /** FEATURE_CONFIG ГУ разобран; mode = значение AUDIO_TRANSMISSION_MODE (null - ключа нет). */
@@ -341,6 +370,7 @@ class AaBridgeCore(
             return false
         }
         carlifeStarted = false
+        exitPending = false
         gotIdr = false
         resetAudio()
         stopTranscoderAsync()

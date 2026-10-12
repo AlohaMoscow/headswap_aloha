@@ -35,6 +35,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="auto = TLS 1.2/1.3 as offered by OpenSSL (headunit-revived default); 1.2 caps it")
     p.add_argument("--duration", type=float, default=None, metavar="N",
                    help="stop after N seconds from Auth Complete (default: until Ctrl+C)")
+    p.add_argument("--cmd-file", type=Path, default=None,
+                   help="poll this file for 'tap X Y' / 'tap2 X Y' lines (deleted after reading)")
     p.add_argument("--touch-test", action="store_true",
                    help="10 s after the first video frame send a tap (DOWN+UP) at the centre")
     p.add_argument("--out", type=Path, default=HERE / "out", help="output directory (default pc-headunit/out)")
@@ -65,6 +67,7 @@ def build_options(args: argparse.Namespace) -> Options:
     return Options(
         duration=args.duration,
         touch_test=args.touch_test,
+        cmd_file=args.cmd_file,
         idle_timeout_s=args.idle_timeout,
         version_attempts=max(1, args.version_attempts),
         max_unacked_video=args.max_unacked_video,

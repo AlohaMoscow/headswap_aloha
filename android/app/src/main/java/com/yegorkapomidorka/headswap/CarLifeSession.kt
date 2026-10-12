@@ -613,6 +613,13 @@ class CarLifeSession(
         return true
     }
 
+    /** CMD GO_TO_DESKTOP (MD -> ГУ, пустое тело): ГУ показывает свой рабочий стол. */
+    override fun goToDesktop() {
+        if (closed.get()) return
+        AppLog.i("-> ГУ: GO_TO_DESKTOP")
+        sendCmd(Msg.GO_TO_DESKTOP, null)
+    }
+
     /**
      * Запись микрофона на ГУ как у Baidu MD: старт = MIC_RECORD_RECOG_START (VrManager.sendStartRecogMsgToVehicle)
      * и MODULE_STATUS VR=1 (prepareShowVr); стоп = MIC_RECORD_END (sendRecordEndMsgToVehicle) и VR=0 (prepareCloseVr).
