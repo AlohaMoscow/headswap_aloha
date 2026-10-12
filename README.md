@@ -25,7 +25,15 @@
 
 ## Совместимость
 
-Проверено: Honda Vezel 2024 (китайская ГУ), CarLife 2.0, телефон на Android 16 / HyperOS, Android Auto 17.x. Другие ГУ и телефоны не проверялись; отчёты о результатах приветствуются (Telegram и 4PDA ниже). Минимальная версия Android: 10 (API 29).
+Подтверждённые автомобили (штатные китайские ГУ с Baidu CarLife):
+
+1. Honda Vezel 2022–2024
+2. Toyota Corolla Cross 2025
+3. Jetta VS7 — только с Baidu CarLife (версия с J-Link не поддерживается)
+4. Mazda CX-5
+5. Volkswagen Tharu XR 2026
+
+Отчёты о других машинах приветствуются (Telegram и 4PDA ниже). Минимальная версия Android: 10 (API 29).
 
 ## Установка (для пользователей)
 
