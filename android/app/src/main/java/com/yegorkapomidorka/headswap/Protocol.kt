@@ -717,6 +717,31 @@ object AnnexB {
 
     fun startsWithSps(d: ByteArray) = nalTypes(d).firstOrNull() == 7
 
+    /** Минимальный level_idc H.264 для кадра w x h при 30 fps: 31 до 720p (3600 MB), иначе 40 (до 8192 MB, 1080p). */
+    fun levelFor(w: Int, h: Int): Int = if (((w + 15) / 16) * ((h + 15) / 16) <= 3600) 31 else 40
+
+    /**
+     * Подпись SPS Exynos (c2.exynos: Baseline, constraints 0x00, level_idc 52) старые ГУ CarLife не декодируют,
+     * экран остаётся чёрным (Desay G6S, Samsung A55). Приводим к подписи c2.qti: constraint_set0 = 1, level по размеру.
+     * Трогаем только SPS с level_idc > 41 (для наших размеров это ошибочная подпись), остальные отдаём как есть.
+     * Байты profile/constraints/level идут сразу за заголовком NAL, эмуляционных 0x03 перед ними нет, а новые значения
+     * (constraints 0x80, level >= 31) пару 00 00 не образуют. Возвращает исходный массив, если менять нечего.
+     */
+    fun fixSps(d: ByteArray, w: Int, h: Int): ByteArray {
+        var out = d
+        for (s in startCodes(d)) {
+            val p = s[0] + s[1]
+            if (p + 3 >= d.size || (d[p].toInt() and 0x1F) != 7) continue
+            val profile = d[p + 1].toInt() and 0xFF
+            val level = d[p + 3].toInt() and 0xFF
+            if (level <= 41) continue
+            if (out === d) out = d.copyOf()
+            if (profile == 66) out[p + 2] = (out[p + 2].toInt() or 0x80).toByte()
+            out[p + 3] = levelFor(w, h).toByte()
+        }
+        return out
+    }
+
     fun glue(a: ByteArray, b: ByteArray): ByteArray {
         val r = ByteArray(a.size + b.size)
         System.arraycopy(a, 0, r, 0, a.size)

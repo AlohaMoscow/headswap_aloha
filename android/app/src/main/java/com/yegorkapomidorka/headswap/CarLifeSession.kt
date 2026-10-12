@@ -74,6 +74,7 @@ class CarLifeSession(
     private val placeholderIdr = IdrThrottle()
     @Volatile private var lastOverflowMs = NEVER_MS
     private var passthroughBitrateLogged = false
+    private var spsFixLogged = false
     private val parser = FrameParser()
     private val assembler = InnerAssembler()
     private val closed = AtomicBoolean(false)
@@ -533,7 +534,7 @@ class CarLifeSession(
         synchronized(videoLock) {
             if (videoOverflow()) return false
             lastVideoTx = SystemClock.elapsedRealtime()
-            send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), payload))
+            send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), withFixedSps(payload)))
             return true
         }
     }
@@ -545,9 +546,22 @@ class CarLifeSession(
             // под тем же замком, что и onFrame заглушки: после AA-IDR ни один её кадр уже не уйдёт
             acceptEncoder = false
             lastVideoTx = SystemClock.elapsedRealtime()
-            send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), payload))
+            send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), withFixedSps(payload)))
             return true
         }
+    }
+
+    /** Весь H.264 в ГУ (мост, перехват, заглушка) идёт через AnnexB.fixSps: подпись SPS Exynos ГУ не принимает. */
+    private fun withFixedSps(payload: ByteArray): ByteArray {
+        val out = AnnexB.fixSps(payload, pendingW, pendingH)
+        if (out !== payload && !spsFixLogged) {
+            spsFixLogged = true
+            val i = payload.indices.first { payload[it] != out[it] }
+            val from = maxOf(0, i - 4)
+            AppLog.i("видео: SPS в ГУ исправлен под ${pendingW}x$pendingH: ${Hex.compact(payload.copyOfRange(from, i + 4), 8)}" +
+                " -> ${Hex.compact(out.copyOfRange(from, i + 4), 8)}")
+        }
+        return out
     }
 
     /**
@@ -907,7 +921,7 @@ class CarLifeSession(
             csdPending = false
         }
         lastVideoTx = SystemClock.elapsedRealtime()
-        send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), payload))
+        send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), withFixedSps(payload)))
     }
 
     override fun onError(msg: String, t: Throwable?) {

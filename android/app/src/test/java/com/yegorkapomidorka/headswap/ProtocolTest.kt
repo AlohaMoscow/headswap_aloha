@@ -207,6 +207,23 @@ class ProtocolTest {
     }
 
     @Test
+    fun annexBFixSpsExynos() {
+        // c2.exynos 1280x720: 67 42 00 34 -> подпись c2.qti 67 42 80 1F, PPS и IDR не трогаем
+        val exynos = hex("00 00 00 01 67 42 00 34 AB CD 00 00 00 01 68 CE 3C 80 00 00 00 01 65 88 84")
+        val fixed = AnnexB.fixSps(exynos, 1280, 720)
+        assertArrayEquals(hex("00 00 00 01 67 42 80 1F AB CD 00 00 00 01 68 CE 3C 80 00 00 00 01 65 88 84"), fixed)
+        assertArrayEquals(hex("00 00 00 01 67 42 00 34 AB CD 00 00 00 01 68 CE 3C 80 00 00 00 01 65 88 84"), exynos)
+        // 1728x648 и 1920x720 больше 3600 макроблоков: level 4.0
+        assertEquals(0x28, AnnexB.fixSps(exynos, 1728, 648)[7].toInt())
+        assertEquals(0x28, AnnexB.fixSps(exynos, 1920, 720)[7].toInt())
+        // qti (80/31), mtk (level 40), AA passthrough (00/31) и кадры без SPS - тот же массив
+        for (s in listOf("00 00 00 01 67 42 80 1F AB", "00 00 00 01 67 42 C0 28 AB", "00 00 00 01 67 42 00 1F AB", "00 00 00 01 41 9A 00 34")) {
+            val d = hex(s)
+            assertTrue(AnnexB.fixSps(d, 1280, 720) === d)
+        }
+    }
+
+    @Test
     fun annexBNormalizeAndGlue() {
         val three = hex("00 00 01 67 AA 00 00 01 68 BB 00 00 00 01 65 CC")
         val norm = AnnexB.normalize(three)
