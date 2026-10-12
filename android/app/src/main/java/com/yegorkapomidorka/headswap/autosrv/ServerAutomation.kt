@@ -17,6 +17,9 @@ interface ServerUi {
     /** Тексты всех узлов окон AA (меню видно в них же). */
     fun texts(): List<String>
 
+    /** View id (entry name без пакета, как в дампе) узлов окон AA. */
+    fun viewIds(): List<String>
+
     /** Нажать узел (или ближайшего кликабельного предка) с текстом, подходящим под предикат. */
     fun clickText(match: (CharSequence?) -> Boolean): Boolean
 
@@ -65,6 +68,24 @@ class ServerAutomation(
         }
     }
 
+    /** Поверх настроек экран первой настройки AA (согласие/разрешения): дальше нельзя ничего нажимать. */
+    private class ConsentScreen : RuntimeException()
+
+    /** Проверка перед каждым действием; при экране согласия прерывает сценарий (restart() его ловит). */
+    private fun guard() {
+        if (AutoServerText.isConsent(ui.viewIds(), ui.texts())) throw ConsentScreen()
+    }
+
+    private fun guardedClick(match: (CharSequence?) -> Boolean): Boolean {
+        guard()
+        return ui.clickText(match)
+    }
+
+    private fun guardedBack() {
+        guard()
+        ui.back()
+    }
+
     private fun menuHas(): Pair<Boolean, Boolean> {
         val t = ui.texts()
         return Pair(t.any { AutoServerText.isStop(it) }, t.any { AutoServerText.isStart(it) })
@@ -73,7 +94,7 @@ class ServerAutomation(
     /** Нажать «Ещё» и дождаться пунктов сервера. null = меню не открылось (или без нужных пунктов). */
     private fun openMenu(step: String): Pair<Boolean, Boolean>? {
         for (attempt in 1..2) {
-            if (!waitUntil(menuTimeoutMs) { ui.clickMore() }) {
+            if (!waitUntil(menuTimeoutMs) { guard(); ui.clickMore() }) {
                 log("$step: кнопка «Ещё» не найдена (попытка $attempt)")
                 log("дамп: " + ui.dump())
                 continue
@@ -81,6 +102,7 @@ class ServerAutomation(
             log("$step: нажала «Ещё» (попытка $attempt)")
             var found: Pair<Boolean, Boolean>? = null
             waitUntil(menuTimeoutMs) {
+                guard()
                 val h = menuHas()
                 if (h.first || h.second) found = h
                 found != null
@@ -92,13 +114,21 @@ class ServerAutomation(
             }
             log("$step: в меню нет пунктов сервера (попытка $attempt); тексты: ${ui.texts().take(20)}")
             log("дамп: " + ui.dump())
-            ui.back()
+            guardedBack()
             ui.sleep(400)
         }
         return null
     }
 
-    fun restart(): AutoOutcome {
+    fun restart(): AutoOutcome = try {
+        runScenario()
+    } catch (_: ConsentScreen) {
+        // без back и returnToApp: диалог должен остаться на экране, пока пользователь не пройдёт настройку
+        log("дамп: " + ui.dump())
+        done(AutoResult.CONSENT, "на телефоне экран настройки Android Auto (согласие/разрешения), жду пользователя")
+    }
+
+    private fun runScenario(): AutoOutcome {
         val (ready, why) = ui.prepareScreen()
         log("экран: $why")
         if (!ready) return done(AutoResult.LOCKED, why)
@@ -111,32 +141,33 @@ class ServerAutomation(
             else done(AutoResult.NOT_FOUND, "окно Android Auto не появилось за ${pageTimeoutMs} мс (блок фонового запуска?)")
         }
         log("окно AA на экране")
-        ui.sleep(300)                       // тулбар дорисовывается после появления окна
+        guard()
+        ui.sleep(300)                     // тулбар дорисовывается после появления окна
 
         var items = openMenu("шаг 1") ?: return done(AutoResult.NOT_FOUND, "меню сервера ГУ не открылось")
         if (items.first) {
-            if (!ui.clickText { AutoServerText.isStop(it) }) return done(AutoResult.ERROR, "пункт «Остановить…» не нажался")
+            if (!guardedClick { AutoServerText.isStop(it) }) return done(AutoResult.ERROR, "пункт «Остановить…» не нажался")
             log("шаг 2: нажала «Остановить сервер головного устройства»")
             ui.sleep(700)
             var started = false
             for (attempt in 1..5) {
                 items = openMenu("шаг 3.$attempt") ?: return done(AutoResult.NOT_FOUND, "после «Остановить» меню не открылось")
                 if (items.second) {
-                    if (!ui.clickText { AutoServerText.isStart(it) }) return done(AutoResult.ERROR, "пункт «Запустить…» не нажался")
+                    if (!guardedClick { AutoServerText.isStart(it) }) return done(AutoResult.ERROR, "пункт «Запустить…» не нажался")
                     log("шаг 4: нажала «Запустить сервер головного устройства»")
                     started = true
                     break
                 }
                 log("шаг 3.$attempt: «Запустить» ещё нет (сервер останавливается), закрываю меню и жду")
-                ui.back()
+                guardedBack()
                 ui.sleep(800)
             }
             if (!started) return done(AutoResult.TIMEOUT, "после «Остановить» пункт «Запустить» не появился")
         } else if (items.second) {
-            if (!ui.clickText { AutoServerText.isStart(it) }) return done(AutoResult.ERROR, "пункт «Запустить…» не нажался")
+            if (!guardedClick { AutoServerText.isStart(it) }) return done(AutoResult.ERROR, "пункт «Запустить…» не нажался")
             log("шаг 2: сервер был остановлен, нажала «Запустить сервер головного устройства»")
         } else {
-            ui.back()
+            guardedBack()
             return done(AutoResult.NOT_FOUND, "в меню нет ни «Остановить», ни «Запустить»")
         }
 
@@ -156,15 +187,16 @@ class ServerAutomation(
                 verified = true
                 startAgain = false
                 log("проверка.$attempt: в меню «Остановить…» (сервер запущен)")
-                ui.back()
+                guardedBack()
                 ui.sleep(300)
                 break
             }
             startAgain = true
             log("проверка.$attempt: в меню снова «Запустить…»: сервер не запустился, нажимаю ещё раз")
-            if (!ui.clickText { AutoServerText.isStart(it) }) break
+            if (!guardedClick { AutoServerText.isStart(it) }) break
             ui.sleep(settleAfterStartMs)
         }
+        guard()
         ui.returnToApp()
         return when {
             verified -> done(AutoResult.OK, "сервер запущен, подтверждено меню")

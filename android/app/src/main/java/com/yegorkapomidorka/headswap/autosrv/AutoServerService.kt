@@ -198,6 +198,15 @@ class AccessibilityServerUi(private val svc: AutoServerService) : ServerUi {
         return res
     }
 
+    override fun viewIds(): List<String> {
+        val res = ArrayList<String>()
+        walk { n ->
+            n.viewIdResourceName?.substringAfterLast('/')?.takeIf { it.isNotEmpty() }?.let { res.add(it) }
+            false
+        }
+        return res
+    }
+
     override fun clickText(match: (CharSequence?) -> Boolean): Boolean {
         var target: AccessibilityNodeInfo? = null
         walk { n ->
