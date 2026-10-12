@@ -32,6 +32,11 @@ class AapSessionTest {
         override fun onFrame(annexB: ByteArray, ptsUs: Long) {
             frames.add(annexB to ptsUs)
         }
+
+        val nativeRequests = java.util.concurrent.atomic.AtomicInteger()
+        override fun onAaNativeFocusRequest() {
+            nativeRequests.incrementAndGet()
+        }
     }
 
     /** Приёмник с микрофоном: принимает open, считает open/close. */
@@ -223,6 +228,8 @@ class AapSessionTest {
             }
             sendMsg(2, M.MEDIA_VIDEO_FOCUS_REQUEST, AapPb().v(2, 1).toByteArray())
             assertArrayEquals(Golden["video_focus_sol"], expect(2, M.MEDIA_VIDEO_FOCUS_NOTIFICATION))
+            // mode=2 (NATIVE, «Выйти»): HU не отвечает (иначе следующим пришло бы не ch5 MEDIA_CONFIG), а зовёт sink
+            sendMsg(2, M.MEDIA_VIDEO_FOCUS_REQUEST, AapPb().v(2, 2).v(3, 0).toByteArray())
 
             // сторож тишины работает только до VIDEO MEDIA_START: пауза дольше его таймаута сессию не убивает
             if (idleAfterVideoMs > 0) Thread.sleep(idleAfterVideoMs)
@@ -409,6 +416,7 @@ class AapSessionTest {
             assertArrayEquals(Phone.SMALL, sink.frames[1].first)
             assertEquals(1_033_000L, sink.frames[1].second)
             assertEquals(1L, session.stats.videoCodecConfig)
+            assertEquals("VIDEO_FOCUS_REQUEST mode=2 -> один вызов sink, mode=1 не считается", 1, (sink as Sink).nativeRequests.get())
             if (stress) {
                 assertEquals(302, sink.frames.size)
                 assertEquals(302L, session.stats.videoData)
