@@ -5,6 +5,18 @@
     <string name="dev_section_mic">Микрофон ГУ</string>
     <string name="dev_mic_vr_sub">Слать VR 1/0 вместе с MIC_RECORD_* (как Baidu)</string>
 
+    <string name="dev_section_meta">Метаданные на ГУ (с переподключения USB)</string>
+    <string name="dev_meta_music_title">Музыка</string>
+    <string name="dev_meta_music_sub">Трек, обложка и прогресс: MEDIA_INFO / MEDIA_PROGRESS_BAR</string>
+    <string name="dev_meta_navi_title">Навигация</string>
+    <string name="dev_meta_navi_sub">Повороты и дистанция: NAVI_NEXT_TURN_INFO по подписке ГУ</string>
+    <string name="dev_meta_icon_title">Поле 6: иконка</string>
+    <string name="dev_meta_icon_sub">bytes turnIconData, стрелка PNG (как Baidu 8.6.7)</string>
+    <string name="dev_meta_time_title">Поле 6: time</string>
+    <string name="dev_meta_time_sub">int32 time до манёвра, с (как apollo-DuerOS)</string>
+    <string name="dev_meta_progress_title">Прогресс в секундах</string>
+    <string name="dev_meta_progress_sub">MEDIA_PROGRESS_BAR в с вместо мс (если на ГУ в 1000 раз больше)</string>
+
     <string name="dev_section_actions">Действия</string>
     <string name="dev_action_scan">Сканировать</string>
     <string name="dev_action_stop_bridge">Стоп моста</string>

@@ -151,6 +151,18 @@ object AapMessages {
     const val INPUT_BINDING_REQUEST = 0x8002
     const val INPUT_BINDING_RESPONSE = 0x8003
 
+    private val PLAYBACK_NAMES = mapOf(0x8001 to "MEDIA_PLAYBACK_STATUS", 0x8002 to "MEDIA_PLAYBACK_INPUT", 0x8003 to "MEDIA_PLAYBACK_METADATA")
+    private val NAV_NAMES = mapOf(
+        0x8001 to "INSTRUMENT_CLUSTER_START", 0x8002 to "INSTRUMENT_CLUSTER_STOP", 0x8003 to "NAVIGATION_STATUS",
+        0x8004 to "NAVIGATION_TURN_EVENT", 0x8005 to "NAVIGATION_DISTANCE_EVENT", 0x8006 to "NAVIGATION_STATE",
+        0x8007 to "NAVIGATION_CURRENT_POSITION",
+    )
+
+    /** Статус плеера (ch9), состояние/дистанция/позиция навигации (ch10) идут примерно раз в секунду: в UI-лог не пишем (смену трека и манёвра громко пишет MetaRelay). */
+    fun isPeriodicMeta(chan: Int, type: Int) =
+        (chan == CH_MEDIA_PLAYBACK && type == AaMeta.MEDIA_STATUS) ||
+            (chan == CH_NAVIGATION && (type == AaMeta.NAV_DISTANCE || type == AaMeta.NAV_STATE || type == AaMeta.NAV_POSITION))
+
     private val SENSOR_NAMES = mapOf(0x8001 to "SENSOR_START_REQUEST", 0x8002 to "SENSOR_START_RESPONSE", 0x8003 to "SENSOR_EVENT")
     private val INPUT_NAMES = mapOf(0x8001 to "INPUT_EVENT", 0x8002 to "KEY_BINDING_REQUEST", 0x8003 to "BINDING_RESPONSE")
 
@@ -163,6 +175,9 @@ object AapMessages {
         }
         if (chan == CH_SENSOR) SENSOR_NAMES[type]?.let { return it }
         if (chan == CH_INPUT) INPUT_NAMES[type]?.let { return it }
+        if (chan == CH_MEDIA_PLAYBACK) PLAYBACK_NAMES[type]?.let { return it }
+        if (chan == CH_NAVIGATION) NAV_NAMES[type]?.let { return it }
+        if (chan == CH_MEDIA_PLAYBACK || chan == CH_NAVIGATION) return "UNKNOWN_0x%04x".format(type)
         MEDIA_NAMES[type]?.let { return it }
         return "UNKNOWN_0x%04x".format(type)
     }
@@ -356,6 +371,8 @@ object AapMessages {
     private fun i(n: String) = FieldDef(n, Kind.INT)
     private fun b(n: String) = FieldDef(n, Kind.BOOL)
     private fun t(n: String) = FieldDef(n, Kind.STR)
+    private fun y(n: String) = FieldDef(n, Kind.BYTES)
+    private fun m(n: String, sub: Schema) = FieldDef(n, Kind.MSG, sub)
 
     private val SCHEMAS: Map<Int, Schema> = mapOf(
         SERVICE_DISCOVERY_REQUEST to s("ServiceDiscoveryRequest", 4 to t("phone_name"), 5 to t("phone_brand")),
@@ -391,6 +408,50 @@ object AapMessages {
         INPUT_BINDING_RESPONSE to s("BindingResponse", 1 to i("status")),
     )
 
+    // ch9 / ch10 (aasdk mediaplayback / navigationstatus)
+    private val PLAYBACK_SCHEMAS: Map<Int, Schema> = mapOf(
+        AaMeta.MEDIA_STATUS to s(
+            "MediaPlaybackStatus", 1 to i("state"), 2 to t("media_source"), 3 to i("playback_seconds"),
+            4 to b("shuffle"), 5 to b("repeat"), 6 to b("repeat_one"),
+        ),
+        AaMeta.MEDIA_METADATA to s(
+            "MediaPlaybackMetadata", 1 to t("song"), 2 to t("artist"), 3 to t("album"), 4 to y("album_art"),
+            5 to t("playlist"), 6 to i("duration_seconds"), 7 to i("rating"),
+        ),
+    )
+    private val NAV_DISTANCE = s("NavigationDistance", 1 to i("meters"), 2 to t("display_value"), 3 to i("display_units"))
+    private val NAV_ROAD = s("NavigationRoad", 1 to t("name"))
+    private val NAV_STEP = s(
+        "NavigationStep",
+        1 to m("maneuver", s("NavigationManeuver", 1 to i("type"), 2 to i("roundabout_exit_number"), 3 to i("roundabout_exit_angle"))),
+        2 to m("road", NAV_ROAD),
+        3 to m("lanes", s("NavigationLane", 1 to m("lane_directions", s("LaneDirection", 1 to i("shape"), 2 to b("is_highlighted"))))),
+        4 to m("cue", s("NavigationCue", 1 to t("alternate_text"))),
+    )
+    private val NAV_SCHEMAS: Map<Int, Schema> = mapOf(
+        AaMeta.NAV_STATUS to s("NavigationStatus", 1 to i("status")),
+        AaMeta.NAV_TURN to s(
+            "NextTurnEvent", 1 to t("road"), 2 to i("turn_side"), 3 to i("event"), 4 to y("image"),
+            5 to i("turn_number"), 6 to i("turn_angle"),
+        ),
+        AaMeta.NAV_DISTANCE to s(
+            "NextTurnDistanceEvent", 1 to i("distance_meters"), 2 to i("time_to_turn_seconds"),
+            3 to i("display_distance_e3"), 4 to i("display_distance_unit"),
+        ),
+        AaMeta.NAV_STATE to s(
+            "NavigationState", 1 to m("steps", NAV_STEP), 2 to m("destinations", s("NavigationDestination", 1 to t("address"))),
+        ),
+        AaMeta.NAV_POSITION to s(
+            "NavigationCurrentPosition",
+            1 to m("step_distance", s("NavigationStepDistance", 1 to m("distance", NAV_DISTANCE), 2 to i("time_to_step_seconds"))),
+            2 to m("destination_distances", s(
+                "NavigationDestinationDistance", 1 to m("distance", NAV_DISTANCE), 2 to t("estimated_time_at_arrival"),
+                3 to i("time_to_arrival_seconds"),
+            )),
+            3 to m("current_road", NAV_ROAD),
+        ),
+    )
+
     /** Одна строка: протобуф-тело с именами полей, если схема известна, иначе hex-префикс. */
     fun describe(chan: Int, type: Int, payload: ByteArray, maxLen: Int = 600): String {
         val schema = when {
@@ -398,6 +459,8 @@ object AapMessages {
             type <= 26 && !(type == 1 && isMediaChan(chan)) -> SCHEMAS[type]
             chan == CH_SENSOR -> SENSOR_SCHEMAS[type]
             chan == CH_INPUT -> INPUT_SCHEMAS[type]
+            chan == CH_MEDIA_PLAYBACK -> PLAYBACK_SCHEMAS[type]
+            chan == CH_NAVIGATION -> NAV_SCHEMAS[type]
             else -> MEDIA_SCHEMAS[type]
         }
         val text = if (schema != null || (payload.isNotEmpty() && PbReader.parse(payload) != null && type != MEDIA_DATA && type != MEDIA_CODEC_CONFIG)) {

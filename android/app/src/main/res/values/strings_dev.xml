@@ -6,6 +6,18 @@
     <string name="dev_mic_vr_title" translatable="false">MODULE_STATUS VR</string>
     <string name="dev_mic_vr_sub">Send VR 1/0 together with MIC_RECORD_* (like Baidu)</string>
 
+    <string name="dev_section_meta">Metadata on the head unit (applies after USB reconnect)</string>
+    <string name="dev_meta_music_title">Music</string>
+    <string name="dev_meta_music_sub">Track, cover and progress: MEDIA_INFO / MEDIA_PROGRESS_BAR</string>
+    <string name="dev_meta_navi_title">Navigation</string>
+    <string name="dev_meta_navi_sub">Turns and distance: NAVI_NEXT_TURN_INFO when the head unit subscribes</string>
+    <string name="dev_meta_icon_title">Field 6: icon</string>
+    <string name="dev_meta_icon_sub">bytes turnIconData, PNG arrow (like Baidu 8.6.7)</string>
+    <string name="dev_meta_time_title">Field 6: time</string>
+    <string name="dev_meta_time_sub">int32 time to the maneuver, s (like apollo-DuerOS)</string>
+    <string name="dev_meta_progress_title">Progress in seconds</string>
+    <string name="dev_meta_progress_sub">MEDIA_PROGRESS_BAR in s instead of ms (if the head unit shows 1000× too much)</string>
+
     <string name="dev_section_actions">Actions</string>
     <string name="dev_action_scan">Scan</string>
     <string name="dev_action_stop_bridge">Stop bridge</string>

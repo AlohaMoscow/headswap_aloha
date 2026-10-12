@@ -40,6 +40,17 @@ class DevScreen(host: MainActivity) : Screen(host) {
             group(listOf(row(c.getString(R.string.dev_mic_vr_title), c.getString(R.string.dev_mic_vr_sub), aa.micVrStatus) { aa.micVrStatus = it })),
         )
 
+        body.addView(c.sectionTitle(c.getString(R.string.dev_section_meta)))
+        body.addView(
+            group(listOf(
+                row(c.getString(R.string.dev_meta_music_title), c.getString(R.string.dev_meta_music_sub), aa.metaMusic) { aa.metaMusic = it },
+                row(c.getString(R.string.dev_meta_navi_title), c.getString(R.string.dev_meta_navi_sub), aa.metaNavi) { aa.metaNavi = it },
+                row(c.getString(R.string.dev_meta_icon_title), c.getString(R.string.dev_meta_icon_sub), aa.naviIcon) { aa.naviIcon = it },
+                row(c.getString(R.string.dev_meta_time_title), c.getString(R.string.dev_meta_time_sub), aa.naviTime) { aa.naviTime = it },
+                row(c.getString(R.string.dev_meta_progress_title), c.getString(R.string.dev_meta_progress_sub), aa.progressSeconds) { aa.progressSeconds = it },
+            )),
+        )
+
         body.addView(c.sectionTitle(c.getString(R.string.dev_section_actions)))
         val actions = listOf(
             c.getString(R.string.dev_action_scan) to { Actions.scan(c, "кнопка") },

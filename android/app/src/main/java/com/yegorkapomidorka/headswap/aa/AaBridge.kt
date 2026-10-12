@@ -35,6 +35,15 @@ interface CarlifeLink {
 
     /** Состояние видео-очереди (слив, бэклог, длина) для статистики моста; null = нет данных. */
     fun videoStats(): LinkVideoStats? = null
+
+    /** CMD MEDIA_INFO (0x10035); обложку (PNG из AA) перекодирует реализация, не задерживая вызывающего. false = не ушло. */
+    fun sendMediaInfo(info: CarlifeMediaInfo): Boolean = false
+
+    /** CMD MEDIA_PROGRESS_BAR (0x10036). */
+    fun sendMediaProgress(progressBar: Int): Boolean = false
+
+    /** CMD NAVI_NEXT_TURN_INFO (0x10030); поле 6 (иконка / time) по настройке реализации. */
+    fun sendNaviTurn(info: NaviTurnInfo): Boolean = false
 }
 
 /** Ссылка на мёртвую CarLife-сессию (USB оборван): всё отбрасывает. */
@@ -56,7 +65,7 @@ class AaBridgeCore(
     private val clockUs: () -> Long = { System.nanoTime() / 1_000 },
     micSchedule: ((Long, Runnable) -> MicTimerHandle)? = null,
     audioSchedule: ((Long, Runnable) -> MicTimerHandle)? = null,
-) :AaVideoSink, AaAudioSink, AaMicSink, TranscodeOutput {
+) : AaVideoSink, AaAudioSink, AaMicSink, AaMetaSink, TranscodeOutput {
     enum class Source { PLACEHOLDER, AA }
 
     @Volatile var peer: AaPeer? = null
@@ -162,7 +171,9 @@ class AaBridgeCore(
     private val mediaReleaseTimer = AudioTimer()
     private val voiceExitTimer = AudioTimer()
     private var carlifePaused = false          // VIDEO_ENCODER_PAUSE после последнего START
-    private var naviSent = false
+    private var naviSent = false               // MODULE_STATUS NAVI=1 ушёл (держит TTS и/или маршрут)
+    private var ttsNaviHeld = false            // NAVI=1 нужен ради TTS (до stopAllAudio)
+    private var routeNaviHeld = false          // NAVI=1 нужен ради маршрута (MetaRelay)
     private var mediaPaused = false            // MEDIA на ГУ стоит на PAUSE (STOP ещё не слали)
     private var mediaGuard = false             // TTS_STOP уже ушёл, ждём +300 мс до управляющих пакетов MEDIA
     private var pendingMediaPause = false      // желаемое состояние MEDIA = пауза, применим после TTS
@@ -172,6 +183,21 @@ class AaBridgeCore(
 
     /** MEDIA инициализирован на ГУ и играет (для ответа на MODULE_CONTROL MUSIC). */
     val isMediaInited: Boolean @Synchronized get() = audioInited[CarlifeAudio.CH_MEDIA] == true
+
+    /** Ответ на MODULE_CONTROL MUSIC: звук по USB - по MEDIA INIT, иначе по состоянию плеера AA (ch9). */
+    val musicActive: Boolean @Synchronized get() = isMediaInited || (!audioViaUsb && meta.playing)
+
+    // --- метаданные AA (ch9/ch10) -> CarLife MEDIA_INFO / PROGRESS / NAVI_NEXT_TURN_INFO ---
+    private val meta = MetaRelay(
+        log = log,
+        clockMs = clockMs,
+        link = { link },
+        ready = { carlifeStarted && link !== NoLink },
+        navHold = { on -> routeNavi(on) },
+        musicState = { on -> musicByState(on) },
+    )
+
+    val metaRelay: MetaRelay get() = meta
 
     /** Звук идёт по USB: включён в UI и ГУ не просит Bluetooth. Читает AapOptions.sdProvider (какие синки объявлять). */
     val audioViaUsb: Boolean get() = usbAudioEnabled && !btAudio
@@ -240,6 +266,7 @@ class AaBridgeCore(
         carlifePaused = false
         gotIdr = false
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
+        meta.onAttach()
         link.showPlaceholder(placeholderText)
         log("BRIDGE CarLife-сессия подключена: источник = заглушка '$placeholderText' (AA ${if (aaVideoSeen) "жива" else "нет видео"})", true)
     }
@@ -266,6 +293,13 @@ class AaBridgeCore(
             keyframeRequests++
             peer?.requestKeyFrame()
         }
+        if (!warm) meta.onCarlifeStart()
+    }
+
+    /** CARLIFE_DATA_SUBSCRIBE_START (on=true) / STOP от ГУ; moduleID подписки: 0 навигация, 2 музыка. */
+    @Synchronized
+    fun onCarlifeSubscribe(moduleIds: List<Int>, on: Boolean) {
+        for (id in moduleIds) meta.onSubscribe(id, on)
     }
 
     /** VIDEO_ENCODER_PAUSE от ГУ: следующий START - полный, со сбросом звука. */
@@ -373,6 +407,7 @@ class AaBridgeCore(
 
     @Synchronized
     fun onAaEnded(established: Boolean) {
+        meta.onAaEnded()
         stopAllAudio("AA завершился")
         resetTranscodeForAa()
         val wasAa = active == Source.AA
@@ -427,9 +462,10 @@ class AaBridgeCore(
         if (audioInited[ch] != true) {
             val rate = if (ch == CarlifeAudio.CH_MEDIA) 48000 else 16000
             val channels = if (ch == CarlifeAudio.CH_MEDIA) 2 else 1
-            if (ch == CarlifeAudio.CH_TTS && NAVI_STATUS_ENABLED && !naviSent) {
+            if (ch == CarlifeAudio.CH_TTS && NAVI_STATUS_ENABLED) {
+                ttsNaviHeld = true
                 // как MD: перед TTS шлёт MODULE_STATUS NAVI=1 и держит его
-                if (link.sendModuleStatus(CarlifeAudio.MODULE_NAVI, 1)) {
+                if (!naviSent && link.sendModuleStatus(CarlifeAudio.MODULE_NAVI, 1)) {
                     naviSent = true
                     log("BRIDGE CarLife MODULE_STATUS NAVI=1 (перед TTS INIT)", true)
                 }
@@ -578,6 +614,31 @@ class AaBridgeCore(
         if (MODULE_MUSIC_ENABLED) link.sendModuleStatus(CarlifeAudio.MODULE_MUSIC, status)
     }
 
+    /** Плеер AA сменил состояние (ch9). MUSIC по нему - только когда звук не по USB: иначе им владеет MEDIA INIT/PAUSE. */
+    private fun musicByState(playing: Boolean) {
+        if (audioViaUsb || !MODULE_MUSIC_ENABLED || !carlifeStarted) return
+        if (link.sendModuleStatus(CarlifeAudio.MODULE_MUSIC, if (playing) 1 else 0)) {
+            log("BRIDGE CarLife MODULE_STATUS MUSIC=${if (playing) 1 else 0} (плеер AA, звук не по USB)", true)
+        }
+    }
+
+    /** Маршрут держит / отпускает NAVI. NAVI=0 уходит, только когда его не держит и TTS. */
+    private fun routeNavi(on: Boolean) {
+        routeNaviHeld = on
+        if (on && !naviSent) {
+            if (link.sendModuleStatus(CarlifeAudio.MODULE_NAVI, 1)) {
+                naviSent = true
+                log("BRIDGE CarLife MODULE_STATUS NAVI=1 (маршрут)", true)
+            }
+        } else if (!on && naviSent && !ttsNaviHeld) {
+            naviSent = false
+            link.sendModuleStatus(CarlifeAudio.MODULE_NAVI, 0)
+            log("BRIDGE CarLife MODULE_STATUS NAVI=0 (маршрут закончен)", true)
+        } else if (!on && naviSent) {
+            log("BRIDGE маршрут закончен, NAVI=1 держит TTS", false)
+        }
+    }
+
     private fun stopAudio(ch: Int) {
         if (ch == CarlifeAudio.CH_TTS) ttsStopTimer.cancel()
         val wasInited = audioInited[ch] == true
@@ -598,6 +659,7 @@ class AaBridgeCore(
         ttsStopTimer.cancel()
         mediaReleaseTimer.cancel()
         naviSent = false
+        ttsNaviHeld = false
         mediaPaused = false
         mediaGuard = false
         pendingMediaPause = false
@@ -614,12 +676,32 @@ class AaBridgeCore(
         if (audioInited.values.any { it } || mediaPaused) log("BRIDGE останавливаю звук CarLife: $why", true)
         stopAudio(CarlifeAudio.CH_MEDIA)
         stopAudio(CarlifeAudio.CH_TTS)
-        if (naviSent) {
+        ttsNaviHeld = false
+        if (naviSent && !routeNaviHeld) {
             naviSent = false
             link.sendModuleStatus(CarlifeAudio.MODULE_NAVI, 0)
             log("BRIDGE CarLife MODULE_STATUS NAVI=0", true)
         }
     }
+
+    // --- метаданные AA ---
+    @Synchronized
+    override fun onMediaStatus(s: AaMediaStatus) = meta.onMediaStatus(s)
+
+    @Synchronized
+    override fun onMediaMetadata(m: AaMediaMetadata) = meta.onMediaMetadata(m)
+
+    @Synchronized
+    override fun onNavCluster(start: Boolean) = meta.onNavCluster(start)
+
+    @Synchronized
+    override fun onNavStatus(status: Int) = meta.onNavStatus(status)
+
+    @Synchronized
+    override fun onNavTurn(t: AaNavTurn) = meta.onNavTurn(t)
+
+    @Synchronized
+    override fun onNavDistance(d: AaNavDistance) = meta.onNavDistance(d)
 
     // --- видео AA ---
     @Synchronized

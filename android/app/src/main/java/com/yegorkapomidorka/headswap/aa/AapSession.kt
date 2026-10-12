@@ -96,6 +96,7 @@ class AapSession(
 
     private val audioSink: AaAudioSink? = sink as? AaAudioSink
     private val micSink: AaMicSink? = sink as? AaMicSink
+    private val metaSink: AaMetaSink? = sink as? AaMetaSink
     private val uplink = AaMicUplink({ sid, ts, pcm ->
         outQueue.offer(MsgJob(M.micData(ts, pcm), true, "mic sid=$sid ts=${ts}us"))
     })
@@ -593,7 +594,8 @@ class AapSession(
             onMediaData(chan, type, payload)
             return
         }
-        logMsg("RX", chan, type, payload, media = chan == M.CH_MIC && type == M.MEDIA_ACK)     // ack микрофона идёт 8 раз в секунду: не в UI
+        // ack микрофона идёт 8 раз в секунду, статус плеера и дистанция навигации - раз в секунду: в файл, не в UI
+        logMsg("RX", chan, type, payload, media = (chan == M.CH_MIC && type == M.MEDIA_ACK) || M.isPeriodicMeta(chan, type))
 
         if (type == M.CHANNEL_OPEN_REQUEST) {
             send(M.channelOpenResponse(chan))
@@ -605,7 +607,10 @@ class AapSession(
             chan == M.CH_SENSOR -> onSensor(type, payload)
             chan == M.CH_INPUT -> if (type == M.INPUT_BINDING_REQUEST) send(M.bindingResponse(chan))
             chan == M.CH_VIDEO || chan in M.AUDIO_CHANNELS || chan == M.CH_MIC -> onMediaControl(chan, type, payload)
-            // MEDIA_PLAYBACK / NAVIGATION: телефон только присылает статус, отвечать нечего
+            // MEDIA_PLAYBACK / NAVIGATION: телефон только присылает статус, отвечать нечего; метаданные -> мост
+            chan == M.CH_MEDIA_PLAYBACK || chan == M.CH_NAVIGATION -> AaMeta.dispatch(chan, type, payload, metaSink)?.let {
+                log("AA META ${M.channelName(chan)} ${M.messageName(chan, type)}: $it", !M.isPeriodicMeta(chan, type))
+            }
         }
     }
 

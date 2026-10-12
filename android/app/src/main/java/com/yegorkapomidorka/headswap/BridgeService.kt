@@ -24,6 +24,7 @@ import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.aa.AapOptions
 import com.yegorkapomidorka.headswap.aa.BridgeHost
+import com.yegorkapomidorka.headswap.aa.MetaRelay
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.PhoneMicCapture
 import com.yegorkapomidorka.headswap.aa.ServerPhase
@@ -125,7 +126,11 @@ class BridgeService : Service() {
 
         val aaPrefs = AaPrefs(this)
         val screenOn = getSystemService(PowerManager::class.java).isInteractive
-        val cfg = SessionConfig(screenOn, aaPrefs.micVrStatus, aaPrefs.fpsSetting)
+        val cfg = SessionConfig(
+            screenOn, aaPrefs.micVrStatus, aaPrefs.fpsSetting,
+            metaMusic = aaPrefs.metaMusic, metaNavi = aaPrefs.metaNavi, naviField6 = aaPrefs.naviField6,
+        )
+        MetaRelay.PROGRESS_UNIT = if (aaPrefs.progressSeconds) 1 else 1000
 
         // AA-сессия к серверу ГУ на 127.0.0.1:5277 живёт на уровне сервиса (BridgeHost), а не этой USB-сессии
         var h = host

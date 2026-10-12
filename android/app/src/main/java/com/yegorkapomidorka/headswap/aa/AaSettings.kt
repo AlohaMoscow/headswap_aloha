@@ -50,6 +50,33 @@ class AaPrefs(ctx: Context) {
     var micVrStatus: Boolean
         get() = sp.getBoolean("micVrStatus", true)
         set(v) = sp.edit().putBoolean("micVrStatus", v).apply()
+
+    /** Трек, обложка и прогресс из AA -> MEDIA_INFO / MEDIA_PROGRESS_BAR. Читается на подключение. */
+    var metaMusic: Boolean
+        get() = sp.getBoolean("metaMusic", true)
+        set(v) = sp.edit().putBoolean("metaMusic", v).apply()
+
+    /** Подсказки поворотов из AA -> NAVI_NEXT_TURN_INFO (если ГУ подписалась). Читается на подключение. */
+    var metaNavi: Boolean
+        get() = sp.getBoolean("metaNavi", true)
+        set(v) = sp.edit().putBoolean("metaNavi", v).apply()
+
+    /** Поле 6 NAVI_NEXT_TURN_INFO: bytes-иконка (как 8.6.7). */
+    var naviIcon: Boolean
+        get() = sp.getBoolean("naviIcon", true)
+        set(v) = sp.edit().putBoolean("naviIcon", v).apply()
+
+    /** Поле 6 NAVI_NEXT_TURN_INFO: int32 time (как apollo-DuerOS). */
+    var naviTime: Boolean
+        get() = sp.getBoolean("naviTime", true)
+        set(v) = sp.edit().putBoolean("naviTime", v).apply()
+
+    val naviField6: NaviField6 get() = NaviField6.of(naviIcon, naviTime)
+
+    /** MEDIA_PROGRESS_BAR в секундах вместо мс (если ГУ покажет прогресс в 1000 раз больше). */
+    var progressSeconds: Boolean
+        get() = sp.getBoolean("progressSeconds", false)
+        set(v) = sp.edit().putBoolean("progressSeconds", v).apply()
 }
 
 /** Состояние AA-режима для экрана; пишет сервис, читает activity (один процесс). */

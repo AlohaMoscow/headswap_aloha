@@ -11,7 +11,10 @@ import com.yegorkapomidorka.headswap.aa.CarlifeLink
 import com.yegorkapomidorka.headswap.aa.DrainMeter
 import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.IdrThrottle
+import com.yegorkapomidorka.headswap.aa.CarlifeMediaInfo
 import com.yegorkapomidorka.headswap.aa.LinkVideoStats
+import com.yegorkapomidorka.headswap.aa.NaviField6
+import com.yegorkapomidorka.headswap.aa.NaviTurnInfo
 import com.yegorkapomidorka.headswap.aa.TranscodeOutput
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.aa.VideoQueueLimit
@@ -33,6 +36,12 @@ class SessionConfig(
     val micVrStatus: Boolean = true,
     /** Частота кадров: Авто (как просит ГУ) или фиксированная. В passthrough не действует. */
     val fpsSetting: FpsSetting = FpsSetting.DEFAULT,
+    /** Трек, обложка и прогресс из AA (MEDIA_INFO / MEDIA_PROGRESS_BAR). */
+    val metaMusic: Boolean = true,
+    /** Подсказки поворотов из AA (NAVI_NEXT_TURN_INFO по подписке ГУ moduleID=0). */
+    val metaNavi: Boolean = true,
+    /** Поле 6 NAVI_NEXT_TURN_INFO: иконка и/или time. */
+    val naviField6: NaviField6 = NaviField6.BOTH,
 )
 
 /**
@@ -69,6 +78,11 @@ class CarLifeSession(
     private val assembler = InnerAssembler()
     private val closed = AtomicBoolean(false)
     private val sched: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "cl-sched") }
+    private val metaExec = Executors.newSingleThreadExecutor { r -> Thread(r, "cl-meta").also { it.isDaemon = true } }
+    private var lastArtSrc: ByteArray? = null          // только нить cl-meta
+    private var lastArtJpeg = ByteArray(0)
+    private val turnIcons = HashMap<Int, ByteArray>()
+    @Volatile private var metaMusicOffLogged = false
     private var reader: Thread? = null
     private var writer: Thread? = null
 
@@ -150,6 +164,7 @@ class CarLifeSession(
         CarLifeState.status = "закрыто: $reason"
         try {
             sched.shutdownNow()
+            metaExec.shutdownNow()
         } catch (_: Exception) {
         }
         try {
@@ -330,10 +345,15 @@ class CarLifeSession(
                     sendCmd(Msg.CARLIFE_DATA_SUBSCRIBE_DONE, done)
                 }
             }
-            Msg.CARLIFE_DATA_SUBSCRIBE_START ->
-                AppLog.i("== SUBSCRIBE_START moduleID=${Msgs.subscribeIds(m.body)}, данные не шлю")
-            Msg.CARLIFE_DATA_SUBSCRIBE_STOP ->
-                AppLog.i("== SUBSCRIBE_STOP moduleID=${Msgs.subscribeIds(m.body)}")
+            Msg.CARLIFE_DATA_SUBSCRIBE_START, Msg.CARLIFE_DATA_SUBSCRIBE_STOP -> {
+                val on = m.type == Msg.CARLIFE_DATA_SUBSCRIBE_START
+                val ids = Msgs.subscribeIds(m.body)
+                // навигация выключена в настройках: подписку ГУ не передаём, NAVI_NEXT_TURN_INFO не уйдёт
+                val pass = ids.filter { it != SUB_NAVI || cfg.metaNavi }
+                AppLog.i("== SUBSCRIBE_${if (on) "START" else "STOP"} moduleID=$ids" +
+                    (if (pass.size != ids.size) ", навигация выключена в настройках" else ""))
+                bridge.onCarlifeSubscribe(pass, on)
+            }
             Msg.VIDEO_ENCODER_JPEG -> {
                 AppLog.i("== ГУ просит JPEG-режим видео: отвечаю ACK, но шлю только H.264")
                 sendCmd(Msg.VIDEO_ENCODER_JPEG_ACK, null)
@@ -375,7 +395,7 @@ class CarLifeSession(
                 val module = f?.let { PbReader.int(it, 1) }
                 val status = f?.let { PbReader.int(it, 2) }
                 if (module == CarlifeAudio.MODULE_MUSIC && AaBridgeCore.MODULE_MUSIC_ENABLED) {
-                    val on = bridge.isMediaInited
+                    val on = bridge.musicActive
                     AppLog.i("== MODULE_CONTROL MUSIC status=$status, отвечаю MODULE_STATUS MUSIC=${if (on) 1 else 0}", ui = false)
                     sendModuleStatus(CarlifeAudio.MODULE_MUSIC, if (on) 1 else 0)
                 } else if (module == MODULE_VR) {
@@ -604,6 +624,68 @@ class CarLifeSession(
         return true
     }
 
+    // ---------------- метаданные AA -> CarLife ----------------
+    // Все три сообщения идут через одну нить metaExec: порядок MEDIA_INFO -> PROGRESS сохраняется, а перекодирование
+    // обложки и рисование стрелки не держат монитор моста (зовут из нити AA-сессии под ним).
+
+    private fun metaSubmit(what: String, task: () -> Unit): Boolean {
+        if (closed.get()) return false
+        return try {
+            metaExec.execute {
+                try {
+                    if (!closed.get()) task()
+                } catch (e: Throwable) {
+                    AppLog.e("метаданные: $what", e)
+                }
+            }
+            true
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            false
+        }
+    }
+
+    override fun sendMediaInfo(info: CarlifeMediaInfo): Boolean {
+        if (!cfg.metaMusic) {
+            if (!metaMusicOffLogged) AppLog.i("метаданные: музыка выключена в настройках, MEDIA_INFO не шлю")
+            metaMusicOffLogged = true
+            return false
+        }
+        return metaSubmit("MEDIA_INFO") {
+            val art = info.art
+            val jpeg = when {
+                art == null || art.isEmpty() -> ByteArray(0)
+                art.contentEquals(lastArtSrc) -> lastArtJpeg
+                else -> {
+                    val t = SystemClock.elapsedRealtime()
+                    val j = MetaImages.albumJpeg(art) ?: ByteArray(0)
+                    AppLog.i("метаданные: обложка ${PbText.blob(art)} -> ${PbText.blob(j)} за ${SystemClock.elapsedRealtime() - t} мс", ui = false)
+                    lastArtSrc = art
+                    lastArtJpeg = j
+                    j
+                }
+            }
+            sendCmd(Msg.MEDIA_INFO, Msgs.mediaInfo(info, jpeg))
+        }
+    }
+
+    override fun sendMediaProgress(progressBar: Int): Boolean {
+        if (!cfg.metaMusic) return false
+        return metaSubmit("MEDIA_PROGRESS_BAR") { sendCmd(Msg.MEDIA_PROGRESS_BAR, Msgs.mediaProgress(progressBar)) }
+    }
+
+    override fun sendNaviTurn(info: NaviTurnInfo): Boolean {
+        if (!cfg.metaNavi) return false
+        return metaSubmit("NAVI_NEXT_TURN_INFO") {
+            // конец маршрута (action 3) - иконка пустая, как Baidu onNaviStateChange(false)
+            val icon = if (!cfg.naviField6.icon || info.action == 3) ByteArray(0) else turnIcons.getOrPut(info.nextTurn) {
+                MetaImages.turnIcon(info.nextTurn).also {
+                    AppLog.i("метаданные: стрелка nextTurn=${info.nextTurn} ${PbText.blob(it)}", ui = false)
+                }
+            }
+            sendCmd(Msg.NAVI_NEXT_TURN_INFO, Msgs.naviNextTurn(info, cfg.naviField6, icon))
+        }
+    }
+
     /** Транскодер моста: декодер AA (кадр режима) -> кроп -> Surface энкодера (выход режима). null, если MediaCodec не поднялся. */
     override fun createTranscoder(out: TranscodeOutput): VideoTranscoder? = try {
         AaTranscoder(
@@ -726,7 +808,10 @@ class CarLifeSession(
         if (Ch.isCmdStyle(o.chan)) {
             val m = Wire.parseCmd(o.inner) ?: return
             val decoded = if (m.body.isEmpty()) null else PbText.render(m.body, Schemas.byType[m.type])
-            AppLog.msg("TX", o.chan, o.inner.size, m.type, m.declaredLen, decoded, o.inner)
+            // прогресс трека - раз в секунду, обновление дистанции (action 2) - тоже: в файл, не в UI
+            val quiet = m.type == Msg.MEDIA_PROGRESS_BAR ||
+                (m.type == Msg.NAVI_NEXT_TURN_INFO && PbReader.parse(m.body)?.let { PbReader.int(it, 1) } == 2)
+            AppLog.msg("TX", o.chan, o.inner.size, m.type, m.declaredLen, decoded, o.inner, ui = !quiet)
         } else {
             val m = Wire.parseData(o.inner) ?: return
             if (o.chan != Ch.VIDEO) { // аудио моста: INIT/STOP всегда, DATA - первые и каждый 200-й
@@ -880,6 +965,9 @@ class CarLifeSession(
         private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
         private const val FEATURE_CONTENT_ENCRYPTION = "CONTENT_ENCRYPTION"
+
+        /** moduleID подписки CARLIFE_DATA_SUBSCRIBE на навигацию (CarlifeDataSubscribe: 0 навигация, 2 музыка). */
+        private const val SUB_NAVI = 0
 
         /** moduleID голосового помощника в MODULE_STATUS (ModuleStatusManage: 4 = VR). */
         private const val MODULE_VR = 4

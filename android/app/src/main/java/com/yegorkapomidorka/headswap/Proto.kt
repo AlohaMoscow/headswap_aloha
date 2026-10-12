@@ -107,7 +107,8 @@ object PbReader {
         fields.filter { it.number == number }
 }
 
-enum class Kind { INT, BOOL, STR, MSG }
+/** BYTES: двоичное поле (картинка), в лог только размер и формат. */
+enum class Kind { INT, BOOL, STR, MSG, BYTES }
 
 class FieldDef(val name: String, val kind: Kind, val sub: Schema? = null)
 
@@ -175,6 +176,19 @@ object Schemas {
         1 to int("cnt"), 2 to FieldDef("subscribemobileCarLifeInfo", Kind.MSG, subscribeInfo)
     )
     val themeState = schema("CarlifeThemeState", 1 to int("themeModes"))
+    val mediaInfo = schema(
+        "CarlifeMediaInfo",
+        1 to str("source"), 2 to str("song"), 3 to str("artist"), 4 to str("album"),
+        5 to FieldDef("albumArt", Kind.BYTES), 6 to int("duration"), 7 to int("playlistNum"), 8 to str("songId"), 9 to int("mode")
+    )
+    val mediaProgressBar = schema("CarlifeMediaProgressBar", 1 to int("progressBar"))
+
+    /** Поле 6: в 8.6.7 bytes turnIconData, в refs (apollo/CarProjection) int32 time; рендер по wire-type. */
+    val naviNextTurnInfo = schema(
+        "CarlifeNaviNextTurnInfo",
+        1 to int("action"), 2 to int("nextTurn"), 3 to str("roadName"), 4 to int("totalDistance"),
+        5 to int("remainDistance"), 6 to FieldDef("time|turnIconData", Kind.BYTES)
+    )
 
     /** type сообщения -> схема тела. */
     val byType: Map<Int, Schema> = mapOf(
@@ -197,6 +211,9 @@ object Schemas {
         Msg.CARLIFE_DATA_SUBSCRIBE_DONE to subscribeList,
         Msg.CARLIFE_DATA_SUBSCRIBE_START to subscribeList,
         Msg.CARLIFE_DATA_SUBSCRIBE_STOP to subscribeList,
+        Msg.MEDIA_INFO to mediaInfo,
+        Msg.MEDIA_PROGRESS_BAR to mediaProgressBar,
+        Msg.NAVI_NEXT_TURN_INFO to naviNextTurnInfo,
         Msg.CHANGE_MD_THEME to themeState,
         Msg.RESPONSE_MD_THEME_STATE to themeState,
         Msg.HU_AUTHEN_REQUEST to authenRequest,
@@ -238,11 +255,23 @@ object PbText {
                 2 -> {
                     val d = f.data!!
                     if (def?.kind == Kind.MSG && depth < 4) sb.append(render(d, def.sub, depth + 1))
+                    else if (def?.kind == Kind.BYTES) sb.append(blob(d))
                     else sb.append(quote(d))
                 }
             }
         }
         return sb.append('}').toString()
+    }
+
+    /** "<N Б PNG>": размер и формат по сигнатуре. */
+    fun blob(d: ByteArray): String {
+        val kind = when {
+            d.isEmpty() -> "пусто"
+            d.size >= 4 && d[0] == 0x89.toByte() && d[1] == 'P'.code.toByte() && d[2] == 'N'.code.toByte() -> "PNG"
+            d.size >= 3 && d[0] == 0xFF.toByte() && d[1] == 0xD8.toByte() -> "JPEG"
+            else -> "bin"
+        }
+        return "<${d.size} Б $kind>"
     }
 
     /** Строка в кавычках; непечатные байты как \xNN. */

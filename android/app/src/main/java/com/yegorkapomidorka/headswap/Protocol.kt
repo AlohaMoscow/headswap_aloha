@@ -1,5 +1,8 @@
 package com.yegorkapomidorka.headswap
 
+import com.yegorkapomidorka.headswap.aa.CarlifeMediaInfo
+import com.yegorkapomidorka.headswap.aa.NaviField6
+import com.yegorkapomidorka.headswap.aa.NaviTurnInfo
 import java.io.ByteArrayOutputStream
 
 /** Каналы внешнего заголовка (спека §2.2). */
@@ -50,6 +53,9 @@ object Msg {
     const val STATISTIC_INFO = 0x00018027
     const val MODULE_CONTROL = 0x00018028
     const val GEAR_INFO = 0x00010029
+    const val NAVI_NEXT_TURN_INFO = 0x00010030
+    const val MEDIA_INFO = 0x00010035
+    const val MEDIA_PROGRESS_BAR = 0x00010036
     const val CAR_DATA_SUBSCRIBE = 0x00010031
     const val CONNECT_EXCEPTION = 0x00010037
     const val CARLIFE_DATA_SUBSCRIBE = 0x00018043
@@ -133,14 +139,14 @@ object Msg {
         STATISTIC_INFO to "STATISTIC_INFO",
         MODULE_CONTROL to "MODULE_CONTROL",
         GEAR_INFO to "GEAR_INFO",
-        0x00010030 to "NAVI_NEXT_TURN_INFO",
+        NAVI_NEXT_TURN_INFO to "NAVI_NEXT_TURN_INFO",
         0x00010031 to "CAR_DATA_SUBSCRIBE",
         0x00010032 to "CAR_DATA_SUBSCRIBE_DONE(C++)",
         0x00018032 to "CAR_DATA_SUBSCRIBE_RSP(Java)",
         0x00010033 to "CAR_DATA_START",
         0x00010034 to "CAR_DATA_STOP",
-        0x00010035 to "MEDIA_INFO",
-        0x00010036 to "MEDIA_PROGRESS_BAR",
+        MEDIA_INFO to "MEDIA_INFO",
+        MEDIA_PROGRESS_BAR to "MEDIA_PROGRESS_BAR",
         CONNECT_EXCEPTION to "CONNECT_EXCEPTION",
         0x00010038 to "REQUEST_GO_TO_FOREGROUND",
         0x00010039 to "UI_ACTION_SOUND",
@@ -568,6 +574,30 @@ object Msgs {
     }
 
     fun themeState(mode: Int) = PbWriter().int32(1, mode).toByteArray()
+
+    /**
+     * CarlifeMediaInfo (MusicInfoSender.sendMusicInfoToVehicle :160-262). Все 9 полей proto2 required: пишем всегда,
+     * пустые строки тоже, иначе ГУ на protobuf с required выбросит сообщение. duration в секундах.
+     */
+    fun mediaInfo(i: CarlifeMediaInfo, albumArt: ByteArray): ByteArray =
+        PbWriter().string(1, i.source).string(2, i.song).string(3, i.artist).string(4, i.album)
+            .bytes(5, albumArt).int32(6, i.durationSeconds).int32(7, i.playlistNum).string(8, i.songId).int32(9, i.mode)
+            .toByteArray()
+
+    /** CarlifeMediaProgressBar (MusicInfoSender :293-316). */
+    fun mediaProgress(progressBar: Int) = PbWriter().int32(1, progressBar).toByteArray()
+
+    /**
+     * CarlifeNaviNextTurnInfo (RGEventHUDCollection :109-125). Поля 1-5 всегда; поле 6 по режиму [NaviField6]:
+     * bytes turnIconData (8.6.7) и/или int32 time (apollo-DuerOS / CarProjection) под одним номером 6.
+     */
+    fun naviNextTurn(t: NaviTurnInfo, field6: NaviField6, icon: ByteArray): ByteArray {
+        val w = PbWriter().int32(1, t.action).int32(2, t.nextTurn).string(3, t.roadName)
+            .int32(4, t.totalDistance).int32(5, t.remainDistance)
+        if (field6.time) w.int32(6, t.timeSeconds)
+        if (field6.icon) w.bytes(6, icon)
+        return w.toByteArray()
+    }
 
     fun frameRate(fps: Int) = PbWriter().int32(1, fps).toByteArray()
 }
