@@ -598,6 +598,128 @@ class AaMetaTest {
         assertEquals(2, q.mediaPackets(CarlifeAudio.MEDIA_DATA))
     }
 
+    /** AA играет, ГУ ушло на радио (MUSIC=0): 127 ушёл, huPausedAa. Возвращает риг, пир и счётчик пакетов MEDIA. */
+    private inner class PausedRig {
+        val r = Rig()
+        val peer = FakePeer()
+        val pcm = ByteArray(640)
+
+        init {
+            r.core.peer = peer
+            r.start()
+            r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+            r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+            r.core.onCarlifeMusicControl(0)
+            r.now += 2000
+        }
+
+        fun media() = r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        fun mediaData() = r.link.audio.count { it == CarlifeAudio.MEDIA_DATA }
+    }
+
+    @Test
+    fun btAutoplayAfterHfpKeepsHuPauseAndRepauses() {
+        val p = PausedRig()
+        val r = p.r
+        assertEquals(listOf(127), p.peer.keys.toList())
+        r.core.onHuBtHfpConnection(2)
+        r.now += 6000
+        r.core.onCarlifeTouch(1, 10, 10)          // UP не ввод пользователя
+        r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        assertEquals("автоплей после HFP: снова 127", listOf(127, 127), p.peer.keys.toList())
+        assertTrue(r.logs.any { it.contains("автоплей, снова KEYCODE 127") })
+        val before = p.mediaData()
+        p.media()
+        assertEquals("MEDIA не уходит", before, p.mediaData())
+
+        // не чаще раза в секунду
+        r.now += 500
+        r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        assertEquals(listOf(127, 127), p.peer.keys.toList())
+        // автоплей через статус плеера: paused -> playing
+        r.now += 600
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 2))!!)
+        r.now += 1500
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 3))!!)
+        assertEquals(listOf(127, 127, 127), p.peer.keys.toList())
+        p.media()
+        assertEquals("MEDIA всё ещё не уходит", before, p.mediaData())
+    }
+
+    @Test
+    fun btAutoplayAfterHfpReleasedByUserInput() {
+        for (input in listOf<(Rig) -> Unit>(
+            { it.core.onCarlifeTouch(0, 10, 10) },
+            { it.core.onCarlifeHardKey(0x06) },
+            { it.core.onCarlifeVoiceKey() },
+        )) {
+            val p = PausedRig()
+            val r = p.r
+            r.core.onHuBtHfpConnection(2)
+            r.now += 6000
+            input(r)
+            r.now += 1000
+            r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+            val before = p.mediaData()
+            p.media()
+            assertEquals("play после ввода пользователя: данные идут", before + 1, p.mediaData())
+            assertEquals("второго 127 нет", 1, p.peer.keys.count { it == 127 })
+        }
+    }
+
+    @Test
+    fun autoplayWithoutHfpReleasesPause() {
+        val p = PausedRig()
+        val before = p.mediaData()
+        p.r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        p.media()
+        assertEquals("без HFP play снимает паузу", before + 1, p.mediaData())
+        assertEquals(listOf(127), p.peer.keys.toList())
+
+        // HFP отключился (state=0) окно не открывает
+        val q = PausedRig()
+        q.r.core.onHuBtHfpConnection(0)
+        q.r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        assertEquals(listOf(127), q.peer.keys.toList())
+        val qBefore = q.mediaData()
+        q.media()
+        assertEquals(qBefore + 1, q.mediaData())
+    }
+
+    @Test
+    fun autoplayAfterHfpWindowReleasesPause() {
+        val p = PausedRig()
+        p.r.core.onHuBtHfpConnection(2)
+        p.r.now += AaBridgeCore.BT_AUTOPLAY_WINDOW_MS + 1
+        p.r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 2))!!)
+        p.r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 3))!!)
+        assertEquals("окно HFP истекло: 127 нет", listOf(127), p.peer.keys.toList())
+        val before = p.mediaData()
+        p.media()
+        assertEquals(before + 1, p.mediaData())
+    }
+
+    @Test
+    fun btAutoplayGuardCanBeDisabled() {
+        AaBridgeCore.BT_AUTOPLAY_GUARD_ENABLED = false
+        try {
+            val p = PausedRig()
+            p.r.core.onHuBtHfpConnection(2)
+            p.r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+            assertEquals(listOf(127), p.peer.keys.toList())
+        } finally {
+            AaBridgeCore.BT_AUTOPLAY_GUARD_ENABLED = true
+        }
+    }
+
+    @Test
+    fun playerStopLogsDiagnostics() {
+        val p = PausedRig()
+        p.r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 2))!!)
+        val line = p.r.logs.single { it.contains("AA плеер остановился") }
+        assertTrue(line, line.contains("KEYCODE 127 2000 мс назад") && line.contains("ввод пользователя не было") && line.contains("BT HFP не было"))
+    }
+
     @Test
     fun huMusicOffIgnoredWhenAaNotPlaying() {
         val r = Rig()

@@ -409,6 +409,11 @@ class CarLifeSession(
                     }
                 }
             }
+            Msg.BT_HFP_CONNECTION -> {
+                // поле 1: 2 = телефон подключился к ГУ по BT, 0 = отключился; после подключения AA сам запускает автоплей
+                val state = PbReader.parse(m.body)?.let { PbReader.int(it, 1) }
+                bridge.onHuBtHfpConnection(state)
+            }
             Msg.MD_EXIT -> close("ГУ прислало MD_EXIT")
             else -> Unit // всё остальное только в логе
         }

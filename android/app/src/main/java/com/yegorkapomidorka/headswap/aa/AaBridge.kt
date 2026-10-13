@@ -187,6 +187,9 @@ class AaBridgeCore(
     private var carlifePaused = false          // VIDEO_ENCODER_PAUSE после последнего START
     private var exitPending = false            // «Выйти» в AA: GO_TO_DESKTOP ушёл, ждём PAUSE от ГУ, чтобы отдать AA NATIVE
     private var huPausedAa = false             // плеер AA поставили на паузу, когда ГУ ушло на свой источник; MEDIA не пересылаем до play
+    @Volatile private var lastUserInputMs = NEVER   // последний тач DOWN / клавиша / шайба / голос с ГУ
+    private var lastHfpConnectMs = NEVER       // ГУ прислало BT_HFP_CONNECTION=connected (дальше AA сам запускает автоплей по BT)
+    private var lastPauseKeyMs = NEVER         // когда последний раз слали AA KEYCODE 127
     private var naviSent = false               // MODULE_STATUS NAVI=1 ушёл (держит TTS и/или маршрут)
     private var ttsNaviHeld = false            // NAVI=1 нужен ради TTS (до stopAllAudio)
     private var routeNaviHeld = false          // NAVI=1 нужен ради маршрута (MetaRelay)
@@ -327,7 +330,7 @@ class AaBridgeCore(
             val p = peer
             if (meta.playing && !huPausedAa && p != null) {
                 log("BRIDGE ГУ ушло на свой источник (MUSIC=0${if (carlifePaused) " после PAUSE" else ""}): AA KEYCODE $KEYCODE_MEDIA_PAUSE, MEDIA на паузу", true)
-                p.sendKey(KEYCODE_MEDIA_PAUSE)
+                sendPauseKey(p)
                 huPausedAa = true
             }
             requestMediaPause("ГУ MODULE_CONTROL MUSIC=0")
@@ -335,12 +338,40 @@ class AaBridgeCore(
         return musicActive
     }
 
-    /** AA снова заиграл сам (play пользователя): звук опять пересылаем. */
+    private fun sendPauseKey(p: AaPeer) {
+        lastPauseKeyMs = clockMs()
+        p.sendKey(KEYCODE_MEDIA_PAUSE)
+    }
+
+    /** BT_HFP_CONNECTION от ГУ: state=2 - телефон подключился к ГУ по Bluetooth (0 - отключился). */
+    @Synchronized
+    fun onHuBtHfpConnection(state: Int?) {
+        if (state == 2) {
+            lastHfpConnectMs = clockMs()
+            log("BRIDGE ГУ: BT HFP подключён (автоплей AA в ближайшие $BT_AUTOPLAY_WINDOW_MS мс не снимет паузу)", true)
+        } else {
+            log("BRIDGE ГУ: BT HFP состояние=$state", true)
+        }
+    }
+
+    /** AA снова заиграл сам (play пользователя): звук опять пересылаем. После BT HFP без ввода с ГУ это автоплей - паузу держим. */
     private fun releaseHuPause(why: String) {
         if (!huPausedAa) return
+        val now = clockMs()
+        val p = peer
+        if (BT_AUTOPLAY_GUARD_ENABLED && p != null && now - lastHfpConnectMs < BT_AUTOPLAY_WINDOW_MS &&
+            now - lastUserInputMs > USER_INPUT_WINDOW_MS) {
+            if (now - lastPauseKeyMs >= REPAUSE_MIN_MS) {
+                log("BRIDGE $why через ${now - lastHfpConnectMs} мс после BT HFP без ввода пользователя: автоплей, снова KEYCODE $KEYCODE_MEDIA_PAUSE", true)
+                sendPauseKey(p)
+            }
+            return
+        }
         huPausedAa = false
         log("BRIDGE $why: MEDIA снова пересылаю", true)
     }
+
+    private fun ago(t: Long): String = if (t == NEVER) "не было" else "${clockMs() - t} мс назад"
 
     /** CARLIFE_DATA_SUBSCRIBE_START (on=true) / STOP от ГУ; moduleID подписки: 0 навигация, 2 музыка. */
     @Synchronized
@@ -412,6 +443,7 @@ class AaBridgeCore(
 
     /** TOUCH_ACTION ГУ -> AA: 0 DOWN, 1 UP, 2 MOVE; координаты кадра ГУ -> кадр AA через [VideoMode.mapTouch] (без margin-ов 1:1). */
     fun onCarlifeTouch(action: Int, x: Int, y: Int) {
+        if (action == 0) lastUserInputMs = clockMs()
         if (action !in 0..2) {
             log("BRIDGE тач action=$action x=$x y=$y не передаю (нет аналога в AA)", false)
             return
@@ -431,6 +463,7 @@ class AaBridgeCore(
 
     /** TOUCH_CAR_HARD_KEY_CODE ГУ (кнопки руля) -> AA: нажатие Android KeyEvent по [HARD_KEY_TO_ANDROID]. */
     fun onCarlifeHardKey(code: Int) {
+        lastUserInputMs = clockMs()
         HARD_KEY_TO_ROTARY[code]?.let { delta ->
             val p = peer
             if (p == null) {
@@ -457,6 +490,7 @@ class AaBridgeCore(
 
     /** MODULE_CONTROL VR=1 от ГУ (кнопка голоса) -> AA KEYCODE_SEARCH: AA открывает ассистента и сам просит микрофон. */
     fun onCarlifeVoiceKey() {
+        lastUserInputMs = clockMs()
         val p = peer
         if (p == null) {
             log("BRIDGE кнопка голоса проигнорирована: AA не подключён", true)
@@ -689,6 +723,7 @@ class AaBridgeCore(
     /** Плеер AA сменил состояние (ch9). MUSIC по нему - только когда звук не по USB: иначе им владеет MEDIA INIT/PAUSE. */
     private fun musicByState(playing: Boolean) {
         if (playing) releaseHuPause("AA заиграл")
+        else log("BRIDGE AA плеер остановился: наш KEYCODE $KEYCODE_MEDIA_PAUSE ${ago(lastPauseKeyMs)}, ввод пользователя ${ago(lastUserInputMs)}, BT HFP ${ago(lastHfpConnectMs)}", true)
         if (audioViaUsb || !MODULE_MUSIC_ENABLED || !carlifeStarted) return
         if (link.sendModuleStatus(CarlifeAudio.MODULE_MUSIC, if (playing) 1 else 0)) {
             log("BRIDGE CarLife MODULE_STATUS MUSIC=${if (playing) 1 else 0} (плеер AA, звук не по USB)", true)
@@ -1106,6 +1141,16 @@ class AaBridgeCore(
 
         /** ГУ ушло на свой источник (PAUSE + MODULE_CONTROL MUSIC=0): AA на паузу, на следующем START - play. */
         @Volatile @JvmStatic var HU_MUSIC_FOLLOW_ENABLED = true
+
+        /**
+         * Mazda CX-5: AA сам запускает музыку через 5-9 с после BT_HFP_CONNECTION. Пока ГУ на своём источнике, такой play
+         * (в окне после HFP, без ввода с ГУ) паузу не снимает, а снова получает KEYCODE 127.
+         */
+        @Volatile @JvmStatic var BT_AUTOPLAY_GUARD_ENABLED = true
+
+        const val BT_AUTOPLAY_WINDOW_MS = 20_000L
+        const val USER_INPUT_WINDOW_MS = 3_000L
+        private const val REPAUSE_MIN_MS = 1_000L
 
         const val TTS_STOP_DELAY_MS = 1500L
         const val MEDIA_AFTER_TTS_MS = 300L
