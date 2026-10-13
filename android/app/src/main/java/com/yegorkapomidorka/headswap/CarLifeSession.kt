@@ -396,7 +396,7 @@ class CarLifeSession(
                 val module = f?.let { PbReader.int(it, 1) }
                 val status = f?.let { PbReader.int(it, 2) }
                 if (module == CarlifeAudio.MODULE_MUSIC && AaBridgeCore.MODULE_MUSIC_ENABLED) {
-                    val on = bridge.musicActive
+                    val on = bridge.onCarlifeMusicControl(status)
                     AppLog.i("== MODULE_CONTROL MUSIC status=$status, отвечаю MODULE_STATUS MUSIC=${if (on) 1 else 0}", ui = false)
                     sendModuleStatus(CarlifeAudio.MODULE_MUSIC, if (on) 1 else 0)
                 } else if (module == MODULE_VR) {
@@ -408,6 +408,11 @@ class CarLifeSession(
                         else -> bridge.onCarlifeVoiceKey()
                     }
                 }
+            }
+            Msg.BT_HFP_CONNECTION -> {
+                // поле 1: 2 = телефон подключился к ГУ по BT, 0 = отключился; после подключения AA сам запускает автоплей
+                val state = PbReader.parse(m.body)?.let { PbReader.int(it, 1) }
+                bridge.onHuBtHfpConnection(state)
             }
             Msg.MD_EXIT -> close("ГУ прислало MD_EXIT")
             else -> Unit // всё остальное только в логе
@@ -937,8 +942,14 @@ class CarLifeSession(
     private fun tick() {
         if (closed.get()) return
         val now = SystemClock.elapsedRealtime()
-        // Пустых keepalive 0x20001 len=0 в простое НЕТ: у Baidu это служебные пакеты foreground/background,
-        // а ГУ не должен оставаться без кадров - это обеспечивает энкодер (repeat-previous-frame-after 100 мс).
+        // Пустых keepalive 0x20001 len=0 при идущем видео НЕТ: кадры обеспечивает энкодер (repeat-previous-frame-after
+        // 100 мс). На PAUSE (ГУ на своём источнике) канал иначе молчит: Desay G6S (Mazda CX-5) через ~22 с тишины
+        // рвёт USB (EIO, лог Ивана 2026-10-12), поэтому шлём пустой VIDEO_DATA, как Baidu sendEmptyPacketBackground.
+        if (paused && PAUSE_KEEPALIVE_ENABLED && now - lastVideoTx >= PAUSE_KEEPALIVE_MS) {
+            if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_DATA раз в ${PAUSE_KEEPALIVE_MS} мс, чтобы канал не молчал")
+            lastVideoTx = now
+            send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), ByteArray(0)))
+        }
         if (rxBytes == 0L && now - t0 > SILENCE_MS && (now - t0) % 10_000 < 1000) {
             AppLog.i("ГУ не прислало ни одного байта за ${(now - t0) / 1000} с (ждём HU_PROTOCOL_VERSION)")
             CarLifeState.status = "ГУ молчит, байт от него нет"
@@ -1004,6 +1015,10 @@ class CarLifeSession(
         private const val BITRATE_POLL_MS = 100L
         private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
+        private const val PAUSE_KEEPALIVE_MS = 2_000L
+
+        /** Пустой VIDEO_DATA раз в 2 с, пока ГУ держит PAUSE. */
+        @Volatile @JvmStatic var PAUSE_KEEPALIVE_ENABLED = true
         private const val FEATURE_CONTENT_ENCRYPTION = "CONTENT_ENCRYPTION"
 
         /** moduleID подписки CARLIFE_DATA_SUBSCRIBE на навигацию (CarlifeDataSubscribe: 0 навигация, 2 музыка). */
