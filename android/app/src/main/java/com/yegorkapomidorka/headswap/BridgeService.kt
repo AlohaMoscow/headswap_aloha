@@ -52,6 +52,7 @@ class BridgeService : Service() {
     private var host: BridgeHost? = null
     private var stopRequested = false
     private var wakeLock: PowerManager.WakeLock? = null
+    private val audioDiag = AudioDiag()
     /** Автозапуск пропущен из-за неподключённой службы спецвозможностей: RETRY запустит его, когда она появится. */
     @Volatile private var serverStartPending = false
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "bridge-grace").also { it.isDaemon = true } }
@@ -71,6 +72,7 @@ class BridgeService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.notif_channel_bridge), NotificationManager.IMPORTANCE_LOW))
         registerReceiver(detachReceiver, IntentFilter(UsbManager.ACTION_USB_ACCESSORY_DETACHED), Context.RECEIVER_EXPORTED)
+        audioDiag.start(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -317,6 +319,7 @@ class BridgeService : Service() {
         } catch (_: Exception) {
         }
         stopRequested = true
+        audioDiag.stop()
         session?.close("сервис уничтожен")
         host?.shutdown("сервис уничтожен")
         super.onDestroy()

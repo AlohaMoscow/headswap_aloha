@@ -11,6 +11,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import com.yegorkapomidorka.headswap.aa.AapMessages as M
 
@@ -54,6 +56,17 @@ class MetaLink : CarlifeLink {
 
 class AaMetaTest {
     private val png = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte(), 1, 2, 3)
+
+    // NAVI=1 на весь маршрут по умолчанию выключен; тесты реле проверяют включённый режим, выключенный - routeNaviOffByDefault
+    @Before
+    fun routeNaviOn() {
+        AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = true
+    }
+
+    @After
+    fun routeNaviOff() {
+        AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = false
+    }
 
     private fun status(state: Int, pos: Int, source: String = "Spotify") =
         AapPb().v(1, state).str(2, source).v(3, pos).bool(4, false).bool(5, false).bool(6, false).toByteArray()
@@ -263,6 +276,7 @@ class AaMetaTest {
     fun musicSubscriptionStopSilences() {
         val r = Rig()
         r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
         r.core.onCarlifeSubscribe(listOf(2), false)
         r.core.onMediaMetadata(AaMeta.parseMediaMetadata(metadata("A"))!!)
         assertTrue(r.link.infos.isEmpty())
@@ -448,6 +462,7 @@ class AaMetaTest {
         val r = Rig()
         r.core.onCarlifeSubscribe(listOf(0), true)
         r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 10))!!)
         r.core.onMediaMetadata(AaMeta.parseMediaMetadata(metadata("A"))!!)
         r.core.onNavStatus(1)
         r.core.onNavTurn(AaMeta.parseNavState(navState(8, "Main St"))!!)
@@ -461,6 +476,318 @@ class AaMetaTest {
         assertEquals(listOf(1), link2.navi())
         assertEquals(1, link2.turns.single().action)
         assertEquals(300, link2.turns.single().remainDistance)
+    }
+
+    @Test
+    fun routeNaviOffByDefault() {
+        AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = false
+        val r = Rig()
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        r.core.onNavTurn(AaMeta.parseNavState(navState(8, "Main St"))!!)
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(300, 30))!!)
+        assertTrue("NAVI=1 на маршрут не шлём", r.link.navi().isEmpty())
+        assertEquals("а манёвры идут", 1, r.link.turns.size)
+        r.core.onAudioData(M.CH_AUDIO_SPEECH, ByteArray(640), 0)
+        assertEquals("NAVI=1 вокруг TTS остаётся", listOf(1), r.link.navi())
+    }
+
+    @Test
+    fun mediaInfoWaitsForPlaying() {
+        val r = Rig()
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 5))!!)
+        r.core.onMediaMetadata(AaMeta.parseMediaMetadata(metadata("A"))!!)
+        assertTrue("на паузе MEDIA_INFO не шлём", r.link.infos.isEmpty())
+        assertTrue("и прогресс тоже", r.link.progress.isEmpty())
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 6))!!)
+        assertEquals("заиграл: отложенный трек уходит", "A", r.link.infos.single().song)
+        assertEquals("прогресс ушёл", 1, r.link.progress.size)
+
+        // AA умерла: трек протух, после рестарта без нового metadata ничего не показываем
+        r.core.onAaEnded(true)
+        r.now += 5000
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        assertEquals(1, r.link.infos.size)
+    }
+
+    @Test
+    fun huMusicOffPausesAaWithAndWithoutPause() {
+        assertEquals(127, AaBridgeCore.KEYCODE_MEDIA_PAUSE)
+        // Desay G6S: PAUSE, затем MUSIC=0
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onCarlifePause()
+        r.core.onCarlifeMusicControl(1)
+        assertTrue("MUSIC=1 не пауза", peer.keys.isEmpty())
+        r.core.onCarlifeMusicControl(0)
+        assertEquals(listOf(AaBridgeCore.KEYCODE_MEDIA_PAUSE), peer.keys.toList())
+
+        // другие ГУ: MUSIC=0 без PAUSE
+        val q = Rig()
+        val qPeer = FakePeer()
+        q.core.peer = qPeer
+        q.start()
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        q.core.onCarlifeMusicControl(0)
+        assertEquals(listOf(AaBridgeCore.KEYCODE_MEDIA_PAUSE), qPeer.keys.toList())
+    }
+
+    @Test
+    fun huLeavesForOwnSourceNoAutoPlayOnStartAndNoSecondPause() {
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onCarlifePause()
+        r.core.onCarlifeMusicControl(0)
+        r.core.onCarlifeMusicControl(0)
+        assertEquals("повторный MUSIC=0 не шлёт второй 127", listOf(127), peer.keys.toList())
+
+        r.start()
+        assertEquals("START не запускает музыку (126 нет)", listOf(127), peer.keys.toList())
+        r.core.onCarlifePause()
+        r.start()
+        assertEquals(listOf(127), peer.keys.toList())
+    }
+
+    @Test
+    fun huMusicOffDropsAaBufferTailUntilAaPlaysAgain() {
+        val pcm = ByteArray(640)
+        fun media(r: Rig) = r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        fun Rig.mediaPackets(type: Int) = link.audio.count { it == type }
+
+        // выход из паузы по началу медиаканала AA
+        val r = Rig()
+        r.core.peer = FakePeer()
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        media(r)
+        assertEquals(1, r.mediaPackets(CarlifeAudio.MEDIA_INIT))
+        assertEquals(1, r.mediaPackets(CarlifeAudio.MEDIA_DATA))
+        r.core.onCarlifeMusicControl(0)
+        assertEquals(1, r.mediaPackets(CarlifeAudio.MEDIA_PAUSE))
+        val sent = r.link.audio.size
+        media(r)
+        media(r)
+        assertEquals("хвост буфера на ГУ не идёт: ни INIT, ни DATA", sent, r.link.audio.size)
+        r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        media(r)
+        assertEquals("после MEDIA START данные снова идут", 2, r.mediaPackets(CarlifeAudio.MEDIA_INIT))
+        assertEquals(2, r.mediaPackets(CarlifeAudio.MEDIA_DATA))
+
+        // выход из паузы по статусу playing после paused
+        val q = Rig()
+        q.core.peer = FakePeer()
+        q.start()
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        media(q)
+        q.core.onCarlifeMusicControl(0)
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 2))!!)
+        val qSent = q.link.audio.size
+        media(q)
+        assertEquals("на паузе AA данные не идут", qSent, q.link.audio.size)
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 3))!!)
+        media(q)
+        assertEquals("заиграл: данные снова идут", 2, q.mediaPackets(CarlifeAudio.MEDIA_INIT))
+        assertEquals(2, q.mediaPackets(CarlifeAudio.MEDIA_DATA))
+    }
+
+    /** AA играет, ГУ ушло на радио (MUSIC=0): 127 ушёл, huPausedAa. Возвращает риг, пир и счётчик пакетов MEDIA. */
+    private inner class PausedRig {
+        val r = Rig()
+        val peer = FakePeer()
+        val pcm = ByteArray(640)
+
+        init {
+            r.core.peer = peer
+            r.start()
+            r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+            r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+            r.core.onCarlifeMusicControl(0)
+            r.now += 2000
+        }
+
+        fun media() = r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        fun mediaData() = r.link.audio.count { it == CarlifeAudio.MEDIA_DATA }
+    }
+
+    @Test
+    fun btAutoplayAfterHfpKeepsHuPauseAndRepauses() {
+        val p = PausedRig()
+        val r = p.r
+        assertEquals(listOf(127), p.peer.keys.toList())
+        r.core.onHuBtHfpConnection(2)
+        r.now += 6000
+        r.core.onCarlifeTouch(1, 10, 10)          // UP не ввод пользователя
+        r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        assertEquals("автоплей после HFP: снова 127", listOf(127, 127), p.peer.keys.toList())
+        assertTrue(r.logs.any { it.contains("автоплей, снова KEYCODE 127") })
+        val before = p.mediaData()
+        p.media()
+        assertEquals("MEDIA не уходит", before, p.mediaData())
+
+        // не чаще раза в секунду
+        r.now += 500
+        r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        assertEquals(listOf(127, 127), p.peer.keys.toList())
+        // автоплей через статус плеера: paused -> playing
+        r.now += 600
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 2))!!)
+        r.now += 1500
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 3))!!)
+        assertEquals(listOf(127, 127, 127), p.peer.keys.toList())
+        p.media()
+        assertEquals("MEDIA всё ещё не уходит", before, p.mediaData())
+    }
+
+    @Test
+    fun btAutoplayAfterHfpReleasedByUserInput() {
+        for (input in listOf<(Rig) -> Unit>(
+            { it.core.onCarlifeTouch(0, 10, 10) },
+            { it.core.onCarlifeHardKey(0x06) },
+            { it.core.onCarlifeVoiceKey() },
+        )) {
+            val p = PausedRig()
+            val r = p.r
+            r.core.onHuBtHfpConnection(2)
+            r.now += 6000
+            input(r)
+            r.now += 1000
+            r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+            val before = p.mediaData()
+            p.media()
+            assertEquals("play после ввода пользователя: данные идут", before + 1, p.mediaData())
+            assertEquals("второго 127 нет", 1, p.peer.keys.count { it == 127 })
+        }
+    }
+
+    @Test
+    fun autoplayWithoutHfpReleasesPause() {
+        val p = PausedRig()
+        val before = p.mediaData()
+        p.r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        p.media()
+        assertEquals("без HFP play снимает паузу", before + 1, p.mediaData())
+        assertEquals(listOf(127), p.peer.keys.toList())
+
+        // HFP отключился (state=0) окно не открывает
+        val q = PausedRig()
+        q.r.core.onHuBtHfpConnection(0)
+        q.r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        assertEquals(listOf(127), q.peer.keys.toList())
+        val qBefore = q.mediaData()
+        q.media()
+        assertEquals(qBefore + 1, q.mediaData())
+    }
+
+    @Test
+    fun autoplayAfterHfpWindowReleasesPause() {
+        val p = PausedRig()
+        p.r.core.onHuBtHfpConnection(2)
+        p.r.now += AaBridgeCore.BT_AUTOPLAY_WINDOW_MS + 1
+        p.r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 2))!!)
+        p.r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 3))!!)
+        assertEquals("окно HFP истекло: 127 нет", listOf(127), p.peer.keys.toList())
+        val before = p.mediaData()
+        p.media()
+        assertEquals(before + 1, p.mediaData())
+    }
+
+    @Test
+    fun btAutoplayGuardCanBeDisabled() {
+        AaBridgeCore.BT_AUTOPLAY_GUARD_ENABLED = false
+        try {
+            val p = PausedRig()
+            p.r.core.onHuBtHfpConnection(2)
+            p.r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+            assertEquals(listOf(127), p.peer.keys.toList())
+        } finally {
+            AaBridgeCore.BT_AUTOPLAY_GUARD_ENABLED = true
+        }
+    }
+
+    @Test
+    fun playerStopLogsDiagnostics() {
+        val p = PausedRig()
+        p.r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 2))!!)
+        val line = p.r.logs.single { it.contains("AA плеер остановился") }
+        assertTrue(line, line.contains("KEYCODE 127 2000 мс назад") && line.contains("ввод пользователя не было") && line.contains("BT HFP не было"))
+    }
+
+    @Test
+    fun huMusicOffIgnoredWhenAaNotPlaying() {
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 1))!!)
+        r.core.onCarlifeMusicControl(0)
+        r.core.onCarlifePause()
+        r.core.onCarlifeMusicControl(0)
+        r.start()
+        assertTrue(peer.keys.isEmpty())
+    }
+
+    @Test
+    fun huMusicOffDropsAaBufferTailEvenWhenAaAlreadyPaused() {
+        val pcm = ByteArray(640)
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 1))!!)       // AA на паузе (ассистент / пользователь)
+        assertFalse("MUSIC=0: ответ MUSIC=0", r.core.onCarlifeMusicControl(0))
+        assertTrue("AA не играет: 127 не шлём", peer.keys.isEmpty())
+        assertTrue(r.logs.any { it.contains("AA не играет: хвост MEDIA не пересылаю до play") })
+
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        assertEquals("хвост буфера на ГУ не идёт: ни MEDIA INIT, ни DATA", 0, r.link.audio.count { it == CarlifeAudio.MEDIA_INIT || it == CarlifeAudio.MEDIA_DATA })
+
+        r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        assertEquals("после MEDIA START данные идут", 1, r.link.audio.count { it == CarlifeAudio.MEDIA_INIT })
+        assertEquals(1, r.link.audio.count { it == CarlifeAudio.MEDIA_DATA })
+        assertTrue("второго 127 нет", peer.keys.isEmpty())
+    }
+
+    @Test
+    fun huMusicOffAnswersZeroWhileTtsDefersMediaPause() {
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, ByteArray(640), 0)
+        r.core.onAudioData(M.CH_AUDIO_SPEECH, ByteArray(640), 0)            // TTS инициализирован
+        assertTrue("MEDIA играет: MUSIC активна", r.core.musicActive)
+        assertFalse("MUSIC=0: ответ MUSIC=0, хотя пауза MEDIA отложена", r.core.onCarlifeMusicControl(0))
+        assertFalse("пауза MEDIA ждёт конца TTS", r.link.audio.contains(CarlifeAudio.MEDIA_PAUSE))
+        assertTrue(r.logs.any { it.contains("MEDIA пауза отложена") })
+        assertEquals("AA на паузе: 127 ушёл", listOf(AaBridgeCore.KEYCODE_MEDIA_PAUSE), peer.keys.toList())
+
+        // хвост MEDIA во время TTS на ГУ не идёт
+        val before = r.link.audio.count { it == CarlifeAudio.MEDIA_DATA }
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, ByteArray(640), 0)
+        assertEquals(before, r.link.audio.count { it == CarlifeAudio.MEDIA_DATA })
+    }
+
+    @Test
+    fun huMusicOffAnswersZeroWhenMediaPlayingOverUsb() {
+        val r = Rig()
+        r.core.peer = FakePeer()
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, ByteArray(640), 0)
+        assertTrue("MEDIA играет: MUSIC активна", r.core.musicActive)
+        assertFalse("MUSIC=0: MEDIA на паузе, ответ MUSIC=0", r.core.onCarlifeMusicControl(0))
+        assertTrue(r.link.audio.contains(CarlifeAudio.MEDIA_PAUSE))
     }
 
     @Test

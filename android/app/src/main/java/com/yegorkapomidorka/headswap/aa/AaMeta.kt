@@ -427,6 +427,7 @@ class MetaRelay(
     private var mediaSource = ""
     private var info: CarlifeMediaInfo? = null
     private var infoKey: String? = null
+    private var infoPending = false            // MEDIA_INFO отложен, пока AA не играет
     private var trackSeq = 0
     private var posMs: Int? = null
     private var lastProgressMs: Int? = null
@@ -493,12 +494,16 @@ class MetaRelay(
     // --- музыка ---
     fun onMediaStatus(s: AaMediaStatus) {
         s.source?.takeIf { it.isNotBlank() }?.let { mediaSource = it }
+        s.playbackSeconds?.let { posMs = it * PROGRESS_UNIT }
         if (s.state != null && s.playing != playing) {
             playing = s.playing
             log("META музыка: ${AaMeta.stateName(s.state)}", true)
             musicState(playing)
+            if (playing && infoPending) {
+                replayMusic("AA заиграл")
+                return
+            }
         }
-        s.playbackSeconds?.let { posMs = it * PROGRESS_UNIT }
         sendProgress(force = false)
     }
 
@@ -530,6 +535,13 @@ class MetaRelay(
 
     private fun sendInfo(why: String) {
         val i = info ?: return
+        // трек на паузе не показываем: ГУ (Desay G6S, Mazda) считает CarLife-музыку активной и глушит радио
+        if (!playing) {
+            infoPending = true
+            log("META MEDIA_INFO отложен ($why): AA не играет; $i", false)
+            return
+        }
+        infoPending = false
         if (!ready() || !musicSubscribed) {
             log("META MEDIA_INFO отложен ($why): ${if (!ready()) "CarLife не START" else "музыка не подписана"}; $i", false)
             return
@@ -540,7 +552,7 @@ class MetaRelay(
 
     private fun sendProgress(force: Boolean) {
         val p = posMs ?: return
-        if (!ready() || !musicSubscribed || info == null) return
+        if (!playing || !ready() || !musicSubscribed || info == null) return
         val now = clockMs()
         val last = lastProgressMs
         if (!force && last != null) {
@@ -683,6 +695,10 @@ class MetaRelay(
             musicState(false)
         }
         posMs = null
+        // трек умер вместе с AA: после рестарта не показывать протухший
+        info = null
+        infoKey = null
+        infoPending = false
     }
 
     companion object {
