@@ -216,8 +216,8 @@ class ProtocolTest {
         // 1728x648 и 1920x720 больше 3600 макроблоков: level 4.0
         assertEquals(0x28, AnnexB.fixSps(exynos, 1728, 648)[7].toInt())
         assertEquals(0x28, AnnexB.fixSps(exynos, 1920, 720)[7].toInt())
-        // 2240x950 (8400 MB) > MaxFS level 4.0: level 4.2; 2560x1440 (14400 MB): level 5.0
-        assertEquals(0x2A, AnnexB.fixSps(exynos, 2240, 950)[7].toInt())
+        // 2240x976 (8540 MB) > MaxFS level 4.0: level 4.2; 2560x1440 (14400 MB): level 5.0
+        assertEquals(0x2A, AnnexB.fixSps(exynos, 2240, 976)[7].toInt())
         assertEquals(0x32, AnnexB.fixSps(exynos, 2560, 1440)[7].toInt())
         assertEquals(0x28, AnnexB.fixSps(exynos, 1920, 1080)[7].toInt())
         // qti (80/31), mtk (level 40), AA passthrough (00/31) и кадры без SPS - тот же массив

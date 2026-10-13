@@ -62,8 +62,8 @@
     <string name="video_wide_mid_sub">1728×648: родное разрешение экрана Мазды</string>
     <string name="video_wide_hd_title">Широкий 8:3 HD (обрезка)</string>
     <string name="video_wide_hd_sub">1920×720: чётче и мельче, больше влезает на экран</string>
-    <string name="video_wide_2k_title">Широкий 2K (обрезка)</string>
-    <string name="video_wide_2k_sub">2240×950: окно между полосами штатного ГУ, экран 2240×1260</string>
+    <string name="video_wide_976_title">2240×976 (VW Tharu XR)</string>
+    <string name="video_wide_976_sub">Широкая обрезка под окно CarLife на ГУ VW CNS3</string>
 
     <!-- Frame rate (FpsSetting) -->
     <string name="fps_auto_title">Авто</string>
