@@ -54,12 +54,16 @@
     <string name="video_r720_sub">Подходит большинству ГУ</string>
     <string name="video_r1080_title">1920×1080</string>
     <string name="video_r1080_sub">Чётче, но тяжелее для телефона и ГУ</string>
+    <string name="video_r1440_title">2560×1440</string>
+    <string name="video_r1440_sub">Максимально чётко, но самый тяжёлый для телефона и ГУ</string>
     <string name="video_wide_title">Широкий 8:3 (обрезка)</string>
     <string name="video_wide_sub">Для вытянутых экранов: 1280×480, крупно</string>
-    <string name="video_wide_mid_title">Широкий 8:3 средний (обрезка)</string>
+    <string name="video_wide_mid_title">Широкий 8:3 средний (Mazda CX-5)</string>
     <string name="video_wide_mid_sub">1728×648: родное разрешение экрана Мазды</string>
     <string name="video_wide_hd_title">Широкий 8:3 HD (обрезка)</string>
     <string name="video_wide_hd_sub">1920×720: чётче и мельче, больше влезает на экран</string>
+    <string name="video_wide_976_title">Широкий 2240×976 (VW Tiguan L Pro)</string>
+    <string name="video_wide_976_sub">Широкая обрезка под окно CarLife на ГУ VW CNS3</string>
 
     <!-- Frame rate (FpsSetting) -->
     <string name="fps_auto_title">Авто</string>

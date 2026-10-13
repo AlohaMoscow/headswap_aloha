@@ -718,8 +718,20 @@ object AnnexB {
 
     fun startsWithSps(d: ByteArray) = nalTypes(d).firstOrNull() == 7
 
-    /** Минимальный level_idc H.264 для кадра w x h при 30 fps: 31 до 720p (3600 MB), иначе 40 (до 8192 MB, 1080p). */
-    fun levelFor(w: Int, h: Int): Int = if (((w + 15) / 16) * ((h + 15) / 16) <= 3600) 31 else 40
+    /**
+     * Минимальный level_idc H.264 для кадра w x h при 30 fps по MaxFS: 31 до 720p (3600 MB), 40 до 8192 MB (1080p),
+     * 42 до 8704 MB (2240x976 = 8540), 50 до 22080 MB (2560x1440 = 14400), выше 51.
+     */
+    fun levelFor(w: Int, h: Int): Int {
+        val mb = ((w + 15) / 16) * ((h + 15) / 16)
+        return when {
+            mb <= 3600 -> 31
+            mb <= 8192 -> 40
+            mb <= 8704 -> 42
+            mb <= 22080 -> 50
+            else -> 51
+        }
+    }
 
     /**
      * Подпись SPS Exynos (c2.exynos: Baseline, constraints 0x00, level_idc 52) старые ГУ CarLife не декодируют,
