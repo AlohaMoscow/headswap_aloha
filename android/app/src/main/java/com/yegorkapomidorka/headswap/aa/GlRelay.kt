@@ -342,9 +342,11 @@ class GlRelay(
 
         // uT 0..1, e = ease-out cubic. AA: зум 1.08 -> 1 (кроп-координаты сжимаются к центру до uSTMatrix).
         // Заглушка: зум 1 -> 1.35 и прозрачность 1 -> 0 (чуть быстрее зума, чтобы к концу не висела дымкой).
+        // uT общий для обоих шейдеров: точность обязана совпадать (GLSL ES), в вершинном по умолчанию highp, во
+        // фрагментном mediump - Mali (Exynos 9611) на этом падает при линковке, Adreno прощает. Явный mediump в обоих.
         private const val INTRO_VERTEX = """
             uniform mat4 uSTMatrix;
-            uniform float uT;
+            uniform mediump float uT;
             attribute vec4 aPosition;
             attribute vec4 aTextureCoord;
             varying vec2 vTextureCoord;
