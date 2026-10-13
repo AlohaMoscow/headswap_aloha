@@ -323,6 +323,8 @@ class AaBridgeCore(
      * MODULE_CONTROL MUSIC от ГУ; ответ - MODULE_STATUS MUSIC. status=0 - ГУ ушло на свой источник (радио): Desay G6S
      * (Mazda) шлёт его после PAUSE, другие ГУ - без PAUSE. Плеер AA на паузу, хвост его буфера не пересылаем до
      * следующего play, отвечаем MUSIC=0 - иначе ГУ видит CarLife-музыку активной и спорит с радио.
+     * Хвост держим и когда AA уже на паузе (Honda: MUSIC=0 после паузы ассистентом, хвост буфера давал MEDIA INIT
+     * через 40 мс), и MUSIC=0 отвечаем, даже если MEDIA PAUSE отложен до конца TTS (лог Егора 2026-10-13).
      */
     @Synchronized
     fun onCarlifeMusicControl(status: Int?): Boolean {
@@ -331,9 +333,12 @@ class AaBridgeCore(
             if (meta.playing && !huPausedAa && p != null) {
                 log("BRIDGE ГУ ушло на свой источник (MUSIC=0${if (carlifePaused) " после PAUSE" else ""}): AA KEYCODE $KEYCODE_MEDIA_PAUSE, MEDIA на паузу", true)
                 sendPauseKey(p)
-                huPausedAa = true
+            } else if (!huPausedAa) {
+                log("BRIDGE ГУ ушло на свой источник (MUSIC=0), AA не играет: хвост MEDIA не пересылаю до play", true)
             }
+            huPausedAa = true
             requestMediaPause("ГУ MODULE_CONTROL MUSIC=0")
+            return false
         }
         return musicActive
     }

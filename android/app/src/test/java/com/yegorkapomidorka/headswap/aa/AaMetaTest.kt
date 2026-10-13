@@ -735,6 +735,50 @@ class AaMetaTest {
     }
 
     @Test
+    fun huMusicOffDropsAaBufferTailEvenWhenAaAlreadyPaused() {
+        val pcm = ByteArray(640)
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 1))!!)       // AA на паузе (ассистент / пользователь)
+        assertFalse("MUSIC=0: ответ MUSIC=0", r.core.onCarlifeMusicControl(0))
+        assertTrue("AA не играет: 127 не шлём", peer.keys.isEmpty())
+        assertTrue(r.logs.any { it.contains("AA не играет: хвост MEDIA не пересылаю до play") })
+
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        assertEquals("хвост буфера на ГУ не идёт: ни MEDIA INIT, ни DATA", 0, r.link.audio.count { it == CarlifeAudio.MEDIA_INIT || it == CarlifeAudio.MEDIA_DATA })
+
+        r.core.onAudioStart(M.CH_AUDIO_MEDIA)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        assertEquals("после MEDIA START данные идут", 1, r.link.audio.count { it == CarlifeAudio.MEDIA_INIT })
+        assertEquals(1, r.link.audio.count { it == CarlifeAudio.MEDIA_DATA })
+        assertTrue("второго 127 нет", peer.keys.isEmpty())
+    }
+
+    @Test
+    fun huMusicOffAnswersZeroWhileTtsDefersMediaPause() {
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, ByteArray(640), 0)
+        r.core.onAudioData(M.CH_AUDIO_SPEECH, ByteArray(640), 0)            // TTS инициализирован
+        assertTrue("MEDIA играет: MUSIC активна", r.core.musicActive)
+        assertFalse("MUSIC=0: ответ MUSIC=0, хотя пауза MEDIA отложена", r.core.onCarlifeMusicControl(0))
+        assertFalse("пауза MEDIA ждёт конца TTS", r.link.audio.contains(CarlifeAudio.MEDIA_PAUSE))
+        assertTrue(r.logs.any { it.contains("MEDIA пауза отложена") })
+        assertEquals("AA на паузе: 127 ушёл", listOf(AaBridgeCore.KEYCODE_MEDIA_PAUSE), peer.keys.toList())
+
+        // хвост MEDIA во время TTS на ГУ не идёт
+        val before = r.link.audio.count { it == CarlifeAudio.MEDIA_DATA }
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, ByteArray(640), 0)
+        assertEquals(before, r.link.audio.count { it == CarlifeAudio.MEDIA_DATA })
+    }
+
+    @Test
     fun huMusicOffAnswersZeroWhenMediaPlayingOverUsb() {
         val r = Rig()
         r.core.peer = FakePeer()
