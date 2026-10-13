@@ -16,9 +16,11 @@ class VideoModeTest {
             VideoMode.R800 to Row("800x480", 0, 0, 120, 800, 480, 4_000_000),
             VideoMode.R720 to Row("1280x720", 0, 0, 160, 1280, 720, 4_000_000),
             VideoMode.R1080 to Row("1920x1080", 0, 0, 240, 1920, 1080, 8_000_000),
+            VideoMode.R1440 to Row("2560x1440", 0, 0, 320, 2560, 1440, 12_000_000),
             VideoMode.WIDE to Row("1280x720", 0, 240, 160, 1280, 480, 4_000_000),
             VideoMode.WIDE_MID to Row("1920x1080", 192, 432, 160, 1728, 648, 5_000_000),
             VideoMode.WIDE_HD to Row("1920x1080", 0, 360, 160, 1920, 720, 6_000_000),
+            VideoMode.WIDE_2K to Row("2560x1440", 0, 354, 220, 2240, 950, 10_000_000),
         )
         assertEquals(expected.keys, VideoMode.values().toSet())
         for ((m, r) in expected) {
@@ -29,9 +31,11 @@ class VideoModeTest {
             assertEquals(m.name, r.w, m.outW)
             assertEquals(m.name, r.h, m.outH)
             assertEquals(m.name, r.bitrate, m.bitrate)
-            // выход CarLife = кадр AA без margin-ов
-            assertEquals(m.name, m.aaW - m.marginW, m.outW)
-            assertEquals(m.name, m.aaH - m.marginH, m.outH)
+            // выход CarLife = кадр AA без margin-ов (WIDE_2K - исключение: область 2560x1086 масштабируется в 2240x950)
+            if (m != VideoMode.WIDE_2K) {
+                assertEquals(m.name, m.aaW - m.marginW, m.outW)
+                assertEquals(m.name, m.aaH - m.marginH, m.outH)
+            }
         }
         assertEquals(VideoMode.R720, VideoMode.DEFAULT)
     }
@@ -102,7 +106,29 @@ class VideoModeTest {
         assertEquals(216f / 1080f, mid.crop.v0, 1e-6f)
         assertEquals(864f / 1080f, mid.crop.v1, 1e-6f)
         assertTrue(mid.needsTranscode)
-        assertEquals(listOf(VideoMode.WIDE, VideoMode.WIDE_MID, VideoMode.WIDE_HD), VideoMode.values().takeLast(3))
+        assertEquals(listOf(VideoMode.WIDE, VideoMode.WIDE_MID, VideoMode.WIDE_HD, VideoMode.WIDE_2K), VideoMode.values().takeLast(4))
+    }
+
+    @Test
+    fun wide2kAndR1440() {
+        val k = VideoMode.WIDE_2K
+        assertEquals(177f / 1440f, k.crop.v0, 1e-6f)
+        assertEquals(1263f / 1440f, k.crop.v1, 1e-6f)
+        assertEquals(0f, k.crop.u0, 1e-6f)
+        assertEquals(1f, k.crop.u1, 1e-6f)
+        assertTrue(k.needsTranscode)
+        assertEquals(VideoMode.R720, k.effective(transcode = false))
+        // рабочая область AA 2560x1086 масштабируется в кадр ГУ 2240x950: тач пересчитывается и клампится в область
+        assertEquals(2559 to 1085, k.mapTouch(3000, 2000))
+        assertEquals(1280 to 543, k.mapTouch(1120, 475))
+        assertEquals(0 to 0, k.mapTouch(0, 0))
+        assertEquals(2558 to 1084, k.mapTouch(2239, 949))
+        assertEquals("2240×950", k.outLabel)
+        assertTrue(VideoMode.R1440.crop.isNone)
+        assertFalse(VideoMode.R1440.needsTranscode)
+        assertEquals(7 to 9, VideoMode.R1440.mapTouch(7, 9))
+        assertEquals(VideoMode.R1440, VideoMode.parse("R1440"))
+        assertEquals(VideoMode.WIDE_2K, VideoMode.parse("WIDE_2K"))
     }
 
     @Test
@@ -124,6 +150,10 @@ class VideoModeTest {
     fun sdrOtherModes() {
         val r1080 = hex(M.serviceDiscoveryResponse(VideoMode.R1080.sdOptions(false)).payload)
         assertTrue(r1080, r1080.contains("0803100218002000" + "28f001"))      // res=3, margins 0, density 240
+        val r1440 = hex(M.serviceDiscoveryResponse(VideoMode.R1440.sdOptions(false)).payload)
+        assertTrue(r1440, r1440.contains("0804100218002000" + "28c002"))      // res=4, margins 0, density 320
+        val wide2k = hex(M.serviceDiscoveryResponse(VideoMode.WIDE_2K.sdOptions(false)).payload)
+        assertTrue(wide2k, wide2k.contains("08041002180020e202" + "28dc01"))   // res=4, margin_h 354 (e2 02), density 220 (dc 01)
         val r800 = hex(M.serviceDiscoveryResponse(VideoMode.R800.sdOptions(false)).payload)
         assertTrue(r800, r800.contains("0801100218002000" + "2878"))          // res=1, margins 0, density 120
     }

@@ -316,6 +316,7 @@ object AapMessages {
             "800x480" -> 1
             "1280x720" -> 2
             "1920x1080" -> 3
+            "2560x1440" -> 4
             else -> throw IllegalArgumentException("неизвестное разрешение ${o.resolution}")
         }
         val r = AapPb()
