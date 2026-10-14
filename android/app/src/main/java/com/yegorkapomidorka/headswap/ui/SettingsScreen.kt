@@ -18,6 +18,8 @@ import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
+import com.yegorkapomidorka.headswap.update.UpdatePrefs
+import com.yegorkapomidorka.headswap.update.Updater
 
 /** Шапка «назад + заголовок» и прокручиваемое тело. */
 fun scaffold(ctx: Context, title: String, onBack: () -> Unit, body: View): LinearLayout = ctx.vbox().apply {
@@ -34,7 +36,7 @@ fun scaffold(ctx: Context, title: String, onBack: () -> Unit, body: View): Linea
     }, lp(MATCH, 0, 1f))
 }
 
-/** Настройки (Settings.dc.html) + автозапуск сервера ГУ, микрофон, чеклист и ссылки. */
+/** Настройки (Settings.dc.html) + автозапуск сервера ГУ, микрофон, обновления, чеклист и ссылки. */
 class SettingsScreen(host: MainActivity) : Screen(host) {
     private val aa = AaPrefs(ctx)
     private val langRows = LinkedHashMap<String, RadioRow>()
@@ -50,6 +52,8 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private lateinit var svcStatus: TextView
     private lateinit var svcButton: TextView
     private lateinit var micNote: TextView
+    private lateinit var updStatus: TextView
+    private lateinit var updButton: TextView
     private lateinit var body: LinearLayout
     override val view: View
 
@@ -134,6 +138,9 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         body.addView(micNote, lp(WRAP, WRAP).margins(c, 8, 2, 8, 0))
         refreshMic()
 
+        body.addView(c.sectionTitle(c.getString(R.string.upd_title)))
+        body.addView(updateCard())
+
         val links = c.card().apply {
             addView(link(R.drawable.ic_report, c.getString(R.string.set_report_title), c.getString(R.string.set_report_note), false) { LogShare.shareReport(c) })
             addView(c.divider())
@@ -159,9 +166,13 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     override fun onShow() {
         refreshService()
         refreshMic()
+        refreshUpdate()
     }
 
-    override fun tick() = refreshService()
+    override fun tick() {
+        refreshService()
+        refreshUpdate()
+    }
 
     override fun onPermissionResult() = refreshMic()
 
@@ -308,6 +319,56 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         )
         svcStatus.setTextColor(c.clr(if (connected) R.color.ok else R.color.warn))
         svcButton.visibility = if (connected) View.GONE else View.VISIBLE
+    }
+
+    /** Переключатель проверки + строка состояния с кнопкой «Проверить» / «Обновить» (как карточка автозапуска). */
+    private fun updateCard(): View {
+        val c = ctx
+        val prefs = UpdatePrefs(c)
+        val card = c.vbox().apply { background = c.shape(c.clr(R.color.surf), 20) }
+        card.addView(
+            ToggleRow(c, c.getString(R.string.upd_check_title), c.getString(R.string.upd_check_sub), prefs.enabled, 72, false, 17f, 14f) {
+                prefs.enabled = it
+                if (it) Updater.maybeCheck(c)
+            }.view,
+            lp(MATCH, WRAP),
+        )
+        card.addView(c.divider())
+        val row = c.hbox(12).apply { pad(c, 16, 10, 12, 10); minimumHeight = c.dp(64) }
+        updStatus = c.text("", 14f, 400, c.clr(R.color.on2))
+        updButton = c.text("", 15f, 600, c.clr(R.color.acc)).apply {
+            gravity = Gravity.CENTER
+            pad(c, 14, 0, 14, 0)
+            background = c.rippleBg(null, 20)
+            isClickable = true
+            setOnClickListener { if (Updater.available(c) != null) Updater.start(host) else Updater.check(c, manual = true) }
+        }
+        row.addView(updStatus, lp(0, WRAP, 1f))
+        row.addView(updButton, c.lpDp(WRAP, 44))
+        card.addView(row, lp(MATCH, WRAP))
+        refreshUpdate()
+        return card
+    }
+
+    private fun refreshUpdate() {
+        val c = ctx
+        val rel = Updater.available(c)
+        val err = Updater.error
+        val busy = Updater.step != Updater.Step.IDLE
+        val (text, color) = when {
+            Updater.step == Updater.Step.CHECKING -> c.getString(R.string.upd_status_checking) to R.color.on2
+            Updater.step == Updater.Step.DOWNLOADING -> c.getString(R.string.upd_status_downloading, rel?.version ?: "", Updater.progress) to R.color.on2
+            Updater.step == Updater.Step.INSTALLING -> c.getString(R.string.upd_status_installing) to R.color.on2
+            err != null -> err.get(c) to R.color.warn
+            rel != null -> c.getString(R.string.upd_status_available, rel.version) to R.color.acc
+            UpdatePrefs(c).lastCheck > 0 -> c.getString(R.string.upd_status_latest) to R.color.ok
+            else -> c.getString(R.string.upd_status_never) to R.color.on2
+        }
+        if (updStatus.text.toString() != text) updStatus.text = text
+        updStatus.setTextColor(c.clr(color))
+        val label = c.getString(if (rel != null) R.string.upd_btn_update else R.string.upd_btn_check)
+        if (updButton.text.toString() != label) updButton.text = label
+        updButton.visibility = if (busy) View.GONE else View.VISIBLE
     }
 
     private fun setMic(m: MicMode) {

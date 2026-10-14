@@ -20,6 +20,7 @@ import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
+import com.yegorkapomidorka.headswap.update.UpdatePrefs
 import java.io.File
 import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
@@ -185,6 +186,7 @@ object LogShare {
 
     fun deviceInfo(ctx: Context): String {
         val aa = AaPrefs(ctx)
+        val upd = UpdatePrefs(ctx)
         val ver = try {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
         } catch (_: Exception) {
@@ -204,6 +206,7 @@ object LogShare {
             appendLine("  сертификат: ${aa.certSet}")
             appendLine("  автозапуск сервера ГУ: ${aa.autoServer}")
             appendLine("  микрофон: ${aa.micMode.label}, MODULE_STATUS VR: ${aa.micVrStatus}")
+            appendLine("  проверка обновлений: ${upd.enabled}, на GitHub: ${upd.release()?.version ?: "не проверялось"}")
             appendLine("  метаданные: музыка ${aa.metaMusic}, навигация ${aa.metaNavi}, поле 6 NAVI_NEXT_TURN_INFO: ${aa.naviField6}, прогресс в ${if (aa.progressSeconds) "с" else "мс"}")
             appendLine()
             appendLine("Данные ГУ и состояние")

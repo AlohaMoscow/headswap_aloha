@@ -24,6 +24,7 @@ import com.yegorkapomidorka.headswap.ui.Screen
 import com.yegorkapomidorka.headswap.ui.SettingsScreen
 import com.yegorkapomidorka.headswap.ui.StepId
 import com.yegorkapomidorka.headswap.ui.UiPrefs
+import com.yegorkapomidorka.headswap.update.Updater
 
 /**
  * Единственная activity: хранит стек экранов (главный, настройки, для разработчиков, онбординг) и принимает команды intent
@@ -99,6 +100,7 @@ class MainActivity : Activity() {
         resumed = true
         current()?.onShow()
         handler.post(refresh)
+        Updater.maybeCheck(this)
     }
 
     override fun onPause() {
@@ -216,6 +218,7 @@ class MainActivity : Activity() {
                     showOnboarding(rerun = true, startAt = step)
                 }
                 "checklist" -> { toHome(); showOnboarding(checklist = true) }
+                "update_check" -> Updater.check(this, manual = true)      // проверить релиз на GitHub сейчас, не дожидаясь интервала
                 "theme" -> {                                   // --es mode system|light|medium|dark
                     AppTheme.set(this, intent.getStringExtra("mode") ?: AppTheme.SYSTEM)
                     recreate()

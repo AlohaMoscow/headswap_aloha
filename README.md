@@ -42,6 +42,8 @@
 3. В настройках Android -> Спецвозможности включите службу Headswap. Она нужна для автозапуска сервера ГУ. Если пункт серый: Настройки -> Приложения -> Headswap -> «Разрешить ограниченные настройки».
 4. Разблокируйте телефон и подключите его к ГУ по USB.
 
+Обновления: в версиях новее 1.1.10 Headswap сам находит новую версию в [релизах на GitHub](https://github.com/YegorkaPomidorka/headswap/releases) и ставит её поверх старой, настройки сохраняются. Отключается в Настройках → Обновления. При первом обновлении Android попросит разрешить установку приложений из Headswap.
+
 ## Сборка из исходников
 
 Нужен JDK 17.
@@ -93,6 +95,7 @@ android/app/src/main/assets/aa/hur/key.pem
 ## Ссылки
 
 - Сайт и APK: https://yegorkapomidorka.com/headswap/
+- Релизы на GitHub (те же APK, из них обновляется приложение): https://github.com/YegorkaPomidorka/headswap/releases
 - Telegram: https://t.me/headswap
 - Тема на 4PDA: https://4pda.to/forum/index.php?showtopic=1127415
 
