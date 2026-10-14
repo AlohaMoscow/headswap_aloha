@@ -69,6 +69,24 @@ python carlife_hu.py --transport tcp6 --kill-chan VIDEO --kill-after 10
 
 `--kill-chan` принимает CMD, VIDEO, MEDIA, TTS, VR, TOUCH; `--kill-after` считается от первого видеокадра. В итоге будет строка `kill: VIDEO at 12.3 s, bridge closed others after 0.4 s` или `bridge did NOT close others within 10 s` (последнее значит, что мост остался висеть с частью каналов).
 
+## Ветка B: хотспот телефона
+
+Телефон раздаёт хотспот, ПК подключается к нему как ГУ-клиент. Адрес телефона вручную не нужен: эмулятор слушает UDP-маяк (`CarlifeHost` раз в 2 с), берёт адрес отправителя первой датаграммы как host и дальше работает как в режиме 6 сокетов.
+
+1. Включить хотспот на телефоне, подключить ПК к нему.
+2. На телефоне запустить ветку B:
+   ```
+   adb shell am start-foreground-service -n com.yegorkapomidorka.headswap/.BridgeService --ez debug_wifi_b true
+   ```
+3. На ПК:
+   ```
+   python carlife_hu.py --transport tcp6 --discover --probe-8999 --touch-test
+   ```
+
+На Windows разрешите python входящий UDP 7999 в брандмауэре (частная сеть), иначе маяк не дойдёт. Если у ПК несколько сетевых карт, укажите карту хотспота: `--bind-ip <ip ПК в сети хотспота>`.
+
+Флаги: `--discover` (только с `--transport tcp6`), `--beacon-port` (по умолчанию 7999), `--bind-ip` (по умолчанию 0.0.0.0), `--discover-timeout` (по умолчанию 60 с; без маяка сессия завершается с `no beacon within 60 s`), `--probe-8999` (после маяка одна UDP-датаграмма на порт 8999 телефона, ответ ждётся до 2 с и необязателен). В итоге выводятся `discovered_host`, число маяков и результат пробы.
+
 ## Тесты
 
 ```

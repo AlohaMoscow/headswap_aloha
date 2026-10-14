@@ -43,6 +43,12 @@ MAX_DATA_LEN = 64 * 1024 * 1024
 DEFAULT_PORTS = {CH_CMD: 7240, CH_VIDEO: 8240, CH_MEDIA: 9240, CH_TTS: 9241, CH_VR: 9242, CH_TOUCH: 9340}
 DATA_PORT = 9440                    # Data-канал: телефон принимает соединение и игнорирует его
 
+# ветка B (--discover): телефон раздаёт хотспот и шлёт UDP-маяк, ГУ слушает его и подключается к отправителю
+BEACON_PORT = 7999                  # UDP-порт приёма маяка (как у эталонной ГУ)
+BEACON_PAYLOAD = b"CarlifeHost"     # что шлёт телефон раз в 2 с (содержимое строго не проверяем)
+PROBE_PORT = 8999                   # UDP-проба: JSON-запрос на телефон, ответ необязателен
+PROBE_REQUEST = b'{"carlifehost":"carlife","deviceInfo":{}}'
+
 # коды сообщений (Protocol.kt, object Msg)
 HU_PROTOCOL_VERSION = 0x00018001
 MD_INFO = 0x00010004
@@ -360,7 +366,9 @@ def auth_expected(brand: str, model: str, sdk: str, rnd: str) -> str:
 class Options:
     def __init__(self, host="127.0.0.1", port=7240, duration=120.0, no_auth=False, touch_test=False,
                  out: Path | None = None, quiet=False, transport="stream", ports: dict[int, int] | None = None,
-                 kill_chan: str | None = None, kill_after=10.0, extra_data_socket=False):
+                 kill_chan: str | None = None, kill_after=10.0, extra_data_socket=False,
+                 discover=False, beacon_port=BEACON_PORT, bind_ip="0.0.0.0", discover_timeout=60.0,
+                 probe_8999=False, probe_port=PROBE_PORT):
         self.host, self.port, self.duration = host, port, duration
         self.no_auth, self.touch_test = no_auth, touch_test
         self.out = out or HERE / "out"
@@ -370,8 +378,19 @@ class Options:
         self.kill_chan = kill_chan.upper() if kill_chan else None
         self.kill_after = kill_after
         self.extra_data_socket = extra_data_socket
+        # ветка B (телефон раздаёт хотспот): host телефона берём из адреса отправителя UDP-маяка
+        self.discover = discover
+        self.beacon_port = beacon_port                      # порт приёма маяка; 0 = эфемерный (тесты)
+        self.bind_ip = bind_ip                              # на какой карте слушать маяк
+        self.discover_timeout = discover_timeout
+        self.probe_8999 = probe_8999
+        self.probe_port = probe_port
         if self.transport not in ("stream", "tcp6"):
             raise ValueError(f"unknown transport {self.transport!r}")
+        if self.discover and self.transport != "tcp6":
+            raise ValueError("discover works only with transport tcp6")
+        if self.probe_8999 and not self.discover:
+            raise ValueError("probe_8999 needs discover")
         if self.kill_chan and self.kill_chan not in CH_NAMES.values():
             raise ValueError(f"unknown channel {self.kill_chan!r}")
 
@@ -381,6 +400,7 @@ class HeadUnit:
     TOUCH_DELAY = 15.0
     CONNECT_TIMEOUT = 5.0
     KILL_WAIT = 10.0                # tcp6: сколько ждать, пока мост сам закроет остальные сокеты
+    PROBE_WAIT = 2.0                # --probe-8999: сколько ждать ответ
 
     def __init__(self, opts: Options):
         self.o = opts
@@ -415,6 +435,12 @@ class HeadUnit:
         self.vid_size = (1280, 720)
         self.vfile = None
         self.t0 = 0.0
+        self.host = opts.host                       # tcp6: при --discover подменяется адресом отправителя маяка
+        self.bsock: socket.socket | None = None     # UDP-сокет приёма маяка
+        self.beacon_port = opts.beacon_port         # настоящий порт (beacon_port=0 даёт свободный)
+        self.beacons = 0
+        self.discovered_host: str | None = None
+        self.probe_reply: bool | None = None
 
     def log(self, msg: str):
         line = f"{time.strftime('%H:%M:%S')}.{int(time.time() * 1000) % 1000:03d} {msg}"
@@ -611,15 +637,88 @@ class HeadUnit:
         self.log(f"bridge connected from {addr[0]}:{addr[1]}")
         return True
 
+    def beacon_listen(self):
+        """Открыть UDP-порт маяка заранее (beacon_port=0 даёт свободный; self.beacon_port хранит настоящий)."""
+        self.bsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.bsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.bsock.bind((self.o.bind_ip, self.o.beacon_port))
+        self.beacon_port = self.bsock.getsockname()[1]
+
+    def recv_beacon(self, timeout: float) -> tuple[str, int] | None:
+        """Одна датаграмма с маяком за timeout секунд: логирует и считает, возвращает адрес отправителя."""
+        self.bsock.settimeout(max(timeout, 0.001))
+        try:
+            data, addr = self.bsock.recvfrom(2048)
+        except (socket.timeout, BlockingIOError):
+            return None
+        self.beacons += 1
+        kind = "CarlifeHost" if BEACON_PAYLOAD in data else "other"
+        self.log(f"beacon from {addr[0]}:{addr[1]} len={len(data)} payload={kind}")
+        return addr[0], addr[1]
+
+    def wait_beacon(self, timeout: float) -> tuple[str, int] | None:
+        """Ждать маяк до timeout секунд, вернуть адрес отправителя первой датаграммы или None."""
+        if self.bsock is None:
+            self.beacon_listen()
+        self.log(f"waiting for beacon on {self.o.bind_ip}:{self.beacon_port} (timeout {timeout:g} s)")
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            try:
+                addr = self.recv_beacon(min(left, 0.5))     # короткие паузы: Ctrl+C проходит и на Windows
+            except ConnectionResetError:
+                continue                                    # Windows: ICMP от чужой отправки, не ошибка
+            if addr:
+                return addr
+
+    def probe(self, ip: str):
+        """Одна UDP-датаграмма на <ip>:probe_port и до PROBE_WAIT секунд ожидания ответа (необязателен)."""
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.settimeout(self.PROBE_WAIT)
+            s.sendto(PROBE_REQUEST, (ip, self.o.probe_port))
+            data, _ = s.recvfrom(4096)
+            self.probe_reply = True
+            self.log(f"probe {self.o.probe_port}: reply {data[:64]!r}")
+        except OSError:                                     # timeout и ConnectionReset (порт закрыт) = ответа нет
+            self.probe_reply = False
+            self.log(f"probe {self.o.probe_port}: no reply")
+        finally:
+            s.close()
+
+    def discover(self) -> bool:
+        """Ветка B: ждать UDP-маяк, host = адрес отправителя; по желанию проба 8999. False, если маяка нет."""
+        try:
+            addr = self.wait_beacon(self.o.discover_timeout)
+        except KeyboardInterrupt:
+            self.finish("Ctrl+C")
+            return False
+        if addr is None:
+            self.finish(f"no beacon within {self.o.discover_timeout:g} s")
+            self.log(self.stop_reason)
+            return False
+        self.discovered_host = self.host = addr[0]
+        self.log(f"discovered phone at {self.host}")
+        if self.o.probe_8999:
+            self.probe(self.host)
+        try:
+            while self.recv_beacon(0.001):                  # уже накопившиеся маяки: только посчитать
+                pass
+        except OSError:
+            pass
+        return True
+
     def open_tcp6(self) -> bool:
         """tcp6: подключиться к шести портам телефона по порядку каналов (плюс Data по желанию)."""
-        self.log(f"connecting to {self.o.host} (tcp6)")
+        self.log(f"connecting to {self.host} (tcp6)")
         targets = [(c, CH_NAMES[c], self.o.ports[c]) for c in sorted(CH_NAMES)]
         if self.o.extra_data_socket:
             targets.append((0, "DATA", DATA_PORT))
         for chan, name, port in targets:
             try:
-                s = socket.create_connection((self.o.host, port), timeout=self.CONNECT_TIMEOUT)
+                s = socket.create_connection((self.host, port), timeout=self.CONNECT_TIMEOUT)
                 s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 s.settimeout(None)
             except OSError as e:
@@ -677,7 +776,11 @@ class HeadUnit:
         self.logf = open(self.o.out / "carlife_hu.log", "w", encoding="utf-8")
         self.vfile = open(self.o.out / "carlife_video.h264", "wb")
         try:
-            if self.open_tcp6() if self.tcp6 else self.open_stream():
+            found = self.discover() if self.o.discover else True
+            if self.bsock:
+                self.bsock.close()
+                self.bsock = None
+            if found and (self.open_tcp6() if self.tcp6 else self.open_stream()):
                 self.t0 = time.monotonic()
                 self.send_cmd(HU_PROTOCOL_VERSION, build_protocol_version())
                 self.start_readers()
@@ -696,6 +799,8 @@ class HeadUnit:
             self.vfile.close()
             if self.srv:
                 self.srv.close()
+            if self.bsock:
+                self.bsock.close()
         res = self.summary()
         self.logf.close()
         return res
@@ -760,6 +865,8 @@ class HeadUnit:
         self.log(f"video: {self.frames} frames, {self.vbytes} B, avg {avg:.1f} fps")
         connected = len(self.socks) + (1 if self.extra else 0) if self.tcp6 else 1 if self.conn else 0
         self.log(f"transport: {self.o.transport}, connected sockets: {connected}")
+        if self.o.discover:
+            self.log(f"discover: host {self.discovered_host}, beacons {self.beacons}, probe reply {self.probe_reply}")
         if self.o.kill_chan and self.tcp6:
             if not self.killed:
                 self.log(f"kill: {self.o.kill_chan} not triggered (no video frame within the session)")
@@ -774,7 +881,8 @@ class HeadUnit:
                 "transport": self.o.transport, "connected": connected,
                 "kill_chan": self.o.kill_chan if self.killed else None,
                 "kill_at": self.kill_at - self.t0 if self.killed else None,
-                "closed_others_after": self.closed_others_after}
+                "closed_others_after": self.closed_others_after,
+                "discovered_host": self.discovered_host, "beacons": self.beacons, "probe_reply": self.probe_reply}
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -791,19 +899,38 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="tcp6: close the --kill-chan socket N seconds after the first video frame (default 10)")
     p.add_argument("--extra-data-socket", action="store_true",
                    help="tcp6: also connect to the Data channel port 9440 (the phone ignores it)")
+    p.add_argument("--discover", action="store_true",
+                   help="tcp6, branch B (phone hotspot): wait for the phone's UDP beacon and use the sender "
+                        "address as --host")
+    p.add_argument("--beacon-port", type=int, default=BEACON_PORT, metavar="N",
+                   help=f"--discover: UDP port to listen on (default {BEACON_PORT})")
+    p.add_argument("--bind-ip", default="0.0.0.0", metavar="IP",
+                   help="--discover: local address to receive the beacon on, to pick the hotspot NIC (default 0.0.0.0)")
+    p.add_argument("--discover-timeout", type=float, default=60.0, metavar="N",
+                   help="--discover: give up after N seconds without a beacon (default 60)")
+    p.add_argument("--probe-8999", action="store_true",
+                   help=f'--discover: after the beacon send {PROBE_REQUEST.decode()} to the phone, UDP {PROBE_PORT}, '
+                        "and log the reply (not required to continue)")
     p.add_argument("--duration", type=float, default=120.0, metavar="N",
                    help="stop N seconds after the bridge connects (default 120)")
     p.add_argument("--no-auth", action="store_true", help="do not send HU_AUTHEN_REQUEST")
     p.add_argument("--touch-test", action="store_true",
                    help="15 s after the first video frame send a tap (DOWN+UP) at the centre")
     p.add_argument("--out", type=Path, default=HERE / "out", help="output directory (default pc-headunit/out)")
-    return p.parse_args(argv)
+    a = p.parse_args(argv)
+    if a.discover and a.transport != "tcp6":
+        p.error("--discover works only with --transport tcp6")
+    if a.probe_8999 and not a.discover:
+        p.error("--probe-8999 needs --discover")
+    return a
 
 
 def main(argv=None) -> int:
     a = parse_args(argv)
     hu = HeadUnit(Options(a.host, a.port, a.duration, a.no_auth, a.touch_test, a.out, transport=a.transport,
-                          kill_chan=a.kill_chan, kill_after=a.kill_after, extra_data_socket=a.extra_data_socket))
+                          kill_chan=a.kill_chan, kill_after=a.kill_after, extra_data_socket=a.extra_data_socket,
+                          discover=a.discover, beacon_port=a.beacon_port, bind_ip=a.bind_ip,
+                          discover_timeout=a.discover_timeout, probe_8999=a.probe_8999))
     hu.run()
     return 0
 
