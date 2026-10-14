@@ -398,7 +398,7 @@ MD→HU `MODULE_STATUS {cnt, [moduleID,statusID]...}` при смене сост
 
 ### 6.2 «Жестовый» режим (если `TRANSPARENT_SEND_TOUCH_EVENT=false`)
 
-HU разбирает касания `GestureDetector`-ом и шлёт, все с телом `CarlifeTouchSinglePoint {x=1, y=2}` в тех же пикселях (`TouchListenerManager.java:233-355`, `GestureListenerImp.java:36-161`):
+HU разбирает касания `GestureDetector`-ом и шлёт, все с телом `CarlifeTouchSinglePoint {x=1, y=2, optional pointerx=3, optional pointery=4}` в тех же пикселях (`TouchListenerManager.java:233-355`, `GestureListenerImp.java:36-161`):
 
 | Код | Имя | Когда |
 |---|---|---|
