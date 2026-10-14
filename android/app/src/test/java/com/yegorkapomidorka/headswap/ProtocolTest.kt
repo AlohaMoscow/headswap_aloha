@@ -225,6 +225,9 @@ class ProtocolTest {
             val d = hex(s)
             assertTrue(AnnexB.fixSps(d, 1280, 720) === d)
         }
+        // c2.qti на 2240x976 уже пишет 80/42: менять нечего, тот же массив (h57: копия без отличий валила заглушку)
+        val qti976 = hex("00 00 00 01 67 42 80 2A AB")
+        assertTrue(AnnexB.fixSps(qti976, 2240, 976) === qti976)
     }
 
     @Test

@@ -748,9 +748,13 @@ object AnnexB {
             val profile = d[p + 1].toInt() and 0xFF
             val level = d[p + 3].toInt() and 0xFF
             if (level <= 41) continue
+            val cons = if (profile == 66) (d[p + 2].toInt() or 0x80).toByte() else d[p + 2]
+            val lvl = levelFor(w, h).toByte()
+            // c2.qti на 2240x976 уже пишет 0x80/42: копия без изменений ломала поиск отличий в withFixedSps
+            if (cons == d[p + 2] && lvl == d[p + 3]) continue
             if (out === d) out = d.copyOf()
-            if (profile == 66) out[p + 2] = (out[p + 2].toInt() or 0x80).toByte()
-            out[p + 3] = levelFor(w, h).toByte()
+            out[p + 2] = cons
+            out[p + 3] = lvl
         }
         return out
     }
