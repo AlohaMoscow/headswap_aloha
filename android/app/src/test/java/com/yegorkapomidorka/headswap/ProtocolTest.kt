@@ -552,13 +552,24 @@ class ProtocolTest {
         assertFalse(HuAuth.isV2Branch("txGaIEnzYVCaFOEArS9O_0"))
         assertFalse(HuAuth.isV2Branch("1.0;abc"))
         assertFalse(HuAuth.isV2Branch("2.0;")) // split даёт одну часть
-        assertNull(HuAuth.encryptValue("2.0;abcdef"))
+    }
+
+    @Test
+    fun v2VerifyCodeLikeLibEncryption() {
+        // md5("CARLIFE" + str) строчным hex
+        assertEquals("2fce147802726d1aeae532116434339d", HuAuth.verifyCode("HUAWEIADY-LX9312026-10-14-12-01-33"))
+        // запрос Honda CR-V 2026 (h61): ключ brand+model+sdk из MD_INFO + часть после ";"
+        val key = HuAuth.mdInfoKey(DeviceInfo(brand = "HUAWEI", model = "ADY-LX9", sdk = "31", sdkInt = 31))
+        assertEquals("HUAWEIADY-LX931", key)
+        assertEquals("2fce147802726d1aeae532116434339d", HuAuth.encryptValue("2.0;2026-10-14-12-01-33", key))
+        // третья часть после ";" в код не идёт (у Baidu strArrSplit[1])
+        assertEquals(HuAuth.verifyCode("ab"), HuAuth.encryptValue("2.0;b;c", "a"))
     }
 
     @Test
     fun authSignatureDecryptsWithPublicKey() {
         val rnd = "txGaIEnzYVCaFOEArS9O_0"
-        val enc = HuAuth.encryptValue(rnd)!!
+        val enc = HuAuth.encryptValue(rnd)
         assertFalse(enc.contains("\n") || enc.contains("\r"))
         val sig = java.util.Base64.getDecoder().decode(enc)
         assertEquals(128, sig.size)
