@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Палитра MEDIUM: нейтральная тёмно-серая (без синевы), светлее DARK; акценты и статусы как в values-night/colors.xml.
+     Подставляется в ui/Kit.kt clr() через AppTheme.res(), а в теме Theme.Headswap.Medium - напрямую. -->
+<resources>
+    <color name="bg_mid">#2A2A2A</color>
+    <color name="surf_mid">#343434</color>
+    <color name="surf2_mid">#3F3F3F</color>
+    <color name="on_mid">#E8E8E8</color>
+    <color name="on2_mid">#B4B4B4</color>
+    <color name="line_mid">#5A5A5A</color>
+    <color name="pri_mid">#F2B33D</color>
+    <color name="onpri_mid">#261A00</color>
+    <color name="acc_mid">#F2B33D</color>
+    <color name="pric_mid">#4D3800</color>
+    <color name="onpric_mid">#FFDEA6</color>
+    <color name="ok_mid">#82D6A6</color>
+    <color name="okc_mid">#133D29</color>
+    <color name="onok_mid">#00391F</color>
+    <color name="warn_mid">#FFB68C</color>
+    <color name="warnc_mid">#5A2500</color>
+    <color name="err_mid">#FFB4A9</color>
+    <color name="errc_mid">#6E1912</color>
+    <color name="onerr_mid">#690003</color>
+    <color name="ripple_mid">#33FFFFFF</color>
+</resources>

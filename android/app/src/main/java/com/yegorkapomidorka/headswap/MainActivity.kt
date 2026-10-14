@@ -31,7 +31,7 @@ import com.yegorkapomidorka.headswap.ui.UiPrefs
  */
 class MainActivity : Activity() {
     override fun attachBaseContext(base: Context) {
-        super.attachBaseContext(AppLocale.wrap(base))
+        super.attachBaseContext(AppTheme.wrap(AppLocale.wrap(base)))
     }
 
     private lateinit var root: FrameLayout
@@ -57,6 +57,7 @@ class MainActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (AppTheme.medium) setTheme(R.style.Theme_Headswap_Medium)
         super.onCreate(savedInstanceState)
         AppLog.init(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
