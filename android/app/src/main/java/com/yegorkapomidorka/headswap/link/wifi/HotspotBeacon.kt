@@ -170,6 +170,7 @@ class HotspotBeacon(
                         targets += i.broadcast
                         if (sweep && LanIface.sweepName(i.name)) targets += i.hosts()
                         for (t in targets) {
+                            if (!running.get()) return   // ГУ уже подключилась: свип не досылаем
                             try {
                                 s.send(DatagramPacket(BeaconCodec.BEACON, BeaconCodec.BEACON.size, t, beaconPort))
                                 sent++
