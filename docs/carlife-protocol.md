@@ -380,12 +380,21 @@ MD→HU `MODULE_STATUS {cnt, [moduleID,statusID]...}` при смене сост
 
 ### 6.1 Основной режим (MSG_TOUCH_ACTION = 0x00068001)
 
-`CarlifeTouchAction {action:int32 = 1, x:int32 = 2, y:int32 = 3}` (`PB/CarlifeTouchActionProto.proto`).
+`CarlifeTouchAction {action:int32 = 1, x:int32 = 2, y:int32 = 3, optional pointerx:int32 = 4, optional pointery:int32 = 5}` (`PB/CarlifeTouchActionProto.proto`; поля 4, 5 есть в `re/carlife-8.6.7/resources/CarlifeTouchActionProto.proto`).
 
-- `action`: код `MotionEvent`: 0 = DOWN, 1 = UP, 2 = MOVE (HU пишет `event.getAction()`, `HUJ/touch/TouchListenerManager.java:207-231`; MD-сторона `CP/Utils.java:24-26`, `MsgProcess.java:242-310`). Мультитача в протоколе нет: одна точка (x, y), поля индекса указателя нет. [К]
+- `action`: код `MotionEvent`: 0 = DOWN, 1 = UP, 2 = MOVE (HU пишет `event.getAction()`, `HUJ/touch/TouchListenerManager.java:207-231`; MD-сторона `CP/Utils.java:24-26`, `MsgProcess.java:242-310`). Мультитач в протоколе есть (до двух пальцев), см. §6.1.1. [К]
 - `x`, `y`: **пиксели в системе координат кодированного видео**, пересчитанные из координат на экране ГУ: `x*phoneW/carW`, `y*phoneH/carH`, где `phoneW/H` = размеры из `VIDEO_ENCODER_INIT_DONE`, `carW/H` = размеры SurfaceView ГУ (`TouchListenerManager.java:211-212`, :488-494 `CarlifeActivity`). Начало координат левый верхний угол. [К]
 - Режим включается флагом `TRANSPARENT_SEND_TOUCH_EVENT` из конфига ГУ: `true` → этот режим (`CarlifeActivity.java:453-454`, `TouchListenerManager.java:60-73,88-101`). Какой режим у реальной Honda, неизвестно. [Д]
 - CarProjection в MD-стороне обрабатывает **только** `MSG_TOUCH_ACTION` и `MSG_TOUCH_CAR_HARD_KEY_CODE` (`MsgProcess.java:546-575`). Остальные типы игнорирует. Значит, для нашего MD реализуем эти два, а остальные (ниже) принимаем и отбрасываем, либо мапим. [К]
+
+#### 6.1.1 Мультитач (второй палец)
+
+Эталон обработки на стороне телефона: Baidu CarLife 8.6.7, `CarlifeTouchManager.onActionEvent` (`re/carlife-8.6.7/sources/com/baidu/carlife/core/screen/touch/CarlifeTouchManager.java:640-662`). [К]
+
+- `action` как у `MotionEvent`: `action & 255` = код (0 DOWN, 1 UP, 2 MOVE, 5 POINTER_DOWN, 6 POINTER_UP), `action >> 8` = индекс пальца. Второй палец опускается/поднимается с `261` (5|1<<8) / `262` (6|1<<8); `6` = поднят палец индекса 0. Baidu больше двух пальцев не обрабатывает (`action > 261/262` отбрасывает). [К]
+- `x, y` = палец индекса 0, `pointerx, pointery` = палец индекса 1, в том числе в MOVE. `pointerx == 0 && pointery == 0` = второго пальца нет: в POINTER_DOWN Baidu ставит второй палец в (x, y), в POINTER_UP берёт его последние координаты из MOVE. [К]
+- После POINTER_UP с индексом 0 оставшийся палец приходит в x, y; в Headswap его pointer_id для AA не меняется (1). [Д]
+- Шлёт ли ГУ второй палец, зависит от ГУ; Headswap пишет в лог `TOUCH action=… пальцев=… тело=… байт` и разовую строку `== МУЛЬТИТАЧ`. Если при щипке в логе только action 0/1/2 и тело до 8 байт, ГУ второй палец не шлёт. [Д]
 
 ### 6.2 «Жестовый» режим (если `TRANSPARENT_SEND_TOUCH_EVENT=false`)
 
@@ -400,6 +409,11 @@ HU разбирает касания `GestureDetector`-ом и шлёт, все 
 | 0x00068005 | TOUCH_SINGLE_CLICK | `onSingleTapUp` |
 | 0x00068006 | TOUCH_DOUBLE_CLICK | двойное нажатие |
 | 0x00068007 | TOUCH_LONG_PRESS | `onShowPress` |
+| 0x0006800B | TOUCH_ACTION_POINTER_DOWN | второй палец опущен; Baidu: как action 261 без pointer-полей |
+| 0x0006800C | TOUCH_ACTION_POINTER_UP | поднят палец индекса 0; Baidu: как action 6 |
+| 0x0006800D | TOUCH_ACTION_OTHERPOINTER_UP | поднят второй палец; Baidu: как action 262 |
+
+Коды 0x6800B-D и pointer-поля `CarlifeTouchSinglePoint {x=1, y=2, pointerx=3, pointery=4}` известны только по телефонной стороне Baidu 8.6.7 (`CarlifeTouchManager.java:519-561`); какие ГУ их шлют, неизвестно. [Д]
 
 Есть ещё `CarlifeTouchEvent`, `TouchFling`, `TouchScroll`, `TouchEventDevice/AllDevice` в `PB/` (для сырых evdev-событий и жестов); в Java-HU и C++-API HU не используются. [К]
 
@@ -572,7 +586,7 @@ inner: <u32 n> <u32 ts>  00 02 00 01  <n байт Annex-B>
 8. **SPS/PPS с каждым IDR или только в первом кадре.** Код Java-HU ожидает первый кадр с SPS+PPS и «голые» IDR после сброса (§5.2). У реального HU Honda поведение может отличаться. Сделать настройку. [Д]
 9. **Heartbeat.** Реальный MD, вероятно, шлёт `VIDEO_HEARTBEAT` периодически (период неизвестен). Если картинка статична, а энкодер не повторяет кадры, надо слать heartbeat или принудительно кадры. [Д]
 10. **Расхождение кодов `CAR_DATA_SUBSCRIBE_DONE` (0x00010032 в C++ vs 0x00018032 в Java)** и тип тела у `CAR_DATA_START` (список vs одиночный). Затрагивает только данные автомобиля (скорость/GPS), не видео и не тач. [К, оба значения есть в коде]
-11. **Тач-режим ГУ.** Режим `TRANSPARENT_SEND_TOUCH_EVENT` (один `TOUCH_ACTION` против набора жестовых сообщений) определяется конфигом ГУ; нужно принимать оба. Мультитач протокол не поддерживает (одна точка). [К/Д]
+11. **Тач-режим ГУ.** Режим `TRANSPARENT_SEND_TOUCH_EVENT` (один `TOUCH_ACTION` против набора жестовых сообщений) определяется конфигом ГУ; нужно принимать оба. Мультитач: до двух пальцев через `action>>8` и pointerx/pointery (§6.1.1); шлёт ли его конкретное ГУ, видно только по логу. [К/Д]
 12. **Звук.** Если ГУ в режиме BT-аудио (`AUDIO_TRANSMISSION_MODE`), PCM по USB игнорируется, звук придётся вести по A2DP. [К по флагу HU, Д по значению]
 13. **`MD_INFO.sdk_int`.** При `sdk_int < 21` Java-HU показывает «AOA не поддерживается» (§4.4); ставить реальный SDK телефона. [К]
 14. **`icar` и `CarLife-MD-Lib`.** Для MD-стороны это не источник правды (`icar` без кода, `MDL` без MD-команд). Единственный образец MD-логики это `CarProjection`, и он урезанный (нет feature config, нет heartbeat, нет FRAME_RATE_CHANGE, нет шифрования, нет мультимедиа-метаданных). [К]

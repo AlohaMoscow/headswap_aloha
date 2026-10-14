@@ -83,6 +83,12 @@ class AaBridgeCore(
     enum class Source { PLACEHOLDER, AA }
 
     @Volatile var peer: AaPeer? = null
+        set(v) {
+            synchronized(touchLock) {
+                field = v
+                fingers.clear()
+            }
+        }
     @Volatile private var link: CarlifeLink = NoLink
 
     @Volatile private var carlifeStarted = false
@@ -455,28 +461,113 @@ class AaBridgeCore(
         stopTranscoderAsync()
         active = Source.PLACEHOLDER
         link = NoLink
+        synchronized(touchLock) { fingers.clear() }
         log("BRIDGE CarLife закрыт (AA ${if (aaVideoSeen) "жива" else "без видео"}, держим)", true)
         return true
     }
 
-    /** TOUCH_ACTION ГУ -> AA: 0 DOWN, 1 UP, 2 MOVE; координаты кадра ГУ -> кадр AA через [VideoMode.mapTouch] (без margin-ов 1:1). */
-    fun onCarlifeTouch(action: Int, x: Int, y: Int) {
-        if (action == 0) lastUserInputMs = clockMs()
-        if (action !in 0..2) {
+    /** Палец CarLife-тача: id для AA и последние координаты кадра ГУ. */
+    private class Finger(val id: Int, var x: Int, var y: Int) {
+        fun set(nx: Int, ny: Int) {
+            x = nx
+            y = ny
+        }
+    }
+
+    private val touchLock = Any()
+
+    /** Активные пальцы в порядке индекса MotionEvent ГУ: x,y TOUCH_ACTION - индекс 0, pointerx/pointery - индекс 1. */
+    private val fingers = ArrayList<Finger>(2)
+
+    /**
+     * TOUCH_ACTION ГУ -> AA. action как у MotionEvent: action&255 = 0 DOWN, 1 UP, 2 MOVE, 5 POINTER_DOWN, 6 POINTER_UP,
+     * action>>8 = индекс пальца. Второй палец - в (px, py); 0,0 = координат нет (тогда последние известные).
+     * До двух пальцев; id оставшегося пальца после POINTER_UP не меняется. Координаты кадра ГУ -> кадр AA через
+     * [VideoMode.mapTouch] (без margin-ов 1:1). Один палец уходит в AA так же, как до мультитача (id 0, action_index 0).
+     */
+    fun onCarlifeTouch(action: Int, x: Int, y: Int, px: Int = 0, py: Int = 0) = synchronized(touchLock) {
+        val act = action and 0xFF
+        val idx = action ushr 8
+        if (act == AapMessages.TOUCH_DOWN || act == AapMessages.TOUCH_POINTER_DOWN) lastUserInputMs = clockMs()
+        val name = TOUCH_NAMES[act]
+        if (name == null) {
             log("BRIDGE тач action=$action x=$x y=$y не передаю (нет аналога в AA)", false)
-            return
+            return@synchronized
         }
         val p = peer
-        val name = when (action) { 0 -> "DOWN"; 1 -> "UP"; else -> "MOVE" }
         if (p == null) {
             log("BRIDGE тач $name $x,$y проигнорирован: AA не подключён", false)
-            return
+            fingers.clear()
+            return@synchronized
         }
+        val second = px != 0 || py != 0
+        when (act) {
+            AapMessages.TOUCH_DOWN -> {
+                fingers.clear()
+                fingers.add(Finger(0, x, y))
+                sendFingers(p, act, 0, name)
+            }
+            AapMessages.TOUCH_MOVE -> {
+                if (fingers.isEmpty()) fingers.add(Finger(0, x, y))   // DOWN потерян: как раньше, один палец id 0
+                fingers[0].set(x, y)
+                if (fingers.size > 1 && second) fingers[1].set(px, py)
+                sendFingers(p, act, 0, name)
+            }
+            AapMessages.TOUCH_POINTER_DOWN -> {
+                if (fingers.size >= 2 || idx > 1) {
+                    log("BRIDGE тач $name action=$action: больше двух пальцев не передаю", false)
+                    return@synchronized
+                }
+                if (fingers.isEmpty()) fingers.add(Finger(0, x, y))
+                val pos = idx.coerceAtMost(fingers.size)
+                val fresh = Finger(if (fingers[0].id == 0) 1 else 0, x, y)
+                fingers.add(pos, fresh)
+                fingers[0].set(x, y)
+                if (second) fingers[1].set(px, py) else if (fingers[1] === fresh) fresh.set(x, y)
+                sendFingers(p, act, pos, name)
+            }
+            AapMessages.TOUCH_POINTER_UP -> {
+                if (fingers.size < 2 || idx > 1) {
+                    log("BRIDGE тач $name action=$action: пальцев ${fingers.size}, не передаю", false)
+                    return@synchronized
+                }
+                fingers[0].set(x, y)
+                if (second) fingers[1].set(px, py)
+                sendFingers(p, act, idx, name)
+                fingers.removeAt(idx)
+            }
+            else -> {                                              // UP последнего пальца
+                if (fingers.size > 1) {                            // POINTER_UP потерян: сначала снимаем второй палец
+                    sendFingers(p, AapMessages.TOUCH_POINTER_UP, 1, "POINTER_UP")
+                    fingers.removeAt(1)
+                }
+                if (fingers.isEmpty()) fingers.add(Finger(0, x, y))
+                fingers[0].set(x, y)
+                sendFingers(p, act, 0, name)
+                fingers.clear()
+            }
+        }
+    }
+
+    /** Все активные пальцы -> AA одним событием; лог как до мультитача для одного пальца. */
+    private fun sendFingers(p: AaPeer, act: Int, index: Int, name: String) {
         val mode = videoMode
-        val (ax, ay) = mode.mapTouch(x, y)
-        if (ax == x && ay == y) log("BRIDGE тач $name $x,$y -> AA", action != 2)
-        else log("BRIDGE тач $name ГУ $x,$y -> AA $ax,$ay (${mode.name})", action != 2)
-        p.sendTouch(action, ax, ay)
+        val points = fingers.map { f ->
+            val (ax, ay) = mode.mapTouch(f.x, f.y)
+            TouchPoint(f.id, ax, ay)
+        }
+        val ui = act != AapMessages.TOUCH_MOVE
+        if (points.size == 1) {
+            val f = fingers[0]
+            val a = points[0]
+            if (a.x == f.x && a.y == f.y) log("BRIDGE тач $name ${f.x},${f.y} -> AA", ui)
+            else log("BRIDGE тач $name ГУ ${f.x},${f.y} -> AA ${a.x},${a.y} (${mode.name})", ui)
+        } else {
+            val gu = fingers.joinToString(" ") { "#${it.id} ${it.x},${it.y}" }
+            val aa = points.joinToString(" ") { "#${it.id} ${it.x},${it.y}" }
+            log("BRIDGE тач $name[$index] пальцев ${points.size}: ГУ $gu -> AA $aa (${mode.name})", ui)
+        }
+        p.sendTouch(act, index, points)
     }
 
     /** TOUCH_CAR_HARD_KEY_CODE ГУ (кнопки руля) -> AA: нажатие Android KeyEvent по [HARD_KEY_TO_ANDROID]. */
@@ -1140,6 +1231,12 @@ class AaBridgeCore(
     }
 
     companion object {
+        /** action&255 TOUCH_ACTION, которые уходят в AA (у AA те же коды PointerAction). */
+        private val TOUCH_NAMES = mapOf(
+            AapMessages.TOUCH_DOWN to "DOWN", AapMessages.TOUCH_UP to "UP", AapMessages.TOUCH_MOVE to "MOVE",
+            AapMessages.TOUCH_POINTER_DOWN to "POINTER_DOWN", AapMessages.TOUCH_POINTER_UP to "POINTER_UP",
+        )
+
         // Флаги нового звукового поведения (по умолчанию включены): в машине отключаются по одному.
         /** MODULE_STATUS NAVI=1 перед первым TTS_INIT, NAVI=0 при остановке звука. */
         @Volatile @JvmStatic var NAVI_STATUS_ENABLED = true

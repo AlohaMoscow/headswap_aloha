@@ -416,7 +416,7 @@ class AaMicTest {
 
     private class MicPeer : AaPeer {
         val pcm = ArrayList<Pair<Int, Long>>()
-        override fun sendTouch(action: Int, x: Int, y: Int) {}
+        override fun sendTouch(action: Int, actionIndex: Int, points: List<TouchPoint>) {}
         override fun requestKeyFrame() {}
         override fun sendMicPcm(pcm: ByteArray, capturedAtUs: Long) {
             this.pcm.add(pcm.size to capturedAtUs)

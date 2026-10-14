@@ -263,11 +263,21 @@ object AapMessages {
     const val TOUCH_DOWN = 0
     const val TOUCH_UP = 1
     const val TOUCH_MOVE = 2
+    const val TOUCH_POINTER_DOWN = 5
+    const val TOUCH_POINTER_UP = 6
 
-    /** InputReport{timestamp ns, touch_event{pointer, action_index 0, action}}. */
-    fun touchEvent(action: Int, x: Int, y: Int, timestampNs: Long, pointerId: Int = 0): AapOut {
-        val pointer = AapPb().v(1, x).v(2, y).v(3, pointerId)
-        val touch = AapPb().msg(1, pointer).v(2, 0).v(3, action)
+    /** Один палец: InputReport{timestamp ns, touch_event{pointer, action_index 0, action}}. */
+    fun touchEvent(action: Int, x: Int, y: Int, timestampNs: Long, pointerId: Int = 0): AapOut =
+        touchEvent(action, 0, listOf(TouchPoint(pointerId, x, y)), timestampNs)
+
+    /**
+     * InputReport{timestamp ns, touch_event{pointer x N, action_index, action}}: все активные пальцы в одном событии,
+     * action_index = позиция в [points] пальца, вызвавшего POINTER_DOWN/UP (как MotionEvent.getActionIndex).
+     */
+    fun touchEvent(action: Int, actionIndex: Int, points: List<TouchPoint>, timestampNs: Long): AapOut {
+        val touch = AapPb()
+        for (p in points) touch.msg(1, AapPb().v(1, p.x).v(2, p.y).v(3, p.id))
+        touch.v(2, actionIndex).v(3, action)
         return AapOut(CH_INPUT, INPUT_EVENT, AapPb().v(1, timestampNs).msg(3, touch).toByteArray())
     }
 
