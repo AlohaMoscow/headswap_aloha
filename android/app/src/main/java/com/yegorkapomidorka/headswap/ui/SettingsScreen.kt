@@ -2,7 +2,9 @@ package com.yegorkapomidorka.headswap.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -10,7 +12,11 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.yegorkapomidorka.headswap.AppLocale
+import com.yegorkapomidorka.headswap.AppLog
 import com.yegorkapomidorka.headswap.AppTheme
+import com.yegorkapomidorka.headswap.BridgeService
+import com.yegorkapomidorka.headswap.BuildConfig
+import com.yegorkapomidorka.headswap.CarLifeState
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaPrefs
@@ -18,6 +24,7 @@ import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
+import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.update.UpdatePrefs
 import com.yegorkapomidorka.headswap.update.Updater
 
@@ -55,6 +62,9 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private lateinit var updStatus: TextView
     private lateinit var updButton: TextView
     private lateinit var body: LinearLayout
+    private lateinit var wlStatus: TextView
+    private lateinit var wlNoPermission: TextView
+    private var wlAwaitingPermission = false
     override val view: View
 
     init {
@@ -141,6 +151,11 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         body.addView(c.sectionTitle(c.getString(R.string.upd_title)))
         body.addView(updateCard())
 
+        if (BuildConfig.WIRELESS_BETA) {
+            body.addView(c.sectionTitle(c.getString(R.string.wl_title)))
+            body.addView(wirelessCard())
+        }
+
         val links = c.card().apply {
             addView(link(R.drawable.ic_report, c.getString(R.string.set_report_title), c.getString(R.string.set_report_note), false) { LogShare.shareReport(c) })
             addView(c.divider())
@@ -167,14 +182,22 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         refreshService()
         refreshMic()
         refreshUpdate()
+        refreshWireless()
     }
 
     override fun tick() {
         refreshService()
         refreshUpdate()
+        refreshWireless()
     }
 
-    override fun onPermissionResult() = refreshMic()
+    override fun onPermissionResult() {
+        refreshMic()
+        if (wlAwaitingPermission) {
+            wlAwaitingPermission = false
+            if (NetProbe.localNetworkGranted(ctx) == "granted") startWireless() else wlNoPermission.visibility = View.VISIBLE
+        }
+    }
 
     private fun link(icon: Int, title: String, note: String?, chevron: Boolean, onClick: () -> Unit): View {
         val c = ctx
@@ -369,6 +392,52 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         val label = c.getString(if (rel != null) R.string.upd_btn_update else R.string.upd_btn_check)
         if (updButton.text.toString() != label) updButton.text = label
         updButton.visibility = if (busy) View.GONE else View.VISIBLE
+    }
+
+    /** Бета «Беспровод» (ветка B): пояснение, старт/стоп, состояние и отчёт. Только при BuildConfig.WIRELESS_BETA. */
+    private fun wirelessCard(): View {
+        val c = ctx
+        val card = c.vbox(8).apply {
+            background = c.shape(c.clr(R.color.surf), 20)
+            pad(c, 16, 12, 16, 12)
+        }
+        card.addView(c.text(c.getString(R.string.wl_note), 14f, 400, c.clr(R.color.on2)), lp(MATCH, WRAP))
+        wlStatus = c.text("", 15f, 500)
+        card.addView(wlStatus, lp(MATCH, WRAP))
+        wlNoPermission = c.text(c.getString(R.string.wl_no_permission), 13f, 400, c.clr(R.color.warn)).apply { visibility = View.GONE }
+        card.addView(wlNoPermission, lp(MATCH, WRAP))
+        card.addView(c.tonalButton(c.getString(R.string.wl_start)).apply { setOnClickListener { onWirelessStart() } }, lp(MATCH, WRAP))
+        card.addView(c.outlineButton(c.getString(R.string.wl_stop), heightDp = 52, sp = 15f).apply { setOnClickListener { Actions.stopBridge(c) } }, lp(MATCH, WRAP))
+        card.addView(c.linkButton(c.getString(R.string.wl_report)).apply { setOnClickListener { LogShare.shareReport(c) } }, lp(MATCH, WRAP))
+        refreshWireless()
+        return card
+    }
+
+    private fun refreshWireless() {
+        if (!::wlStatus.isInitialized) return
+        val text = ctx.getString(R.string.wl_status_line, CarLifeState.wireless ?: ctx.getString(R.string.wl_off))
+        if (wlStatus.text.toString() != text) wlStatus.text = text
+    }
+
+    /** На Android 17+ без ACCESS_LOCAL_NETWORK LAN режется молча: сначала спрашиваем, старт - в onPermissionResult. */
+    private fun onWirelessStart() {
+        wlNoPermission.visibility = View.GONE
+        if (Build.VERSION.SDK_INT >= 37 && NetProbe.localNetworkGranted(ctx) != "granted") {
+            wlAwaitingPermission = true
+            host.requestPermissions(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK), REQ_LOCAL_NETWORK)
+            return
+        }
+        startWireless()
+    }
+
+    private fun startWireless() {
+        AppLog.i("кнопка «Ждать машину по Wi-Fi»")
+        ctx.startForegroundService(Intent(ctx, BridgeService::class.java).setAction(BridgeService.ACTION_WIFI_B))
+    }
+
+    private companion object {
+        /** Тот же код, что MainActivity.REQ_LOCAL_NETWORK: результат попадает в её лог. */
+        const val REQ_LOCAL_NETWORK = 37
     }
 
     private fun setMic(m: MicMode) {

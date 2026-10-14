@@ -94,4 +94,6 @@
     <string name="mock_usb_default">Использовать по умолчанию</string>
     <string name="mock_cancel">Отмена</string>
     <string name="mock_ok">ОК</string>
+
+    <string name="home_wireless">Беспровод: %1$s</string>
 </resources>

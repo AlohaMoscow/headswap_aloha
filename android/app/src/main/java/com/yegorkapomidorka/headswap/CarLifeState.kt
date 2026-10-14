@@ -15,6 +15,9 @@ object CarLifeState {
     @Volatile var videoMode: VideoMode? = null
     @Volatile var running: Boolean = false
 
+    /** Беспровод (бета, ветка B): что сейчас происходит, для экрана; null - режим не включён. */
+    @Volatile var wireless: String? = null
+
     fun resetSession() {
         protocol = "-"
         auth = "-"
@@ -23,5 +26,6 @@ object CarLifeState {
     }
 
     fun summary(): String =
-        "статус: $status\nаксессуар: $accessory\nпротокол: $protocol\nauth: $auth\nвидео: $video\nтач: $touch"
+        "статус: $status\nаксессуар: $accessory\nпротокол: $protocol\nauth: $auth\nвидео: $video\nтач: $touch" +
+            (wireless?.let { "\nбеспровод: $it" } ?: "")
 }

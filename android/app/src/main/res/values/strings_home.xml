@@ -95,4 +95,6 @@
     <string name="mock_usb_default">Use by default for this USB accessory</string>
     <string name="mock_cancel">Cancel</string>
     <string name="mock_ok">OK</string>
+
+    <string name="home_wireless">Wireless: %1$s</string>
 </resources>

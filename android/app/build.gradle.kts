@@ -20,6 +20,12 @@ android {
         targetSdk = 37
         versionCode = 36
         versionName = "1.1.11"
+        // беспровод (бета): пункт в настройках и ветка B; бета-APK для тестеров: gradlew assembleRelease -Pwlbeta=true
+        buildConfigField("boolean", "WIRELESS_BETA", (project.findProperty("wlbeta") == "true").toString())
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
@@ -34,6 +40,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("boolean", "WIRELESS_BETA", "true")
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")

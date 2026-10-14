@@ -27,6 +27,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
     private val stagesBox = ctx.vbox()
     private val footer = ctx.vbox(4)
     private var lastState: HomeState? = null
+    private var lastWireless: String? = null
     private val rings = ArrayList<ObjectAnimator>()
     private var graceLeftText: TextView? = null
     private var graceFill: View? = null
@@ -69,6 +70,13 @@ class HomeScreen(host: MainActivity) : Screen(host) {
         tick()
     }
 
+    /** Строка беспровода в карточке статуса: только когда режим включён и USB-сессии нет. */
+    private fun wirelessLine(): String? {
+        val w = CarLifeState.wireless
+        // и во время беспроводной сессии, и после обрыва (сервис тогда running, а строка говорит «жду машину снова»)
+        return if (w != null) ctx.getString(R.string.home_wireless, w) else null
+    }
+
     override fun onHide() {
         rings.forEach { it.cancel() }
         rings.clear()
@@ -77,11 +85,14 @@ class HomeScreen(host: MainActivity) : Screen(host) {
     override fun tick() {
         refreshUpdate()
         val st = HeadswapStatus.current(ctx)
-        if (st == lastState) return
+        val wl = wirelessLine()
+        if (st == lastState && wl == lastWireless) return
         val prev = lastState
         lastState = st
+        val wlSame = wl == lastWireless
+        lastWireless = wl
         // меняется только обратный отсчёт: обновляем его, не пересобирая экран
-        if (prev != null && st.copy(graceLeftS = prev.graceLeftS) == prev && st.phase == Phase.RECONNECTING) {
+        if (wlSame && prev != null && st.copy(graceLeftS = prev.graceLeftS) == prev && st.phase == Phase.RECONNECTING) {
             updateGrace(st)
             return
         }
@@ -162,6 +173,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
         heroBox.addView(c.vbox(6).apply {
             addView(c.text(st.title.get(c), 28f, 600, c.clr(textRes)).apply { letterSpacing = -0.01f; lineHeight = c.dp(34) })
             addView(c.text(st.sub.get(c), 16f, 400).apply { lineHeight = c.dp(22) })
+            lastWireless?.let { addView(c.text(it, 14f, 400, c.clr(R.color.on2))) }
         }, lp(MATCH, WRAP))
         if (st.showChain) heroBox.addView(chain(), lp(MATCH, WRAP))
         if (st.phase == Phase.RECONNECTING) heroBox.addView(graceBlock(st), lp(MATCH, WRAP))

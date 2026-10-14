@@ -99,12 +99,14 @@ class HotspotBeacon(
     private val beaconPort: Int = BeaconCodec.BEACON_PORT,
     private val probePort: Int = BeaconCodec.PROBE_PORT,
     private val clock: () -> Long = { SystemClock.elapsedRealtime() },
+    /** Набор сетей изменился (включили/выключили хотспот): для статуса на экране. */
+    private val onIfaces: (List<LanIface>) -> Unit = {},
 ) {
     private val running = AtomicBoolean(false)
     private var sender: Thread? = null
     private var responder: Thread? = null
     @Volatile private var probeSocket: DatagramSocket? = null
-    @Volatile private var known: Set<String> = emptySet()
+    @Volatile private var known: Set<String>? = null   // null: ещё не смотрели, первый опрос всегда сообщает
 
     @Volatile var sent = 0L
         private set
@@ -142,10 +144,15 @@ class HotspotBeacon(
         }
         val keys = list.map { it.toString() }.toSet()
         if (keys != known) {
-            for (k in keys - known) WLog.ev("net", "iface-up", "iface" to k)
-            for (k in known - keys) WLog.ev("net", "iface-down", "iface" to k)
+            val was = known.orEmpty()
+            for (k in keys - was) WLog.ev("net", "iface-up", "iface" to k)
+            for (k in was - keys) WLog.ev("net", "iface-down", "iface" to k)
             if (keys.isEmpty()) WLog.ev("net", "no-lan", "hint" to "хотспот выключен или нет подходящего интерфейса")
             known = keys
+            try {
+                onIfaces(list)
+            } catch (_: Exception) {
+            }
         }
         current = list
         return list

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Беспровод (бета, ветка B): состояние ожидания машины, пишет BridgeService в CarLifeState.wireless -->
+<resources>
+    <string name="wl_state_waiting">waiting for the car over Wi-Fi (%1$s)</string>
+    <string name="wl_state_no_hotspot">no hotspot: turn on the phone\'s Wi-Fi hotspot</string>
+    <string name="wl_state_connected">car connected over Wi-Fi</string>
+    <string name="wl_state_lost">connection lost, waiting for the car again</string>
+    <string name="wl_state_gave_up">the car did not connect within %1$d min</string>
+</resources>
