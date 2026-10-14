@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- debug: сервис моста доступен для adb shell am start-foreground-service (debug-транспорт TCP, DebugTransport.kt) -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <service
+            android:name=".BridgeService"
+            android:exported="true"
+            tools:replace="android:exported" />
+    </application>
+</manifest>
