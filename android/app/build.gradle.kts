@@ -12,12 +12,12 @@ val releaseProps = Properties().apply {
 
 android {
     namespace = "com.yegorkapomidorka.headswap"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.yegorkapomidorka.headswap"
         minSdk = 29
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 35
         versionName = "1.1.10"
     }

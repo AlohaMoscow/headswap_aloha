@@ -129,7 +129,7 @@ class BridgeService : Service() {
 
         // только debug-сборка: беспроводной формат, 6 TCP-сокетов на 127.0.0.1 (adb forward), ГУ подключается сама
         if (DebugTransport.tcp6(intent)) {
-            startTcp6Debug()
+            startTcp6Debug(DebugTransport.tcp6Bind(intent))
             return START_NOT_STICKY
         }
 
@@ -165,19 +165,19 @@ class BridgeService : Service() {
     }
 
     /** debug tcp6: слушать 6 портов на loopback, ждать ГУ (pc-headunit --transport tcp6), затем обычная сессия. */
-    private fun startTcp6Debug() {
+    private fun startTcp6Debug(bind: String) {
         if (pendingTcp6 != null) {
             AppLog.i("сервис: tcp6 уже ждёт ГУ, повторный старт игнорирую")
             return
         }
-        WLog.begin(TransportCaps.TCP6.kind, "bind" to "127.0.0.1")
-        AppLog.i("сервис: debug tcp6, слушаю 6 портов на 127.0.0.1, жду ГУ ${TCP6_WAIT_MS / 1000} с")
+        WLog.begin(TransportCaps.TCP6.kind, "bind" to bind, "ACCESS_LOCAL_NETWORK" to com.yegorkapomidorka.headswap.link.diag.NetProbe.localNetworkGranted(this))
+        AppLog.i("сервис: debug tcp6, слушаю 6 портов на $bind, жду ГУ ${TCP6_WAIT_MS / 1000} с")
         CarLifeState.status = "tcp6: жду ГУ"
         Thread({
             val result: Any = try {
-                val l = Tcp6Listener(java.net.InetAddress.getByName("127.0.0.1")).open()
+                val l = Tcp6Listener(java.net.InetAddress.getByName(bind)).open()
                 pendingTcp6 = l
-                l.await(TCP6_WAIT_MS, "tcp6 127.0.0.1")
+                l.await(TCP6_WAIT_MS, "tcp6 $bind")
             } catch (e: Exception) {
                 e
             } finally {

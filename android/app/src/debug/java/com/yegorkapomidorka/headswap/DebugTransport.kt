@@ -21,6 +21,9 @@ object DebugTransport {
      */
     fun tcp6(intent: Intent?): Boolean = intent?.getBooleanExtra(EXTRA_TCP6, false) == true
 
+    /** Адрес bind для tcp6: по умолчанию 127.0.0.1; `--es debug_tcp6_bind 0.0.0.0` для проверки входящего TCP из LAN. */
+    fun tcp6Bind(intent: Intent?): String = intent?.getStringExtra("debug_tcp6_bind") ?: "127.0.0.1"
+
     fun port(intent: Intent?): Int? =
         intent?.getIntExtra(EXTRA_PORT, 0)?.takeIf { it in 1..65535 }
 

@@ -9,5 +9,7 @@ object DebugTransport {
 
     fun tcp6(intent: Intent?): Boolean = false
 
+    fun tcp6Bind(intent: Intent?): String = "127.0.0.1"
+
     fun connect(port: Int): ParcelFileDescriptor? = null
 }
