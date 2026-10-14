@@ -97,6 +97,26 @@ class BridgeService : Service() {
             return START_NOT_STICKY
         }
 
+        // только debug-сборка: вместо USB-аксессуара TCP к эмулятору ГУ на ПК (adb reverse), в release port() всегда null
+        val dbgPort = DebugTransport.port(intent)
+        if (dbgPort != null) {
+            AppLog.i("сервис: debug-транспорт, подключаюсь к 127.0.0.1:$dbgPort")
+            Thread({
+                val pfd = DebugTransport.connect(dbgPort)
+                main.post {
+                    if (pfd == null) {
+                        CarLifeState.status = "debug TCP: нет соединения"
+                        failStart()
+                    } else if (session != null) {
+                        pfd.close()
+                    } else {
+                        startSession(pfd, "TCP 127.0.0.1:$dbgPort")
+                    }
+                }
+            }, "debug-tcp").start()
+            return START_NOT_STICKY
+        }
+
         val usb = getSystemService(UsbManager::class.java)
         val acc = usb.accessoryList?.firstOrNull()
         if (acc == null) {
@@ -124,7 +144,12 @@ class BridgeService : Service() {
             return START_NOT_STICKY
         }
         AppLog.i("сервис: аксессуар открыт: ${MainActivity.describe(acc)}")
-        CarLifeState.accessory = MainActivity.describe(acc)
+        startSession(pfd, MainActivity.describe(acc))
+        return START_NOT_STICKY
+    }
+
+    private fun startSession(pfd: android.os.ParcelFileDescriptor, accessory: String) {
+        CarLifeState.accessory = accessory
 
         val aaPrefs = AaPrefs(this)
         val screenOn = getSystemService(PowerManager::class.java).isInteractive
@@ -153,7 +178,7 @@ class BridgeService : Service() {
                 }
                 CarLifeState.status = AaState.setupError ?: "мост не стартовал"
                 failStart()
-                return START_NOT_STICKY
+                return
             }
         } else {
             AppLog.i("BRIDGE: AA-хост уже есть, переиспользую (grace=${h.isInGrace})")
@@ -172,7 +197,6 @@ class BridgeService : Service() {
         session = s
         s.start()
         h.onUsbSessionStarted()
-        return START_NOT_STICKY
     }
 
     /** Новый AA-хост: ядро, коннектор, сертификаты. null = мост не поднялся (причина в AaState.setupError). */

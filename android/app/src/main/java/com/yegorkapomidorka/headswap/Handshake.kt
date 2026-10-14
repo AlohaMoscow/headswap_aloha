@@ -23,7 +23,10 @@ object HuAuth {
             .generatePrivate(java.security.spec.PKCS8EncodedKeySpec(java.util.Base64.getDecoder().decode(PRIVATE_KEY)))
     }
 
-    /** Ветка "2.0;<rnd>" (EncryptionUtils.getVerifyCode, нативная либа Baidu): не реализована. Условие как у Baidu. */
+    /** Соль MD5_HEAD из libencryption.so Baidu 8.6.7. */
+    private const val V2_SALT = "CARLIFE"
+
+    /** Ветка "2.0;<rnd>" (EncryptionUtils.getVerifyCode, нативная либа Baidu). Условие как у Baidu. */
     fun isV2Branch(random: String): Boolean {
         val parts = javaSplit(random, ";")
         return parts.size >= 2 && parts[0] == "2.0" && parts[1].isNotEmpty()
@@ -56,9 +59,28 @@ object HuAuth {
         return str
     }
 
-    /** encryptValue для MD_AUTHEN_RESPONSE; null для ветки 2.0 (ответа нет). */
-    fun encryptValue(random: String): String? {
-        if (isV2Branch(random)) return null
+    /**
+     * Строка CONNECT_ENCRYPTION_MD_INFO у Baidu: brand + model + sdk из отправленного MD_INFO
+     * (CarlifeDeviceInfoManager :174). ГУ берёт её из того же MD_INFO, поэтому поля должны совпадать байт в байт.
+     */
+    fun mdInfoKey(info: DeviceInfo) = info.brand + info.model + info.sdk
+
+    /**
+     * getVerifyCode из libencryption.so: md5(MD5_HEAD + str) строчным hex (класс MD5 из md5.cpp, HEX_NUMBERS
+     * "0123456789abcdef"). Проверку подписи APK (APP_SIGNATURE_CARLIFE) пропускаем: у Baidu она при
+     * чужой подписи просто отдаёт null. ГУ сверяет getVerifyResult: тот же md5 и strcmp.
+     */
+    fun verifyCode(str: String): String {
+        val d = java.security.MessageDigest.getInstance("MD5").digest((V2_SALT + str).toByteArray(Charsets.UTF_8))
+        return d.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    }
+
+    /**
+     * encryptValue для MD_AUTHEN_RESPONSE. Ветка 2.0: verifyCode(mdInfo + часть после ";"), как
+     * PrivateKeyManager.encryptContentProcess; иначе RSA-подпись.
+     */
+    fun encryptValue(random: String, mdInfo: String = ""): String {
+        if (isV2Branch(random)) return verifyCode(mdInfo + javaSplit(random, ";")[1])
         val cipher = javax.crypto.Cipher.getInstance(TRANSFORMATION)
         cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, privateKey)
         val sig = cipher.doFinal(versionVerify(random).toByteArray(Charsets.UTF_8))

@@ -112,6 +112,8 @@ class CarLifeSession(
     private var huVersion = "-"
     private var sawAuthRequest = false
     private var authRandom: String? = null
+    /** brand + model + sdk из отправленного MD_INFO: ключ ветки авторизации 2.0. */
+    private var mdInfoKey = ""
     private var huAuthResult: String? = null
     private var touchMode = "не было тачей"
     private var touchCount = 0
@@ -291,7 +293,9 @@ class CarLifeSession(
                 AppLog.i("== ВЕРСИЯ ПРОТОКОЛА ГУ: major=$maj minor=$min")
                 matchSent = true
                 // стартовая пачка сразу, ничего не ждём от ГУ: MATCH, FOREGROUND, SCREEN_ON, MD_INFO
-                for (c in Handshake.startBatch(cfg.screenOn, deviceInfo())) sendCmd(c.type, c.body)
+                val info = deviceInfo()
+                mdInfoKey = HuAuth.mdInfoKey(info)
+                for (c in Handshake.startBatch(cfg.screenOn, info)) sendCmd(c.type, c.body)
                 val mod = Handshake.moduleStatus(huMajor)
                 try {
                     sched.schedule({ sendCmd(mod.type, mod.body) }, Handshake.MODULE_STATUS_DELAY_MS, TimeUnit.MILLISECONDS)
@@ -324,17 +328,18 @@ class CarLifeSession(
                 AppLog.i("== ГУ ШЛЁТ HU_AUTHEN_REQUEST randomValue=$authRandom")
                 AppLog.i("== AUTHEN randomValue ${if (v2) "начинается с \"2.0;\"" else "не начинается с \"2.0;\""}")
                 CarLifeState.auth = "HU_AUTHEN_REQUEST пришёл, ${if (v2) "2.0;" else "не 2.0;"}"
-                // как Baidu 8.6.7 (PrivateKeyManager.encryptContentProcess): подпись приватным ключом Baidu сразу по запросу;
-                // MD_AUTHEN_RESULT{true} по-прежнему уходит после STATISTIC_INFO
+                // как Baidu 8.6.7 (PrivateKeyManager.encryptContentProcess): сразу по запросу подпись приватным ключом Baidu,
+                // для "2.0;" md5-код от MD_INFO; MD_AUTHEN_RESULT{true} по-прежнему уходит после STATISTIC_INFO
                 val enc = if (rndStr == null) null else try {
-                    HuAuth.encryptValue(rndStr)
+                    HuAuth.encryptValue(rndStr, mdInfoKey)
                 } catch (e: Exception) {
                     AppLog.e("подпись HU_AUTHEN_REQUEST", e)
                     null
                 }
                 if (enc == null) {
-                    AppLog.i("на HU_AUTHEN_REQUEST не отвечаю (${if (rndStr == null) "нет randomValue" else "ветка 2.0 не реализована"})")
+                    AppLog.i("на HU_AUTHEN_REQUEST не отвечаю (${if (rndStr == null) "нет randomValue" else "подпись не вышла"})")
                 } else {
+                    if (rndStr != null && HuAuth.isV2Branch(rndStr)) AppLog.i("== AUTHEN 2.0: md5 от \"CARLIFE\" + \"$mdInfoKey\" + дата")
                     AppLog.i("== отвечаю MD_AUTHEN_RESPONSE encryptValue=$enc")
                     CarLifeState.auth += ", MD_AUTHEN_RESPONSE отправлен"
                     sendCmd(Msg.MD_AUTHEN_RESPONSE, Msgs.authenResponse(enc))

@@ -228,6 +228,12 @@ class ProtocolTest {
         // c2.qti на 2240x976 уже пишет 80/42: менять нечего, тот же массив (h57: копия без отличий валила заглушку)
         val qti976 = hex("00 00 00 01 67 42 80 2A AB")
         assertTrue(AnnexB.fixSps(qti976, 2240, 976) === qti976)
+        // Huawei Pura 70 на 2560x1440: 67 42 C0 32 уже совпадает с целевой подписью - тот же массив (h61: копия без отличий
+        // роняла withFixedSps на first{})
+        val kirin = hex("00 00 00 01 67 42 C0 32 AB 00 00 00 01 68 CE")
+        assertTrue(AnnexB.fixSps(kirin, 2560, 1440) === kirin)
+        // тот же SPS на 1280x720: level понижается до 3.1
+        assertArrayEquals(hex("00 00 00 01 67 42 C0 1F AB 00 00 00 01 68 CE"), AnnexB.fixSps(kirin, 1280, 720))
     }
 
     @Test
@@ -555,13 +561,24 @@ class ProtocolTest {
         assertFalse(HuAuth.isV2Branch("txGaIEnzYVCaFOEArS9O_0"))
         assertFalse(HuAuth.isV2Branch("1.0;abc"))
         assertFalse(HuAuth.isV2Branch("2.0;")) // split даёт одну часть
-        assertNull(HuAuth.encryptValue("2.0;abcdef"))
+    }
+
+    @Test
+    fun v2VerifyCodeLikeLibEncryption() {
+        // md5("CARLIFE" + str) строчным hex
+        assertEquals("2fce147802726d1aeae532116434339d", HuAuth.verifyCode("HUAWEIADY-LX9312026-10-14-12-01-33"))
+        // запрос Honda CR-V 2026 (h61): ключ brand+model+sdk из MD_INFO + часть после ";"
+        val key = HuAuth.mdInfoKey(DeviceInfo(brand = "HUAWEI", model = "ADY-LX9", sdk = "31", sdkInt = 31))
+        assertEquals("HUAWEIADY-LX931", key)
+        assertEquals("2fce147802726d1aeae532116434339d", HuAuth.encryptValue("2.0;2026-10-14-12-01-33", key))
+        // третья часть после ";" в код не идёт (у Baidu strArrSplit[1])
+        assertEquals(HuAuth.verifyCode("ab"), HuAuth.encryptValue("2.0;b;c", "a"))
     }
 
     @Test
     fun authSignatureDecryptsWithPublicKey() {
         val rnd = "txGaIEnzYVCaFOEArS9O_0"
-        val enc = HuAuth.encryptValue(rnd)!!
+        val enc = HuAuth.encryptValue(rnd)
         assertFalse(enc.contains("\n") || enc.contains("\r"))
         val sig = java.util.Base64.getDecoder().decode(enc)
         assertEquals(128, sig.size)

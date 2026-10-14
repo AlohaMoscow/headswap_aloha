@@ -23,7 +23,7 @@ MD -> HU  0x1004B MD_AUTHEN_RESULT {true}   `08 01`
 MD -> HU  0x10051 MD_FEATURE_CONFIG_REQUEST (пусто)
 MD -> HU  0x10031 CAR_DATA_SUBSCRIBE        (пусто)
 HU -> MD  0x18048 HU_AUTHEN_REQUEST {randomValue}  (Honda не шлёт; VW Tharu шлёт)
-MD -> HU  0x10049 MD_AUTHEN_RESPONSE {encryptValue}  (сразу в ответ: RSA-подпись приватным ключом Baidu, Base64; ветка "2.0;" без ответа)
+MD -> HU  0x10049 MD_AUTHEN_RESPONSE {encryptValue}  (сразу в ответ: RSA-подпись приватным ключом Baidu, Base64; ветка "2.0;" — md5-код, см. ниже)
 HU -> MD  0x1804A HU_AUTHEN_RESULT                 (лог)
 HU -> MD  0x18052 HU_FEATURE_CONFIG_RESPONSE       (лог всех ключей; CONTENT_ENCRYPTION=1 -> только предупреждение)
 HU -> MD  0x18045/0x18046 SUBSCRIBE_START/STOP     (лог, данные не шлём)
@@ -86,7 +86,7 @@ SDK: при `SDK_INT >= 33` шлётся `sdk="29"`, `sdk_int=29`. На Android 
 
 ## Что не реализовано
 
-- MD_AUTHEN_RESPONSE для ветки `randomValue = "2.0;<rnd>"` (нативный `EncryptionUtils.getVerifyCode` у Baidu): не отправляется, только лог. Обычный `randomValue` подписывается как у Baidu 8.6.7, см. выше.
+- MD_AUTHEN_RESPONSE для ветки `randomValue = "2.0;<rnd>"` (нативный `EncryptionUtils.getVerifyCode` у Baidu): `encryptValue = md5hex("CARLIFE" + brand + model + sdk + <rnd>)`, строчный hex, brand/model/sdk из отправленного MD_INFO, `<rnd>` — вторая часть `split(";")`. Шлёт ГУ Honda CR-V 2026 (Китай, `honda_3ya`, CarLife HU v2.3.4), `<rnd>` там дата вида `2026-10-14-12-01-33`; без ответа ГУ пишет «устройство не авторизовано» и рвёт USB каждые ~40 с. Обычный `randomValue` подписывается как у Baidu 8.6.7, см. выше.
 - Шифрование канала: проверенная ГУ его не объявляет. Если `HU_FEATURE_CONFIG_RESPONSE` содержит CONTENT_ENCRYPTION=1, в лог пишется предупреждение; цепочка 0x1006A..0x1006E (RSA public key -> AES key -> ENCRYPT_READY, описана в carlife-protocol.md, §8) не сделана.
 - Данные подписки (turn-by-turn, музыка): DONE говорит supportFlag=true для moduleID 0 и 2, но после SUBSCRIBE_START данные не шлются.
 - JPEG-режим видео не поддерживается, шлём только H.264.
