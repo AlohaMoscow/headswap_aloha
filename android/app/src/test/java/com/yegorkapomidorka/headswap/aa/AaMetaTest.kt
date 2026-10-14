@@ -12,7 +12,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.After
-import org.junit.Before
 import org.junit.Test
 import com.yegorkapomidorka.headswap.aa.AapMessages as M
 
@@ -57,15 +56,10 @@ class MetaLink : CarlifeLink {
 class AaMetaTest {
     private val png = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte(), 1, 2, 3)
 
-    // NAVI=1 на весь маршрут по умолчанию выключен; тесты реле проверяют включённый режим, выключенный - routeNaviOffByDefault
-    @Before
+    // NAVI=1 на весь маршрут по умолчанию включён (кроме Desay G6S); тесты, выключающие флаг, возвращают его здесь
+    @After
     fun routeNaviOn() {
         AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = true
-    }
-
-    @After
-    fun routeNaviOff() {
-        AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = false
     }
 
     private fun status(state: Int, pos: Int, source: String = "Spotify") =
@@ -479,9 +473,13 @@ class AaMetaTest {
     }
 
     @Test
-    fun routeNaviOffByDefault() {
+    fun routeNaviOffWhenFlagDisabled() {
         AaBridgeCore.ROUTE_NAVI_STATUS_ENABLED = false
-        val r = Rig()
+        assertRouteWithoutNavi(Rig())
+    }
+
+    /** Маршрут без NAVI=1: манёвры идут, NAVI=1 остаётся только вокруг TTS. */
+    private fun assertRouteWithoutNavi(r: Rig) {
         r.core.onCarlifeSubscribe(listOf(0), true)
         r.start()
         r.core.onNavStatus(1)
@@ -491,6 +489,61 @@ class AaMetaTest {
         assertEquals("а манёвры идут", 1, r.link.turns.size)
         r.core.onAudioData(M.CH_AUDIO_SPEECH, ByteArray(640), 0)
         assertEquals("NAVI=1 вокруг TTS остаётся", listOf(1), r.link.navi())
+    }
+
+    @Test
+    fun routeNaviOnForUsualHu() {
+        val r = Rig()
+        r.core.onHuInfo("", "")                  // Honda Vezel: пустые manufacturer / model
+        r.core.onHuStatistic("20832125")
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        assertEquals("старт маршрута - NAVI=1", listOf(1), r.link.navi())
+        r.core.onNavStatus(2)
+        assertEquals("конец маршрута - NAVI=0", listOf(1, 0), r.link.navi())
+    }
+
+    @Test
+    fun routeNaviOnForOtherMazda() {
+        val r = Rig()
+        r.core.onHuInfo("alps", "MAZDA")
+        r.core.onHuStatistic("21520001")
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        assertEquals(listOf(1), r.link.navi())
+    }
+
+    @Test
+    fun routeNaviOffForDesayByManufacturer() {
+        val r = Rig()
+        r.core.onHuInfo("Desay SV Automotive", "G6S")
+        assertTrue(r.core.huDesayG6S)
+        assertRouteWithoutNavi(r)
+    }
+
+    @Test
+    fun routeNaviOffForDesayByChannel() {
+        val r = Rig()
+        r.core.onHuInfo("", "")
+        r.core.onHuStatistic("20622116")
+        assertTrue(r.core.huDesayG6S)
+        assertRouteWithoutNavi(r)
+    }
+
+    @Test
+    fun desayFlagResetsOnNewSession() {
+        val r = Rig()
+        r.core.onHuInfo("Desay SV Automotive", "G6S")
+        r.core.onCarlifeClosed()
+        val link2 = MetaLink()
+        r.core.attach(link2)
+        assertTrue("новая сессия - флаг заново по HU_INFO", !r.core.huDesayG6S)
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.core.onCarlifeStart()
+        r.core.onNavStatus(1)
+        assertEquals(listOf(1), link2.navi())
     }
 
     @Test

@@ -137,6 +137,8 @@ class AaBridgeCore(
     @Volatile var expectFeatureConfig = false
     @Volatile var featureConfigSeen = false
     @Volatile private var btAudio = false
+    @Volatile var huDesayG6S = false           // ГУ Desay G6S (Mazda CX-5): NAVI=1 глушит штатное радио, маршрутный NAVI не шлём
+        private set
     private val audioInited = HashMap<Int, Boolean>()
     private val audioLogged = HashMap<Int, Long>()
     var audioBytes = 0L
@@ -286,6 +288,7 @@ class AaBridgeCore(
         exitPending = false
         huPausedAa = false
         gotIdr = false
+        huDesayG6S = false                     // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
         meta.onAttach()
         link.showPlaceholder(placeholderText)
@@ -422,6 +425,16 @@ class AaBridgeCore(
         } else {
             log("BRIDGE AUDIO_TRANSMISSION_MODE=${audioTransmissionMode ?: "нет в списке"}: звук по USB ${if (usbAudioEnabled) "включён" else "выключен в UI"}", true)
         }
+    }
+
+    /** HU_INFO ГУ разобран: Desay G6S опознаём по производителю и модели (другие ГУ Desay SV под запрет не попадают). */
+    fun onHuInfo(manufacturer: String?, model: String?) {
+        if (manufacturer == DESAY_MANUFACTURER && model == DESAY_G6S_MODEL) huDesayG6S = true
+    }
+
+    /** STATISTIC_INFO ГУ разобран: запасной признак Desay G6S - канал сборки прошивки. */
+    fun onHuStatistic(channel: String?) {
+        if (channel == DESAY_G6S_CHANNEL) huDesayG6S = true
     }
 
     /** CarLife-сессия закрыта (USB EIO / detach / Стоп). AA не трогаем; from - закрываемая ссылка, чужую не отцепляем. */
@@ -740,6 +753,11 @@ class AaBridgeCore(
         if (!ROUTE_NAVI_STATUS_ENABLED) {
             routeNaviHeld = false
             if (on) log("BRIDGE маршрут: MODULE_STATUS NAVI=1 не шлю (только вокруг TTS)", false)
+            return
+        }
+        if (huDesayG6S) {
+            routeNaviHeld = false
+            if (on) log("BRIDGE маршрут: MODULE_STATUS NAVI=1 не шлю (Desay G6S: глушит радио)", false)
             return
         }
         routeNaviHeld = on
@@ -1139,10 +1157,11 @@ class AaBridgeCore(
         @Volatile @JvmStatic var MEDIA_PAUSE_ENABLED = true
 
         /**
-         * MODULE_STATUS NAVI=1 на весь маршрут (MetaRelay). Выключено: NAVI=1 только вокруг TTS, как в 1.0.8 -
-         * Mazda CX-5 (Desay G6S) с NAVI=1 глушит штатное радио при входе в CarLife (лог Ивана 2026-10-12).
+         * MODULE_STATUS NAVI=1 на весь маршрут (MetaRelay): без него приборка Honda Vezel пишет «Turn by turn waiting
+         * for your smartphone». Desay G6S (Mazda CX-5) с NAVI=1 глушит штатное радио при входе в CarLife (лог Ивана
+         * 2026-10-12), там NAVI=1 только вокруг TTS (huDesayG6S). Выключено = NAVI=1 только вокруг TTS на всех ГУ.
          */
-        @Volatile @JvmStatic var ROUTE_NAVI_STATUS_ENABLED = false
+        @Volatile @JvmStatic var ROUTE_NAVI_STATUS_ENABLED = true
 
         /** ГУ ушло на свой источник (PAUSE + MODULE_CONTROL MUSIC=0): AA на паузу, на следующем START - play. */
         @Volatile @JvmStatic var HU_MUSIC_FOLLOW_ENABLED = true
@@ -1203,6 +1222,9 @@ class AaBridgeCore(
         const val TEXT_RESTARTING_SERVER = "Android Auto отключился, перезапускаю сервер ГУ..."
         const val TEXT_UNLOCK_PHONE = "Разблокируйте телефон"
         const val TEXT_AA_CONSENT = "Завершите настройку Android Auto на телефоне"
+        const val DESAY_MANUFACTURER = "Desay SV Automotive"
+        const val DESAY_G6S_MODEL = "G6S"
+        const val DESAY_G6S_CHANNEL = "20622116"          // STATISTIC_INFO.channel у Mazda CX-5; Vezel - 20832125, другая Mazda - 21520001
         const val KEYFRAME_WAIT_MS = 1500L
         const val KEYFRAME_RETRY_MS = 4000L
         private const val NEVER = Long.MIN_VALUE / 4
