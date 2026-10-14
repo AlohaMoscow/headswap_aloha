@@ -11,14 +11,18 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.yegorkapomidorka.headswap.AppTheme
+import com.yegorkapomidorka.headswap.CarLifeState
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
+import com.yegorkapomidorka.headswap.update.Updater
 
-/** Главный экран «Готов к поездке» (Main.dc.html): пять состояний, этапы, кнопки. */
+/** Главный экран «Готов к поездке» (Main.dc.html): пять состояний, этапы, кнопки; сверху плашка обновления. */
 class HomeScreen(host: MainActivity) : Screen(host) {
     private val root = ctx.vbox()
     override val view: View get() = root
 
+    private val updBox = ctx.vbox()
+    private var updKey: String? = null
     private val heroBox = ctx.vbox(16)
     private val stagesBox = ctx.vbox()
     private val footer = ctx.vbox(4)
@@ -46,6 +50,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
         root.addView(header, c.lpDp(MATCH, 64))
 
         val body = c.vbox(12).apply { pad(c, 16, 8, 16, 8) }
+        body.addView(updBox, lp(MATCH, WRAP))
         body.addView(heroBox, lp(MATCH, WRAP))
         body.addView(c.card(24).apply { pad(c, 0, 6, 0, 6); addView(stagesBox, lp(MATCH, WRAP)) }, lp(MATCH, WRAP))
         root.addView(ScrollView(c).apply {
@@ -60,6 +65,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
 
     override fun onShow() {
         lastState = null
+        updKey = null
         tick()
     }
 
@@ -69,6 +75,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
     }
 
     override fun tick() {
+        refreshUpdate()
         val st = HeadswapStatus.current(ctx)
         if (st == lastState) return
         val prev = lastState
@@ -79,6 +86,44 @@ class HomeScreen(host: MainActivity) : Screen(host) {
             return
         }
         render(st)
+    }
+
+    /** Плашка «Доступна версия X»: не во время подключения к машине; крестик прячет её до следующей версии. */
+    private fun refreshUpdate() {
+        val c = ctx
+        val rel = if (CarLifeState.running) null else Updater.banner(c)
+        val key = if (rel == null) "" else "${rel.version}|${Updater.step}|${Updater.progress}"
+        if (key == updKey) return
+        updKey = key
+        updBox.removeAllViews()
+        if (rel == null) {
+            updBox.visibility = View.GONE
+            return
+        }
+        updBox.visibility = View.VISIBLE
+        val sub = when (Updater.step) {
+            Updater.Step.DOWNLOADING -> c.getString(R.string.upd_status_downloading, rel.version, Updater.progress)
+            Updater.Step.INSTALLING -> c.getString(R.string.upd_status_installing)
+            else -> c.getString(R.string.upd_banner_sub)
+        }
+        val row = c.hbox(14).apply {
+            pad(c, 16, 10, 4, 10)
+            background = c.rippleBg(c.shape(c.clr(R.color.surf), 20), 20)
+            isClickable = true
+            setOnClickListener { Updater.start(host) }
+        }
+        row.addView(c.icon(R.drawable.ic_download, 24, c.clr(R.color.acc)))
+        row.addView(c.vbox(2).apply {
+            addView(c.text(c.getString(R.string.upd_status_available, rel.version), 16f, 600))
+            addView(c.text(sub, 14f, 400, c.clr(R.color.on2)))
+        }, lp(0, WRAP, 1f))
+        row.addView(c.iconButton(R.drawable.ic_close, c.clr(R.color.on2), c.getString(R.string.upd_later)).apply {
+            setOnClickListener {
+                Updater.dismiss(c, rel.version)
+                refreshUpdate()
+            }
+        })
+        updBox.addView(row, lp(MATCH, WRAP))
     }
 
     private fun updateGrace(st: HomeState) {
