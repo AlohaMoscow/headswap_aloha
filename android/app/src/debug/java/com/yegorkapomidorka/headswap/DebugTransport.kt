@@ -13,6 +13,14 @@ import java.net.Socket
 object DebugTransport {
     const val EXTRA_PORT = "debug_tcp"
 
+    const val EXTRA_TCP6 = "debug_tcp6"
+
+    /**
+     * Беспроводной формат (6 сокетов, без внешнего заголовка): телефон слушает 7240..9340 на 127.0.0.1, ГУ на ПК
+     * подключается через `adb forward tcp:P tcp:P`; `--ez debug_tcp6 true`, на ПК `carlife_hu.py --transport tcp6`.
+     */
+    fun tcp6(intent: Intent?): Boolean = intent?.getBooleanExtra(EXTRA_TCP6, false) == true
+
     fun port(intent: Intent?): Int? =
         intent?.getIntExtra(EXTRA_PORT, 0)?.takeIf { it in 1..65535 }
 

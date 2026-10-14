@@ -7,5 +7,7 @@ import android.os.ParcelFileDescriptor
 object DebugTransport {
     fun port(intent: Intent?): Int? = null
 
+    fun tcp6(intent: Intent?): Boolean = false
+
     fun connect(port: Int): ParcelFileDescriptor? = null
 }

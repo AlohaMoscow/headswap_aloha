@@ -9,6 +9,11 @@ HU_PROTOCOL_VERSION, after the bridge's MD_INFO the HU init burst (STATISTIC_INF
 HU_AUTHEN_REQUEST "2.0;<date>", video init/start, feature config), then a VIDEO_HEARTBEAT every second.
 MD_AUTHEN_RESPONSE is checked as md5("CARLIFE" + brand + model + sdk + <random after ';'>).
 Video goes to out/carlife_video.h264, the whole log to out/carlife_hu.log. Standard library only.
+
+Wireless format (--transport tcp6): the HU is the TCP client of 6 phone ports (CMD 7240, VIDEO 8240, MEDIA 9240,
+TTS 9241, VR 9242, TOUCH 9340; reach them with `adb forward`). No outer header, each channel is its own socket
+with plain inner messages. Session logic is the same. --kill-chan/--kill-after close one socket to see whether
+the bridge closes the rest.
 """
 from __future__ import annotations
 
@@ -30,6 +35,13 @@ HERE = Path(__file__).resolve().parent
 CH_CMD, CH_VIDEO, CH_MEDIA, CH_TTS, CH_VR, CH_TOUCH = 1, 2, 3, 4, 5, 6
 CH_NAMES = {CH_CMD: "CMD", CH_VIDEO: "VIDEO", CH_MEDIA: "MEDIA", CH_TTS: "TTS", CH_VR: "VR", CH_TOUCH: "TOUCH"}
 MAX_OUTER_LEN = 64 * 1024 * 1024
+# лимиты длины inner-сообщения в режиме 6 сокетов
+MAX_CMD_LEN = 1024 * 1024
+MAX_DATA_LEN = 64 * 1024 * 1024
+
+# режим tcp6: порты, которые слушает телефон (беспроводной формат CarLife), порядок подключения = порядок каналов
+DEFAULT_PORTS = {CH_CMD: 7240, CH_VIDEO: 8240, CH_MEDIA: 9240, CH_TTS: 9241, CH_VR: 9242, CH_TOUCH: 9340}
+DATA_PORT = 9440                    # Data-канал: телефон принимает соединение и игнорирует его
 
 # коды сообщений (Protocol.kt, object Msg)
 HU_PROTOCOL_VERSION = 0x00018001
@@ -244,6 +256,36 @@ class FrameParser:
         return out
 
 
+class InnerStreamParser:
+    """Накопительный разбор inner-сообщений одного канала (режим tcp6: свой сокет на канал, без внешнего заголовка)."""
+
+    def __init__(self, chan: int):
+        self.chan = chan
+        self.cmd_style = is_cmd_style(chan)
+        self.hdr = 8 if self.cmd_style else 12
+        self.max_len = MAX_CMD_LEN if self.cmd_style else MAX_DATA_LEN
+        self.buf = bytearray()
+
+    def feed(self, data: bytes):
+        """-> список целых inner (заголовок + тело). ValueError на битом заголовке."""
+        self.buf += data
+        out = []
+        while len(self.buf) >= self.hdr:
+            if self.cmd_style:
+                n, _resv, mtype = struct.unpack(">HHI", self.buf[:8])
+            else:
+                n, _t, mtype = struct.unpack(">III", self.buf[:12])
+            if n > self.max_len or mtype >> 16 != self.chan:
+                raise ValueError(f"bad inner header on {CH_NAMES.get(self.chan, self.chan)}: len={n} "
+                                 f"type=0x{mtype:08X} {bytes(self.buf[:16]).hex(' ')}")
+            total = self.hdr + n
+            if len(self.buf) < total:
+                break
+            out.append(bytes(self.buf[:total]))
+            del self.buf[:total]
+        return out
+
+
 # ---- сообщения ГУ ----
 
 def build_protocol_version() -> bytes:
@@ -317,23 +359,46 @@ def auth_expected(brand: str, model: str, sdk: str, rnd: str) -> str:
 
 class Options:
     def __init__(self, host="127.0.0.1", port=7240, duration=120.0, no_auth=False, touch_test=False,
-                 out: Path | None = None, quiet=False):
+                 out: Path | None = None, quiet=False, transport="stream", ports: dict[int, int] | None = None,
+                 kill_chan: str | None = None, kill_after=10.0, extra_data_socket=False):
         self.host, self.port, self.duration = host, port, duration
         self.no_auth, self.touch_test = no_auth, touch_test
         self.out = out or HERE / "out"
         self.quiet = quiet
+        self.transport = transport                          # "stream" (один сокет, внешний заголовок) или "tcp6"
+        self.ports = dict(ports or DEFAULT_PORTS)           # tcp6: канал -> порт на телефоне
+        self.kill_chan = kill_chan.upper() if kill_chan else None
+        self.kill_after = kill_after
+        self.extra_data_socket = extra_data_socket
+        if self.transport not in ("stream", "tcp6"):
+            raise ValueError(f"unknown transport {self.transport!r}")
+        if self.kill_chan and self.kill_chan not in CH_NAMES.values():
+            raise ValueError(f"unknown channel {self.kill_chan!r}")
 
 
 class HeadUnit:
     AUTH_TIMEOUT = 10.0
     TOUCH_DELAY = 15.0
+    CONNECT_TIMEOUT = 5.0
+    KILL_WAIT = 10.0                # tcp6: сколько ждать, пока мост сам закроет остальные сокеты
 
     def __init__(self, opts: Options):
         self.o = opts
+        self.tcp6 = opts.transport == "tcp6"
         self.srv: socket.socket | None = None
         self.conn: socket.socket | None = None
         self.port = opts.port
         self.wlock = threading.Lock()
+        self.loglock = threading.Lock()
+        # tcp6: сокет и замок записи на канал; extra — Data-канал (только держим открытым)
+        self.socks: dict[int, socket.socket] = {}
+        self.locks: dict[int, threading.Lock] = {}
+        self.extra: socket.socket | None = None
+        self.threads: list[threading.Thread] = []
+        self.kill_num = next((c for c, n in CH_NAMES.items() if n == opts.kill_chan), None)
+        self.killed = False
+        self.kill_at: float | None = None
+        self.closed_others_after: float | None = None
         self.logf = None
         self.stop = threading.Event()
         self.stop_reason = ""
@@ -353,11 +418,12 @@ class HeadUnit:
 
     def log(self, msg: str):
         line = f"{time.strftime('%H:%M:%S')}.{int(time.time() * 1000) % 1000:03d} {msg}"
-        if not self.o.quiet:
-            print(line, flush=True)
-        if self.logf:
-            self.logf.write(line + "\n")
-            self.logf.flush()
+        with self.loglock:
+            if not self.o.quiet:
+                print(line, flush=True)
+            if self.logf:
+                self.logf.write(line + "\n")
+                self.logf.flush()
 
     def listen(self):
         """Открыть порт заранее (port=0 даёт свободный; self.port хранит настоящий)."""
@@ -368,9 +434,23 @@ class HeadUnit:
         self.port = self.srv.getsockname()[1]
 
     def send(self, chan: int, inner: bytes, label: str = ""):
-        assert self.conn
-        with self.wlock:
-            self.conn.sendall(outer(chan, inner))
+        """stream: outer(chan, inner) в единственный сокет; tcp6: голый inner в сокет канала."""
+        if self.tcp6:
+            if self.killed and chan == self.kill_num:
+                return                                      # сокет закрыт нами, писать некуда
+            try:
+                with self.locks[chan]:
+                    self.socks[chan].sendall(inner)
+            except OSError as e:
+                if not self.killed:
+                    raise
+                # после kill мост мог уже закрыть остальные сокеты: это не ошибка записи
+                self.peer_gone(chan, f"write error: {e}")
+                return
+        else:
+            assert self.conn
+            with self.wlock:
+                self.conn.sendall(outer(chan, inner))
         if label:
             self.log(f"HU -> {CH_NAMES.get(chan, chan)} {label}")
 
@@ -482,41 +562,137 @@ class HeadUnit:
             if not self.stop.is_set():
                 self.finish(f"read error: {e}")
 
+    def reader_tcp6(self, chan: int, sock: socket.socket, parser: InnerStreamParser | None):
+        """Поток чтения одного сокета tcp6 (parser=None у Data-канала: только ждём EOF)."""
+        name = CH_NAMES.get(chan, "DATA")
+        try:
+            while not self.stop.is_set():
+                if self.killed and chan == self.kill_num:
+                    return
+                r, _, _ = select.select([sock], [], [], 0.2)
+                if not r:
+                    continue
+                data = sock.recv(65536)
+                if not data:
+                    if self.killed and chan == self.kill_num:
+                        return
+                    self.log(f"{name} socket closed by the bridge")
+                    self.peer_gone(chan, "bridge closed the connection")
+                    return
+                if parser:
+                    for inner in parser.feed(data):
+                        self.on_message(chan, inner)
+        except (OSError, ValueError) as e:
+            if self.stop.is_set() or (self.killed and chan == self.kill_num):
+                return
+            self.peer_gone(chan, f"read error on {name}: {e}")
+
+    def peer_gone(self, chan: int, why: str):
+        """Мост закрыл (или порвал) сокет канала. После kill это ожидаемый ответ моста на потерю канала."""
+        if self.killed:
+            if self.closed_others_after is None and self.kill_at is not None:
+                self.closed_others_after = time.monotonic() - self.kill_at
+            self.finish(f"bridge closed the connection (after kill {self.o.kill_chan})")
+        else:
+            self.finish(why)
+
     def finish(self, reason: str):
         if not self.stop.is_set():
             self.stop_reason = reason
             self.stop.set()
 
+    def open_stream(self) -> bool:
+        """stream: слушать порт и принять одно соединение."""
+        if self.srv is None:
+            self.listen()
+        self.log(f"listening on {self.o.host}:{self.port}")
+        self.conn, addr = self.srv.accept()
+        self.conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.log(f"bridge connected from {addr[0]}:{addr[1]}")
+        return True
+
+    def open_tcp6(self) -> bool:
+        """tcp6: подключиться к шести портам телефона по порядку каналов (плюс Data по желанию)."""
+        self.log(f"connecting to {self.o.host} (tcp6)")
+        targets = [(c, CH_NAMES[c], self.o.ports[c]) for c in sorted(CH_NAMES)]
+        if self.o.extra_data_socket:
+            targets.append((0, "DATA", DATA_PORT))
+        for chan, name, port in targets:
+            try:
+                s = socket.create_connection((self.o.host, port), timeout=self.CONNECT_TIMEOUT)
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                s.settimeout(None)
+            except OSError as e:
+                self.finish(f"connect {name} :{port} failed: {e}")
+                self.log(f"connect {name} :{port} failed: {e}")
+                return False
+            if chan:
+                self.socks[chan] = s
+                self.locks[chan] = threading.Lock()
+            else:
+                self.extra = s
+            self.log(f"connected {name} :{port}")
+        return True
+
+    def start_readers(self):
+        if self.tcp6:
+            for chan, sock in self.socks.items():
+                self.threads.append(threading.Thread(target=self.reader_tcp6, args=(chan, sock, InnerStreamParser(chan)),
+                                                     daemon=True))
+            if self.extra:
+                self.threads.append(threading.Thread(target=self.reader_tcp6, args=(0, self.extra, None), daemon=True))
+        else:
+            self.threads.append(threading.Thread(target=self.reader, daemon=True))
+        for t in self.threads:
+            t.start()
+
+    def all_socks(self) -> list[socket.socket]:
+        socks = ([self.conn] if self.conn else []) + list(self.socks.values()) + ([self.extra] if self.extra else [])
+        return socks
+
+    def close_all(self):
+        for s in self.all_socks():
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            s.close()
+
+    def kill_socket(self):
+        """Fault injection (tcp6): закрыть один сокет, остальные оставить открытыми."""
+        sock = self.socks[self.kill_num]
+        self.log(f"fault injection: closing {self.o.kill_chan} socket, the others stay open")
+        self.kill_at = time.monotonic()
+        self.killed = True
+        with self.locks[self.kill_num]:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            sock.close()
+
     def run(self) -> dict:
-        """Принять одно соединение, отработать сессию, вернуть итог (dict)."""
+        """Принять соединение (stream) или подключиться к шести портам (tcp6), отработать сессию, вернуть итог (dict)."""
         self.o.out.mkdir(parents=True, exist_ok=True)
         self.logf = open(self.o.out / "carlife_hu.log", "w", encoding="utf-8")
         self.vfile = open(self.o.out / "carlife_video.h264", "wb")
         try:
-            if self.srv is None:
-                self.listen()
-            self.log(f"listening on {self.o.host}:{self.port}")
-            self.conn, addr = self.srv.accept()
-            self.conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self.log(f"bridge connected from {addr[0]}:{addr[1]}")
-            self.t0 = time.monotonic()
-            self.send_cmd(HU_PROTOCOL_VERSION, build_protocol_version())
-            rt = threading.Thread(target=self.reader, daemon=True)
-            rt.start()
-            try:
-                self.loop()
-            except KeyboardInterrupt:
-                self.finish("Ctrl+C")
-            except OSError as e:
-                self.finish(f"write error: {e}")
-            self.stop.set()
-            try:
-                self.conn.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            self.conn.close()
-            rt.join(2)
+            if self.open_tcp6() if self.tcp6 else self.open_stream():
+                self.t0 = time.monotonic()
+                self.send_cmd(HU_PROTOCOL_VERSION, build_protocol_version())
+                self.start_readers()
+                try:
+                    self.loop()
+                except KeyboardInterrupt:
+                    self.finish("Ctrl+C")
+                except OSError as e:
+                    self.finish(f"write error: {e}")
+                self.stop.set()
+                self.close_all()
+                for t in self.threads:
+                    t.join(2)
         finally:
+            self.close_all()
             self.vfile.close()
             if self.srv:
                 self.srv.close()
@@ -550,6 +726,14 @@ class HeadUnit:
                     and now - self.first_frame_at >= self.TOUCH_DELAY):
                 touched = True
                 self.send_tap()
+            if self.kill_num is not None:
+                if (not self.killed and self.first_frame_at is not None
+                        and now - self.first_frame_at >= self.o.kill_after):
+                    self.kill_socket()
+                elif (self.killed and self.closed_others_after is None
+                        and now - self.kill_at >= self.KILL_WAIT):
+                    self.finish(f"bridge did NOT close the other sockets within {self.KILL_WAIT:g} s after kill "
+                                f"{self.o.kill_chan}")
             self.stop.wait(0.05)
 
     def send_tap(self):
@@ -574,14 +758,39 @@ class HeadUnit:
             tag = f"0x{mtype:08X} {msg_name(mtype)}" if mtype >= 0 else "short"
             self.log(f"  {CH_NAMES.get(chan, chan)} {tag} x{n}")
         self.log(f"video: {self.frames} frames, {self.vbytes} B, avg {avg:.1f} fps")
+        connected = len(self.socks) + (1 if self.extra else 0) if self.tcp6 else 1 if self.conn else 0
+        self.log(f"transport: {self.o.transport}, connected sockets: {connected}")
+        if self.o.kill_chan and self.tcp6:
+            if not self.killed:
+                self.log(f"kill: {self.o.kill_chan} not triggered (no video frame within the session)")
+            elif self.closed_others_after is not None:
+                self.log(f"kill: {self.o.kill_chan} at {self.kill_at - self.t0:.1f} s, "
+                         f"bridge closed others after {self.closed_others_after:.1f} s")
+            else:
+                self.log(f"kill: {self.o.kill_chan} at {self.kill_at - self.t0:.1f} s, "
+                         f"bridge did NOT close others within {self.KILL_WAIT:g} s")
         return {"duration": dur, "auth": self.auth_status, "counts": dict(self.counts), "frames": self.frames,
-                "video_bytes": self.vbytes, "avg_fps": avg, "stop_reason": self.stop_reason}
+                "video_bytes": self.vbytes, "avg_fps": avg, "stop_reason": self.stop_reason,
+                "transport": self.o.transport, "connected": connected,
+                "kill_chan": self.o.kill_chan if self.killed else None,
+                "kill_at": self.kill_at - self.t0 if self.killed else None,
+                "closed_others_after": self.closed_others_after}
 
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=7240)
+    p.add_argument("--port", type=int, default=7240, help="stream: port to listen on (default 7240)")
+    p.add_argument("--transport", choices=("stream", "tcp6"), default="stream",
+                   help="stream: listen, one connection with outer headers (adb reverse); "
+                        "tcp6: connect to the phone's 6 ports (wireless format, adb forward), no outer header")
+    p.add_argument("--kill-chan", choices=tuple(CH_NAMES.values()), metavar="NAME",
+                   help="tcp6 fault injection: close this channel's socket (CMD/VIDEO/MEDIA/TTS/VR/TOUCH), "
+                        "keep the others and wait for the bridge to close them")
+    p.add_argument("--kill-after", type=float, default=10.0, metavar="N",
+                   help="tcp6: close the --kill-chan socket N seconds after the first video frame (default 10)")
+    p.add_argument("--extra-data-socket", action="store_true",
+                   help="tcp6: also connect to the Data channel port 9440 (the phone ignores it)")
     p.add_argument("--duration", type=float, default=120.0, metavar="N",
                    help="stop N seconds after the bridge connects (default 120)")
     p.add_argument("--no-auth", action="store_true", help="do not send HU_AUTHEN_REQUEST")
@@ -593,7 +802,8 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> int:
     a = parse_args(argv)
-    hu = HeadUnit(Options(a.host, a.port, a.duration, a.no_auth, a.touch_test, a.out))
+    hu = HeadUnit(Options(a.host, a.port, a.duration, a.no_auth, a.touch_test, a.out, transport=a.transport,
+                          kill_chan=a.kill_chan, kill_after=a.kill_after, extra_data_socket=a.extra_data_socket))
     hu.run()
     return 0
 

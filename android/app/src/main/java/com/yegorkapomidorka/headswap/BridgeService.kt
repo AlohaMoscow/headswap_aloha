@@ -32,12 +32,18 @@ import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
 import com.yegorkapomidorka.headswap.autosrv.AutoServerPolicy
 import com.yegorkapomidorka.headswap.autosrv.Trigger
+import com.yegorkapomidorka.headswap.link.CarTransport
+import com.yegorkapomidorka.headswap.link.LinkSetupException
+import com.yegorkapomidorka.headswap.link.StreamTransport
+import com.yegorkapomidorka.headswap.link.Tcp6Listener
+import com.yegorkapomidorka.headswap.link.TransportCaps
+import com.yegorkapomidorka.headswap.link.diag.WLog
 import com.yegorkapomidorka.headswap.ui.HeadswapNotification
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 
 /**
- * Foreground-сервис (connectedDevice): держит ParcelFileDescriptor аксессуара и сессию с ГУ.
+ * Foreground-сервис (connectedDevice): держит транспорт (USB-аксессуар или debug-TCP) и сессию с ГУ.
  * AA-сторона моста (BridgeHost) живёт на время сервиса, а не одной USB-сессии: обрыв USB закрывает
  * CarLife-сессию, AA остаётся живой BridgeHost.GRACE_MS и подхватывается следующей USB-сессией.
  * Всё состояние сервиса (session, host, stopRequested) трогает только главная нить.
@@ -51,6 +57,8 @@ class BridgeService : Service() {
     private var session: CarLifeSession? = null
     private var host: BridgeHost? = null
     private var stopRequested = false
+    /** debug tcp6: слушатель ждёт 6/6 (нить debug-tcp6); Стоп его отменяет. */
+    @Volatile private var pendingTcp6: Tcp6Listener? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val audioDiag = AudioDiag()
     /** Автозапуск пропущен из-за неподключённой службы спецвозможностей: RETRY запустит его, когда она появится. */
@@ -61,7 +69,8 @@ class BridgeService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == UsbManager.ACTION_USB_ACCESSORY_DETACHED) {
                 AppLog.i("USB_ACCESSORY_DETACHED")
-                session?.close("аксессуар отключён (broadcast)")
+                // беспроводную сессию отключение USB-аксессуара не касается
+                session?.takeIf { it.transportKind == TransportCaps.USB_AOA.kind }?.close("аксессуар отключён (broadcast)")
             }
         }
     }
@@ -83,6 +92,7 @@ class BridgeService : Service() {
         if (intent?.action == ACTION_STOP) {
             AppLog.i("сервис: стоп по команде")
             stopRequested = true
+            pendingTcp6?.abort()
             val s = session
             if (s != null) {
                 s.close("остановлено пользователем")        // onSessionClosed увидит stopRequested: AA закрывается сразу
@@ -110,10 +120,16 @@ class BridgeService : Service() {
                     } else if (session != null) {
                         pfd.close()
                     } else {
-                        startSession(pfd, "TCP 127.0.0.1:$dbgPort")
+                        startSession(StreamTransport.fromPfd(pfd, TransportCaps.TCP_DEBUG, "TCP 127.0.0.1:$dbgPort"))
                     }
                 }
             }, "debug-tcp").start()
+            return START_NOT_STICKY
+        }
+
+        // только debug-сборка: беспроводной формат, 6 TCP-сокетов на 127.0.0.1 (adb forward), ГУ подключается сама
+        if (DebugTransport.tcp6(intent)) {
+            startTcp6Debug()
             return START_NOT_STICKY
         }
 
@@ -144,12 +160,48 @@ class BridgeService : Service() {
             return START_NOT_STICKY
         }
         AppLog.i("сервис: аксессуар открыт: ${MainActivity.describe(acc)}")
-        startSession(pfd, MainActivity.describe(acc))
+        startSession(StreamTransport.fromPfd(pfd, TransportCaps.USB_AOA, MainActivity.describe(acc)))
         return START_NOT_STICKY
     }
 
-    private fun startSession(pfd: android.os.ParcelFileDescriptor, accessory: String) {
-        CarLifeState.accessory = accessory
+    /** debug tcp6: слушать 6 портов на loopback, ждать ГУ (pc-headunit --transport tcp6), затем обычная сессия. */
+    private fun startTcp6Debug() {
+        if (pendingTcp6 != null) {
+            AppLog.i("сервис: tcp6 уже ждёт ГУ, повторный старт игнорирую")
+            return
+        }
+        WLog.begin(TransportCaps.TCP6.kind, "bind" to "127.0.0.1")
+        AppLog.i("сервис: debug tcp6, слушаю 6 портов на 127.0.0.1, жду ГУ ${TCP6_WAIT_MS / 1000} с")
+        CarLifeState.status = "tcp6: жду ГУ"
+        Thread({
+            val result: Any = try {
+                val l = Tcp6Listener(java.net.InetAddress.getLoopbackAddress()).open()
+                pendingTcp6 = l
+                l.await(TCP6_WAIT_MS, "tcp6 127.0.0.1")
+            } catch (e: Exception) {
+                e
+            } finally {
+                pendingTcp6 = null
+            }
+            main.post {
+                when {
+                    result is CarTransport && session != null -> result.close()
+                    result is CarTransport -> startSession(result)
+                    else -> {
+                        val msg = (result as Exception).message
+                        if (result !is LinkSetupException) AppLog.e("tcp6", result)
+                        AppLog.i("сервис: $msg")
+                        CarLifeState.status = msg ?: "tcp6: ошибка"
+                        failStart()
+                    }
+                }
+            }
+        }, "debug-tcp6").start()
+    }
+
+    private fun startSession(transport: CarTransport) {
+        CarLifeState.accessory = transport.label
+        if (transport.caps.kind != TransportCaps.TCP6.kind) WLog.begin(transport.caps.kind)
 
         val aaPrefs = AaPrefs(this)
         val screenOn = getSystemService(PowerManager::class.java).isInteractive
@@ -172,10 +224,7 @@ class BridgeService : Service() {
             host = h
             if (h == null) {
                 // нет сертификата head unit или мост не собрался: причина уже в AaState.setupError, USB-сессию не открываем
-                try {
-                    pfd.close()
-                } catch (_: Exception) {
-                }
+                transport.close()
                 CarLifeState.status = AaState.setupError ?: "мост не стартовал"
                 failStart()
                 return
@@ -192,7 +241,7 @@ class BridgeService : Service() {
         stopRequested = false
 
         val sref = arrayOfNulls<CarLifeSession>(1)
-        val s = CarLifeSession(pfd, cfg, h.core) { reason -> main.post { onSessionClosed(sref[0]!!, reason) } }
+        val s = CarLifeSession(transport, cfg, h.core) { reason -> main.post { onSessionClosed(sref[0]!!, reason) } }
         sref[0] = s
         session = s
         s.start()
@@ -343,6 +392,7 @@ class BridgeService : Service() {
         } catch (_: Exception) {
         }
         stopRequested = true
+        pendingTcp6?.abort()
         audioDiag.stop()
         session?.close("сервис уничтожен")
         host?.shutdown("сервис уничтожен")
@@ -357,5 +407,7 @@ class BridgeService : Service() {
         private const val NOTIF_ID = 1
         /** Сколько автозапуск ждёт подключения включённой службы спецвозможностей. */
         private const val SERVICE_WAIT_MS = 3_000L
+        /** debug tcp6: сколько ждать все 6 сокетов ГУ. */
+        private const val TCP6_WAIT_MS = 60_000L
     }
 }
