@@ -17,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.Switch
 import android.widget.TextView
+import com.yegorkapomidorka.headswap.AppTheme
 import com.yegorkapomidorka.headswap.R
 
 /** Мелкий набор помощников для сборки View в коде: размеры в dp, цвета из ресурсов (светлая/тёмная палитра), Golos Text. */
@@ -26,7 +27,7 @@ const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 fun Context.dp(v: Number): Int = (v.toFloat() * resources.displayMetrics.density + 0.5f).toInt()
 
-fun Context.clr(id: Int): Int = getColor(id)
+fun Context.clr(id: Int): Int = getColor(AppTheme.res(id))
 
 fun Context.sans(weight: Int = 400): Typeface = Typeface.create(resources.getFont(R.font.golos), weight, false)
 
@@ -124,8 +125,8 @@ fun Context.card(radiusDp: Number = 20, fill: Int = clr(R.color.surf)): LinearLa
 }
 
 fun Context.styledSwitch(): Switch = Switch(this).apply {
-    thumbDrawable = getDrawable(R.drawable.switch_thumb)
-    trackDrawable = getDrawable(R.drawable.switch_track)
+    thumbDrawable = getDrawable(AppTheme.res(R.drawable.switch_thumb))
+    trackDrawable = getDrawable(AppTheme.res(R.drawable.switch_track))
     showText = false
     switchMinWidth = dp(52)
     isClickable = false
@@ -167,7 +168,7 @@ class ToggleRow(
 /** Строка с радио-кнопкой: выбранная подсвечена pric. */
 class RadioRow(val ctx: Context, title: String, sub: String, val onPick: () -> Unit) {
     private val radio = RadioButton(ctx).apply {
-        buttonTintList = ctx.getColorStateList(R.color.radio_tint)
+        buttonTintList = ctx.getColorStateList(AppTheme.res(R.color.radio_tint))
         isClickable = false
         isFocusable = false
     }

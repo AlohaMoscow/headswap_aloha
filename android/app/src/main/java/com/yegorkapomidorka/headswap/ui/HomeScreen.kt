@@ -10,6 +10,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.yegorkapomidorka.headswap.AppTheme
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
 
@@ -204,7 +205,7 @@ class HomeScreen(host: MainActivity) : Screen(host) {
         when (state) {
             StageState.DONE -> { box.background = c.oval(c.clr(R.color.ok)); glyph(R.drawable.ic_check, c.clr(R.color.onok)) }
             StageState.ACTIVE -> {
-                val ring = ImageView(c).apply { setImageResource(R.drawable.ic_ring_active) }
+                val ring = ImageView(c).apply { setImageResource(AppTheme.res(R.drawable.ic_ring_active)) }
                 box.addView(ring, FrameLayout.LayoutParams(c.dp(28), c.dp(28)))
                 box.addView(View(c).apply { background = c.oval(c.clr(R.color.pri)) }, FrameLayout.LayoutParams(c.dp(8), c.dp(8), Gravity.CENTER))
                 rings.add(ObjectAnimator.ofFloat(ring, View.ROTATION, 0f, 360f).apply {

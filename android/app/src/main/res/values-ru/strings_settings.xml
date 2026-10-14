@@ -4,6 +4,12 @@
     <string name="set_title">Настройки</string>
     <string name="set_back">Назад</string>
 
+    <string name="theme_title">Тема</string>
+    <string name="theme_system">Как в системе</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_medium">Средняя</string>
+    <string name="theme_dark">Тёмная</string>
+
     <string name="set_sound">Звук</string>
     <string name="set_usb_audio_title">Звук через USB</string>
     <string name="set_usb_audio_sub">В динамики машины</string>

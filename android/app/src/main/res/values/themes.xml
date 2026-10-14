@@ -22,6 +22,20 @@
         <item name="android:alertDialogTheme">@style/Theme.Headswap.Dialog</item>
     </style>
 
+    <!-- «Средняя» тема: MainActivity форсирует uiMode night (AppTheme.wrap), цвета подменяются на *_mid -->
+    <style name="Theme.Headswap.Medium" parent="Theme.Headswap">
+        <item name="android:windowBackground">@color/bg_mid</item>
+        <item name="android:colorBackground">@color/bg_mid</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:colorAccent">@color/acc_mid</item>
+        <item name="android:colorControlActivated">@color/acc_mid</item>
+        <item name="android:colorControlHighlight">@color/ripple_mid</item>
+        <item name="android:textColorPrimary">@color/on_mid</item>
+        <item name="android:textColorSecondary">@color/on2_mid</item>
+        <item name="android:textColor">@color/on_mid</item>
+    </style>
+
     <style name="Theme.Headswap.Dialog" parent="android:Theme.DeviceDefault.Dialog.Alert">
         <item name="android:colorAccent">@color/acc</item>
         <item name="android:fontFamily">@font/golos</item>

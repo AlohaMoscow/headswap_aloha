@@ -31,7 +31,7 @@ import com.yegorkapomidorka.headswap.ui.UiPrefs
  */
 class MainActivity : Activity() {
     override fun attachBaseContext(base: Context) {
-        super.attachBaseContext(AppLocale.wrap(base))
+        super.attachBaseContext(AppTheme.wrap(AppLocale.wrap(base)))
     }
 
     private lateinit var root: FrameLayout
@@ -57,6 +57,7 @@ class MainActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (AppTheme.medium) setTheme(R.style.Theme_Headswap_Medium)
         super.onCreate(savedInstanceState)
         AppLog.init(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -215,6 +216,10 @@ class MainActivity : Activity() {
                     showOnboarding(rerun = true, startAt = step)
                 }
                 "checklist" -> { toHome(); showOnboarding(checklist = true) }
+                "theme" -> {                                   // --es mode system|light|medium|dark
+                    AppTheme.set(this, intent.getStringExtra("mode") ?: AppTheme.SYSTEM)
+                    recreate()
+                }
                 else -> AppLog.i("неизвестная команда '$cmd' (есть aa_selftest, mic_test, transcode_test, open_aa, aa_server_restart)")
             }
             if (intent.hasExtra("scroll_y")) current()?.scrollTo(intent.getIntExtra("scroll_y", 0))     // отладка: снимки нижней части экрана

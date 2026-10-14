@@ -48,6 +48,11 @@ class UiPrefs(ctx: Context) {
         get() = sp.getBoolean("onboardingDone", false)
         set(v) = sp.edit().putBoolean("onboardingDone", v).apply()
 
+    /** Тема интерфейса: system / light / medium / dark (см. AppTheme). */
+    var theme: String
+        get() = sp.getString("theme", "system") ?: "system"
+        set(v) = sp.edit().putString("theme", v).apply()
+
     fun isManualDone(id: String): Boolean = sp.getBoolean("manual_$id", false)
 
     fun setManualDone(id: String, v: Boolean) = sp.edit().putBoolean("manual_$id", v).apply()

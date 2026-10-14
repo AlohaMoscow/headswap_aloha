@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.yegorkapomidorka.headswap.AppLocale
+import com.yegorkapomidorka.headswap.AppTheme
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaPrefs
@@ -37,6 +38,7 @@ fun scaffold(ctx: Context, title: String, onBack: () -> Unit, body: View): Linea
 class SettingsScreen(host: MainActivity) : Screen(host) {
     private val aa = AaPrefs(ctx)
     private val langRows = LinkedHashMap<String, RadioRow>()
+    private val themeRows = LinkedHashMap<String, RadioRow>()
     private val micRows = HashMap<MicMode, RadioRow>()
     private val modeRows = LinkedHashMap<VideoMode, RadioRow>()
     private val fpsRows = LinkedHashMap<FpsSetting, RadioRow>()
@@ -66,6 +68,19 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             body.addView(row.view, lp(MATCH, WRAP))
         }
         refreshLang()
+
+        body.addView(c.sectionTitle(c.getString(R.string.theme_title)))
+        for ((mode, titleRes) in listOf(
+            AppTheme.SYSTEM to R.string.theme_system,
+            AppTheme.LIGHT to R.string.theme_light,
+            AppTheme.MEDIUM to R.string.theme_medium,
+            AppTheme.DARK to R.string.theme_dark,
+        )) {
+            val row = RadioRow(c, c.getString(titleRes), "") { setTheme(mode) }
+            themeRows[mode] = row
+            body.addView(row.view, lp(MATCH, WRAP))
+        }
+        refreshTheme()
 
         body.addView(c.sectionTitle(c.getString(R.string.set_sound)))
         body.addView(ToggleRow(c, c.getString(R.string.set_usb_audio_title), c.getString(R.string.set_usb_audio_sub), aa.usbAudio) { aa.usbAudio = it }.view)
@@ -175,6 +190,18 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private fun refreshLang() {
         val cur = AppLocale.get(ctx)
         for ((tag, row) in langRows) row.setSelected(cur == tag)
+    }
+
+    private fun setTheme(mode: String) {
+        if (AppTheme.get(ctx) == mode) return
+        AppTheme.set(ctx, mode)
+        refreshTheme()
+        host.recreate()      // тема и цвета читаются при создании activity
+    }
+
+    private fun refreshTheme() {
+        val cur = AppTheme.get(ctx)
+        for ((mode, row) in themeRows) row.setSelected(cur == mode)
     }
 
     private fun setTranscode(on: Boolean, save: Boolean = true) {

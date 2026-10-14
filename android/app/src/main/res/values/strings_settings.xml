@@ -4,6 +4,12 @@
     <string name="set_title">Settings</string>
     <string name="set_back">Back</string>
 
+    <string name="theme_title">Theme</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_medium">Medium</string>
+    <string name="theme_dark">Dark</string>
+
     <string name="set_sound">Sound</string>
     <string name="set_usb_audio_title">Sound over USB</string>
     <string name="set_usb_audio_sub">To the car speakers</string>
