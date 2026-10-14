@@ -303,11 +303,15 @@ class CarLifeSession(
             Msg.HU_INFO -> {
                 huInfo = PbText.render(m.body, Schemas.deviceInfo)
                 AppLog.i("== HU_INFO: $huInfo")
+                PbReader.parse(m.body)?.let { bridge.onHuInfo(PbReader.str(it, 13), PbReader.str(it, 14)) }
+                logDesay()
                 // ответа нет: Baidu только сохраняет (CarlifeDeviceInfoManager.setCarDeviceInfo)
             }
             Msg.STATISTIC_INFO -> {
                 huStatistic = PbText.render(m.body, Schemas.statisticsInfo)
                 AppLog.i("== STATISTIC_INFO: $huStatistic")
+                PbReader.parse(m.body)?.let { bridge.onHuStatistic(PbReader.str(it, 4)) }
+                logDesay()
                 for (c in Handshake.onStatisticInfo(sendFeatureConfigRequest = true)) sendCmd(c.type, c.body)
             }
             Msg.HU_AUTHEN_REQUEST -> {
@@ -474,6 +478,14 @@ class CarLifeSession(
         } catch (_: java.util.concurrent.RejectedExecutionException) {
             // сессия уже закрывается
         }
+    }
+
+    private var desayLogged = false
+
+    private fun logDesay() {
+        if (!bridge.huDesayG6S || desayLogged) return
+        desayLogged = true
+        AppLog.i("== ГУ Desay G6S: маршрутный NAVI=1 выключен")
     }
 
     private fun onFeatureConfig(m: CmdMsg) {
