@@ -216,6 +216,10 @@ class MainActivity : Activity() {
                     showOnboarding(rerun = true, startAt = step)
                 }
                 "checklist" -> { toHome(); showOnboarding(checklist = true) }
+                "theme" -> {                                   // --es mode system|light|medium|dark
+                    AppTheme.set(this, intent.getStringExtra("mode") ?: AppTheme.SYSTEM)
+                    recreate()
+                }
                 else -> AppLog.i("неизвестная команда '$cmd' (есть aa_selftest, mic_test, transcode_test, open_aa, aa_server_restart)")
             }
             if (intent.hasExtra("scroll_y")) current()?.scrollTo(intent.getIntExtra("scroll_y", 0))     // отладка: снимки нижней части экрана
