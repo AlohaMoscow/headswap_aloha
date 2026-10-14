@@ -76,6 +76,8 @@ class Tcp6Listener(
     private val ports: Map<Int, Int> = Tcp6Ports.DEFAULT,
     private val dataPort: Int? = Tcp6Ports.DATA,
     private val clock: () -> Long = { SystemClock.elapsedRealtime() },
+    /** Кого пускать при bind на 0.0.0.0: ветка B пускает только адреса из подсетей, куда идёт маяк. */
+    private val peerOk: (InetAddress) -> Boolean = { true },
 ) {
     private val lock = Object()
     private val servers = LinkedHashMap<Int, ServerSocket>()   // канал -> сервер; DATA_CHAN = порт Data
@@ -180,6 +182,7 @@ class Tcp6Listener(
                 chan == DATA_CHAN && dataSocket != null -> "dup"
                 chan != DATA_CHAN && accepted.containsKey(chan) -> "dup"
                 peer != null && addr != peer -> "peer"
+                peer == null && !peerOk(addr) -> "subnet"
                 else -> null
             }
             if (reject != null) {

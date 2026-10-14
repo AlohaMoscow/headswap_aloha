@@ -37,7 +37,9 @@ import com.yegorkapomidorka.headswap.link.LinkSetupException
 import com.yegorkapomidorka.headswap.link.StreamTransport
 import com.yegorkapomidorka.headswap.link.Tcp6Listener
 import com.yegorkapomidorka.headswap.link.TransportCaps
+import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.link.diag.WLog
+import com.yegorkapomidorka.headswap.link.wifi.HotspotBeacon
 import com.yegorkapomidorka.headswap.ui.HeadswapNotification
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -132,6 +134,11 @@ class BridgeService : Service() {
             startTcp6Debug(DebugTransport.tcp6Bind(intent))
             return START_NOT_STICKY
         }
+        // только debug-сборка: ветка B беспровода (хотспот телефона + маяк)
+        if (DebugTransport.wifiB(intent)) {
+            startWifiB()
+            return START_NOT_STICKY
+        }
 
         val usb = getSystemService(UsbManager::class.java)
         val acc = usb.accessoryList?.firstOrNull()
@@ -165,38 +172,53 @@ class BridgeService : Service() {
     }
 
     /** debug tcp6: слушать 6 портов на loopback, ждать ГУ (pc-headunit --transport tcp6), затем обычная сессия. */
-    private fun startTcp6Debug(bind: String) {
+    private fun startTcp6Debug(bind: String) = startTcp6("tcp6", bind, TCP6_WAIT_MS, beacon = null)
+
+    /**
+     * Ветка B (хотспот телефона): маяк «CarlifeHost» на 7999 и ответчик 8999, 6 портов на 0.0.0.0, пускаем только
+     * адреса из подсетей, куда идёт маяк. Хотспот включает человек. Пока только debug-вход (`--ez debug_wifi_b true`).
+     */
+    private fun startWifiB() {
+        val beacon = HotspotBeacon()
+        startTcp6("wifi-b", "0.0.0.0", WIFI_B_WAIT_MS, beacon)
+    }
+
+    private fun startTcp6(kind: String, bind: String, waitMs: Long, beacon: HotspotBeacon?) {
         if (pendingTcp6 != null) {
             AppLog.i("сервис: tcp6 уже ждёт ГУ, повторный старт игнорирую")
             return
         }
-        WLog.begin(TransportCaps.TCP6.kind, "bind" to bind, "ACCESS_LOCAL_NETWORK" to com.yegorkapomidorka.headswap.link.diag.NetProbe.localNetworkGranted(this))
-        AppLog.i("сервис: debug tcp6, слушаю 6 портов на $bind, жду ГУ ${TCP6_WAIT_MS / 1000} с")
-        CarLifeState.status = "tcp6: жду ГУ"
+        WLog.begin(kind, "bind" to bind, "ACCESS_LOCAL_NETWORK" to NetProbe.localNetworkGranted(this))
+        AppLog.i("сервис: $kind, слушаю 6 портов на $bind, жду ГУ ${waitMs / 1000} с")
+        CarLifeState.status = "$kind: жду ГУ"
         Thread({
             val result: Any = try {
-                val l = Tcp6Listener(java.net.InetAddress.getByName(bind)).open()
+                val peerOk: (java.net.InetAddress) -> Boolean =
+                    if (beacon == null) { _ -> true } else { a -> beacon.current.any { it.contains(a) } }
+                val l = Tcp6Listener(java.net.InetAddress.getByName(bind), peerOk = peerOk).open()
                 pendingTcp6 = l
-                l.await(TCP6_WAIT_MS, "tcp6 $bind")
+                beacon?.start()
+                l.await(waitMs, "$kind $bind")
             } catch (e: Exception) {
                 e
             } finally {
                 pendingTcp6 = null
             }
+            beacon?.stop(if (result is CarTransport) "6/6" else "нет ГУ")
             main.post {
                 when {
                     result is CarTransport && session != null -> result.close()
                     result is CarTransport -> startSession(result)
                     else -> {
                         val msg = (result as Exception).message
-                        if (result !is LinkSetupException) AppLog.e("tcp6", result)
+                        if (result !is LinkSetupException) AppLog.e(kind, result)
                         AppLog.i("сервис: $msg")
-                        CarLifeState.status = msg ?: "tcp6: ошибка"
+                        CarLifeState.status = msg ?: "$kind: ошибка"
                         failStart()
                     }
                 }
             }
-        }, "debug-tcp6").start()
+        }, "link-$kind").start()
     }
 
     private fun startSession(transport: CarTransport) {
@@ -409,5 +431,7 @@ class BridgeService : Service() {
         private const val SERVICE_WAIT_MS = 3_000L
         /** debug tcp6: сколько ждать все 6 сокетов ГУ. */
         private const val TCP6_WAIT_MS = 60_000L
+        /** Ветка B: сколько маячить и ждать ГУ (человек включает хотспот и открывает CarLife на ГУ). */
+        private const val WIFI_B_WAIT_MS = 10 * 60_000L
     }
 }

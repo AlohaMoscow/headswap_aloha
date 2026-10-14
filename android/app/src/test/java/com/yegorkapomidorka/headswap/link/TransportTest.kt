@@ -341,6 +341,22 @@ class TransportTest {
         }
     }
 
+    @Test
+    fun tcp6PeerFilterRejectsForeignSubnet() {
+        // ветка B: пускаем только адреса из подсетей маяка; loopback сюда не входит
+        val l = Tcp6Listener(InetAddress.getLoopbackAddress(), zeroPorts, dataPort = null, clock = clock, peerOk = { false }).open()
+        val s = Socket()
+        try {
+            s.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), l.boundPort(Ch.CMD)), 2000)
+            s.soTimeout = 3000
+            assertEquals(-1, try { s.getInputStream().read() } catch (_: java.net.SocketException) { -1 })
+            assertTrue(wl.any { it.startsWith("WL tcp reject chan=CMD") && "why=subnet" in it })
+        } finally {
+            s.close()
+            l.abort()
+        }
+    }
+
     // ---------------- WLog ----------------
 
     @Test

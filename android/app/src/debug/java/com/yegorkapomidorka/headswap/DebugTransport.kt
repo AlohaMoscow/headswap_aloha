@@ -21,6 +21,9 @@ object DebugTransport {
      */
     fun tcp6(intent: Intent?): Boolean = intent?.getBooleanExtra(EXTRA_TCP6, false) == true
 
+    /** Ветка B беспровода: хотспот телефона, маяк 7999, 6 портов на 0.0.0.0 (`--ez debug_wifi_b true`). */
+    fun wifiB(intent: Intent?): Boolean = intent?.getBooleanExtra("debug_wifi_b", false) == true
+
     /** Адрес bind для tcp6: по умолчанию 127.0.0.1; `--es debug_tcp6_bind 0.0.0.0` для проверки входящего TCP из LAN. */
     fun tcp6Bind(intent: Intent?): String = intent?.getStringExtra("debug_tcp6_bind") ?: "127.0.0.1"
 
