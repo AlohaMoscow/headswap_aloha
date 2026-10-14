@@ -225,6 +225,9 @@ class ProtocolTest {
             val d = hex(s)
             assertTrue(AnnexB.fixSps(d, 1280, 720) === d)
         }
+        // c2.qti на 2240x976 уже пишет 80/42: менять нечего, тот же массив (h57: копия без отличий валила заглушку)
+        val qti976 = hex("00 00 00 01 67 42 80 2A AB")
+        assertTrue(AnnexB.fixSps(qti976, 2240, 976) === qti976)
         // Huawei Pura 70 на 2560x1440: 67 42 C0 32 уже совпадает с целевой подписью - тот же массив (h61: копия без отличий
         // роняла withFixedSps на first{})
         val kirin = hex("00 00 00 01 67 42 C0 32 AB 00 00 00 01 68 CE")
