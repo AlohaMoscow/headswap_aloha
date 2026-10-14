@@ -175,7 +175,7 @@ class BridgeService : Service() {
         CarLifeState.status = "tcp6: жду ГУ"
         Thread({
             val result: Any = try {
-                val l = Tcp6Listener(java.net.InetAddress.getLoopbackAddress()).open()
+                val l = Tcp6Listener(java.net.InetAddress.getByName("127.0.0.1")).open()
                 pendingTcp6 = l
                 l.await(TCP6_WAIT_MS, "tcp6 127.0.0.1")
             } catch (e: Exception) {

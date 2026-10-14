@@ -332,7 +332,9 @@ class MultiSocketTransport internal constructor(
     private fun closeAll() {
         Tcp6Listener.quiet { closeListener() }
         for (s in sockets.values) Tcp6Listener.quiet { s.close() }
-        for (t in threads) t.interrupt()
+        // свою нить не прерываем: после fail() на ней идёт весь CarLifeSession.close() (остановка видео, onClosed)
+        val me = Thread.currentThread()
+        for (t in threads) if (t !== me) t.interrupt()
     }
 
     private fun readLoop(chan: Int, s: Socket, sink: (Int, ByteArray) -> Unit) {
