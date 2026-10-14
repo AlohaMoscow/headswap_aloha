@@ -18,8 +18,8 @@ android {
         applicationId = "com.yegorkapomidorka.headswap"
         minSdk = 29
         targetSdk = 36
-        versionCode = 35
-        versionName = "1.1.10"
+        versionCode = 36
+        versionName = "1.1.11"
     }
 
     signingConfigs {
