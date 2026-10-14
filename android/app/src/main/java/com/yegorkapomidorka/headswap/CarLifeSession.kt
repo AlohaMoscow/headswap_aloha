@@ -573,7 +573,7 @@ class CarLifeSession(
         val out = AnnexB.fixSps(payload, pendingW, pendingH)
         if (out !== payload && !spsFixLogged) {
             spsFixLogged = true
-            val i = payload.indices.first { payload[it] != out[it] }
+            val i = payload.indices.firstOrNull { payload[it] != out[it] } ?: return out
             val from = maxOf(0, i - 4)
             AppLog.i("видео: SPS в ГУ исправлен под ${pendingW}x$pendingH: ${Hex.compact(payload.copyOfRange(from, i + 4), 8)}" +
                 " -> ${Hex.compact(out.copyOfRange(from, i + 4), 8)}")
