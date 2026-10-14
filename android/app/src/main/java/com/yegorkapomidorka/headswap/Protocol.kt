@@ -748,9 +748,14 @@ object AnnexB {
             val profile = d[p + 1].toInt() and 0xFF
             val level = d[p + 3].toInt() and 0xFF
             if (level <= 41) continue
+            val cons = d[p + 2].toInt() and 0xFF
+            val newCons = if (profile == 66) cons or 0x80 else cons
+            val newLevel = levelFor(w, h)
+            // Kirin на 2560x1440 уже отдаёт constraints 0xC0 и level 50: копировать нечего (иначе out !== d при равных байтах)
+            if (newCons == cons && newLevel == level) continue
             if (out === d) out = d.copyOf()
-            if (profile == 66) out[p + 2] = (out[p + 2].toInt() or 0x80).toByte()
-            out[p + 3] = levelFor(w, h).toByte()
+            out[p + 2] = newCons.toByte()
+            out[p + 3] = newLevel.toByte()
         }
         return out
     }

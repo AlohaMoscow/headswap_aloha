@@ -225,6 +225,12 @@ class ProtocolTest {
             val d = hex(s)
             assertTrue(AnnexB.fixSps(d, 1280, 720) === d)
         }
+        // Huawei Pura 70 на 2560x1440: 67 42 C0 32 уже совпадает с целевой подписью - тот же массив (h61: копия без отличий
+        // роняла withFixedSps на first{})
+        val kirin = hex("00 00 00 01 67 42 C0 32 AB 00 00 00 01 68 CE")
+        assertTrue(AnnexB.fixSps(kirin, 2560, 1440) === kirin)
+        // тот же SPS на 1280x720: level понижается до 3.1
+        assertArrayEquals(hex("00 00 00 01 67 42 C0 1F AB 00 00 00 01 68 CE"), AnnexB.fixSps(kirin, 1280, 720))
     }
 
     @Test
