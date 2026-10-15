@@ -72,7 +72,7 @@
     <string name="set_sum_headunit">Сертификат %1$s · автозапуск %2$s</string>
     <string name="set_sum_on">вкл.</string>
     <string name="set_sum_off">выкл.</string>
-    <string name="set_footer">Headswap %1$s · мост для ГУ с CarLife</string>
+    <string name="set_footer">Headswap %1$s</string>
 
     <!-- Video modes (VideoMode) -->
     <string name="video_r800_title">800×480</string>

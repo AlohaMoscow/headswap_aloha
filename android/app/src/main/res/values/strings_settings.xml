@@ -72,7 +72,7 @@
     <string name="set_sum_headunit">Certificate %1$s · auto-start %2$s</string>
     <string name="set_sum_on">on</string>
     <string name="set_sum_off">off</string>
-    <string name="set_footer">Headswap %1$s · bridge for CarLife head units</string>
+    <string name="set_footer">Headswap %1$s</string>
 
     <!-- Video modes (VideoMode) -->
     <string name="video_r800_title">800×480</string>
