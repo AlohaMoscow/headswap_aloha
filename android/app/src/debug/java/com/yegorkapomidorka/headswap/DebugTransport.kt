@@ -13,6 +13,20 @@ import java.net.Socket
 object DebugTransport {
     const val EXTRA_PORT = "debug_tcp"
 
+    const val EXTRA_TCP6 = "debug_tcp6"
+
+    /**
+     * Беспроводной формат (6 сокетов, без внешнего заголовка): телефон слушает 7240..9340 на 127.0.0.1, ГУ на ПК
+     * подключается через `adb forward tcp:P tcp:P`; `--ez debug_tcp6 true`, на ПК `carlife_hu.py --transport tcp6`.
+     */
+    fun tcp6(intent: Intent?): Boolean = intent?.getBooleanExtra(EXTRA_TCP6, false) == true
+
+    /** Ветка B беспровода: хотспот телефона, маяк 7999, 6 портов на 0.0.0.0 (`--ez debug_wifi_b true`). */
+    fun wifiB(intent: Intent?): Boolean = intent?.getBooleanExtra("debug_wifi_b", false) == true
+
+    /** Адрес bind для tcp6: по умолчанию 127.0.0.1; `--es debug_tcp6_bind 0.0.0.0` для проверки входящего TCP из LAN. */
+    fun tcp6Bind(intent: Intent?): String = intent?.getStringExtra("debug_tcp6_bind") ?: "127.0.0.1"
+
     fun port(intent: Intent?): Int? =
         intent?.getIntExtra(EXTRA_PORT, 0)?.takeIf { it in 1..65535 }
 

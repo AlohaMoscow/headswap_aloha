@@ -2,17 +2,28 @@ package com.yegorkapomidorka.headswap.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
 import android.text.TextUtils
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.yegorkapomidorka.headswap.AppLocale
+import com.yegorkapomidorka.headswap.AppLog
 import com.yegorkapomidorka.headswap.AppTheme
+import com.yegorkapomidorka.headswap.BridgeService
+import com.yegorkapomidorka.headswap.BuildConfig
+import com.yegorkapomidorka.headswap.CarLifeState
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaDensity
@@ -21,6 +32,11 @@ import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
+import com.yegorkapomidorka.headswap.link.car.CarNetwork
+import com.yegorkapomidorka.headswap.link.car.CarPairing
+import com.yegorkapomidorka.headswap.link.car.CarProfile
+import com.yegorkapomidorka.headswap.link.car.CarWifi
+import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.update.UpdatePrefs
 import com.yegorkapomidorka.headswap.update.Updater
 
@@ -45,10 +61,16 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     VIDEO("video", R.string.set_video, R.drawable.ic_video),
     SOUND("sound", R.string.set_sec_sound, R.drawable.ic_mic),
     HEADUNIT("headunit", R.string.set_sec_headunit, R.drawable.ic_car),
-    UPDATES("updates", R.string.upd_title, R.drawable.ic_download);
+    UPDATES("updates", R.string.upd_title, R.drawable.ic_download),
+
+    /** Беспровод (бета): только в сборке с BuildConfig.WIRELESS_BETA. */
+    WIRELESS("wireless", R.string.wl_title, R.drawable.ic_wifi);
 
     companion object {
-        fun byKey(key: String?): SettingsSection? = values().firstOrNull { it.key == key }
+        /** Разделы этой сборки: без беты беспровода его нет ни в меню, ни по ключу. */
+        fun shown(): List<SettingsSection> = values().filter { it != WIRELESS || BuildConfig.WIRELESS_BETA }
+
+        fun byKey(key: String?): SettingsSection? = shown().firstOrNull { it.key == key }
     }
 }
 
@@ -100,7 +122,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         val body = c.vbox(12).apply { pad(c, 16, 4, 16, 16) }
 
         val sections = c.card()
-        for ((i, s) in SettingsSection.values().withIndex()) {
+        for ((i, s) in SettingsSection.shown().withIndex()) {
             if (i > 0) sections.addView(c.divider())
             sections.addView(sectionRow(s))
         }
@@ -196,6 +218,12 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
 
         val (upd, color) = c.updateStatus()
         set(SettingsSection.UPDATES, upd, color)
+
+        if (BuildConfig.WIRELESS_BETA) {
+            val car = CarProfile(c)
+            val carText = if (car.isSet) c.getString(R.string.wl_car_line, car.btName ?: car.btMac ?: "") else null
+            set(SettingsSection.WIRELESS, listOfNotNull(CarLifeState.wireless ?: c.getString(R.string.wl_off), carText).joinToString(" · "))
+        }
     }
 
     private fun link(icon: Int, title: String, note: String?, chevron: Boolean, onClick: () -> Unit): View {
@@ -269,6 +297,21 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var svcButton: TextView? = null
     private var updStatus: TextView? = null
     private var updButton: TextView? = null
+    private var wlStatus: TextView? = null
+    private var wlNoPermission: TextView? = null
+    private var wlAwaitingPermission = false
+    private var wlCarLine: TextView? = null
+    private var wlCarWarn: TextView? = null
+    private var wlCarForget: View? = null
+    private var wlAwaitingCarPermission = false
+    private var wlCwLine: TextView? = null
+    private var wlCwSsid: EditText? = null
+    private var wlCwPass: EditText? = null
+    private var wlCwResult: TextView? = null
+    private var wlCwForget: View? = null
+    /** Запрос сети машины из «Сохранить и проверить»; null - проверки нет. */
+    private var wlCwCheck: CarNetwork? = null
+    private val cwHandler = Handler(Looper.getMainLooper())
     private val body: LinearLayout = ctx.vbox(6).apply { pad(ctx, 16, 4, 16, 16) }
     override val view: View
 
@@ -279,6 +322,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             SettingsSection.SOUND -> buildSound()
             SettingsSection.HEADUNIT -> buildHeadunit()
             SettingsSection.UPDATES -> body.addView(updateCard(), lp(MATCH, WRAP).margins(ctx, 0, 8, 0, 0))
+            SettingsSection.WIRELESS -> body.addView(wirelessCard(), lp(MATCH, WRAP).margins(ctx, 0, 8, 0, 0))
         }
         view = scaffold(ctx, ctx.getString(section.titleRes), { host.back() }, body)
     }
@@ -287,14 +331,218 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         refreshService()
         refreshMic()
         refreshUpdate()
+        refreshWireless()
     }
 
     override fun tick() {
         refreshService()
         refreshUpdate()
+        refreshWireless()
     }
 
-    override fun onPermissionResult() = refreshMic()
+    override fun onPermissionResult() {
+        refreshMic()
+        if (wlAwaitingPermission) {
+            wlAwaitingPermission = false
+            val lan = Build.VERSION.SDK_INT < 37 || NetProbe.localNetworkGranted(ctx) == "granted"
+            if (lan) startWireless() else wlNoPermission?.visibility = View.VISIBLE
+        }
+        if (wlAwaitingCarPermission) {
+            wlAwaitingCarPermission = false
+            CarPairing.start(host)      // без разрешения выбор всё равно возможен, refreshWireless предупредит
+        }
+        refreshWireless()
+    }
+
+    override fun onActivityResultDone() = refreshWireless()
+
+    /** Беспровод (бета): пояснение, старт/стоп, выбор машины для автостарта по Bluetooth, отчёт. */
+    private fun wirelessCard(): View {
+        val c = ctx
+        val card = c.vbox(8).apply {
+            background = c.shape(c.clr(R.color.surf), 20)
+            pad(c, 16, 12, 16, 12)
+        }
+        card.addView(c.text(c.getString(R.string.wl_note), 14f, 400, c.clr(R.color.on2)), lp(MATCH, WRAP))
+        wlStatus = c.text("", 15f, 500).also { card.addView(it, lp(MATCH, WRAP)) }
+        wlNoPermission = c.text(c.getString(R.string.wl_no_permission), 13f, 400, c.clr(R.color.warn)).apply { visibility = View.GONE }
+            .also { card.addView(it, lp(MATCH, WRAP)) }
+        // высота кнопок задаётся явно (как на других экранах): pill с WRAP сжимается до высоты текста
+        card.addView(c.primaryButton(c.getString(R.string.wl_start), heightDp = 60, sp = 17f).apply { setOnClickListener { onWirelessStart() } },
+            lp(MATCH, c.dp(60)).apply { topMargin = c.dp(4) })
+        card.addView(c.outlineButton(c.getString(R.string.wl_stop), heightDp = 56, sp = 16f).apply { setOnClickListener { Actions.stopBridge(c) } },
+            lp(MATCH, c.dp(56)))
+        // выбор машины: дальше при её Bluetooth-подключении ожидание по Wi-Fi стартует само
+        wlCarLine = c.text("", 15f, 500).also { card.addView(it, lp(MATCH, WRAP).apply { topMargin = c.dp(8) }) }
+        card.addView(c.text(c.getString(R.string.wl_car_note), 13f, 400, c.clr(R.color.on2)), lp(MATCH, WRAP))
+        wlCarWarn = c.text("", 13f, 400, c.clr(R.color.warn)).apply { visibility = View.GONE }.also { card.addView(it, lp(MATCH, WRAP)) }
+        card.addView(c.outlineButton(c.getString(R.string.wl_car_pick), heightDp = 56, sp = 16f).apply { setOnClickListener { onCarPick() } },
+            lp(MATCH, c.dp(56)))
+        wlCarForget = c.outlineButton(c.getString(R.string.wl_car_forget), heightDp = 56, sp = 16f).apply {
+            setOnClickListener { CarPairing.forget(c); refreshWireless() }
+        }.also { card.addView(it, lp(MATCH, c.dp(56))) }
+        // Wi-Fi машины: телефон входит в её точку доступа сам (WifiNetworkSpecifier), интернет остаётся на основной сети
+        val cw = CarWifi(c)
+        wlCwLine = c.text("", 15f, 500).also { card.addView(it, lp(MATCH, WRAP).apply { topMargin = c.dp(8) }) }
+        card.addView(c.text(c.getString(R.string.wl_cw_note), 13f, 400, c.clr(R.color.on2)), lp(MATCH, WRAP))
+        wlCwSsid = wifiField(c.getString(R.string.wl_cw_ssid_hint), password = false).apply { setText(cw.ssid.orEmpty()) }
+            .also { card.addView(it, lp(MATCH, c.dp(52))) }
+        wlCwPass = wifiField(c.getString(R.string.wl_cw_pass_hint), password = true).apply { setText(cw.pass) }
+            .also { card.addView(it, lp(MATCH, c.dp(52))) }
+        wlCwResult = c.text("", 13f, 400, c.clr(R.color.on2)).apply { visibility = View.GONE }.also { card.addView(it, lp(MATCH, WRAP)) }
+        card.addView(c.outlineButton(c.getString(R.string.wl_cw_save), heightDp = 56, sp = 16f).apply { setOnClickListener { onCarWifiSave() } },
+            lp(MATCH, c.dp(56)))
+        wlCwForget = c.outlineButton(c.getString(R.string.wl_cw_forget), heightDp = 56, sp = 16f).apply {
+            setOnClickListener { onCarWifiForget() }
+        }.also { card.addView(it, lp(MATCH, c.dp(56))) }
+        card.addView(c.linkButton(c.getString(R.string.wl_report), heightDp = 52, sp = 16f).apply { setOnClickListener { LogShare.shareReport(c) } },
+            lp(MATCH, c.dp(52)))
+        refreshWireless()
+        return card
+    }
+
+    private fun refreshWireless() {
+        val st = wlStatus ?: return
+        val c = ctx
+        val text = c.getString(R.string.wl_status_line, CarLifeState.wireless ?: c.getString(R.string.wl_off))
+        if (st.text.toString() != text) st.text = text
+        val car = CarProfile(c)
+        val carText = c.getString(R.string.wl_car_line, if (car.isSet) car.btName ?: car.btMac ?: "" else c.getString(R.string.wl_car_none))
+        wlCarLine?.let { if (it.text.toString() != carText) it.text = carText }
+        wlCarForget?.visibility = if (car.isSet) View.VISIBLE else View.GONE
+        // без BLUETOOTH_CONNECT (31+) система не доставляет ACL выбранной машины: триггер молчит
+        val warn = when {
+            !CarPairing.available(c) -> c.getString(R.string.wl_car_unavailable)
+            car.isSet && !carBtGranted() -> c.getString(R.string.wl_car_no_permission)
+            else -> ""
+        }
+        wlCarWarn?.let {
+            if (it.text.toString() != warn) it.text = warn
+            it.visibility = if (warn.isEmpty()) View.GONE else View.VISIBLE
+        }
+        val cw = CarWifi(c)      // SSID на экране показываем, в логи и отчёт он не уходит
+        val cwText = c.getString(R.string.wl_cw_line, if (cw.isSet) c.getString(R.string.wl_cw_set, cw.ssid) else c.getString(R.string.wl_cw_none))
+        wlCwLine?.let { if (it.text.toString() != cwText) it.text = cwText }
+        wlCwForget?.visibility = if (cw.isSet) View.VISIBLE else View.GONE
+    }
+
+    private fun wifiField(hint: String, password: Boolean): EditText = EditText(ctx).apply {
+        this.hint = hint
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        setTextColor(ctx.clr(R.color.on))
+        setHintTextColor(ctx.clr(R.color.on2))
+        typeface = ctx.sans(400)
+        background = ctx.shape(ctx.clr(R.color.surf2), 14)
+        pad(ctx, 16, 0, 16, 0)
+        isSingleLine = true
+        inputType = InputType.TYPE_CLASS_TEXT or
+            if (password) InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        typeface = ctx.sans(400)      // setInputType для пароля сам ставит моноширинный
+    }
+
+    private fun showCwResult(text: String, color: Int = R.color.on2) {
+        wlCwResult?.apply {
+            this.text = text
+            setTextColor(ctx.clr(color))
+            visibility = View.VISIBLE
+        }
+    }
+
+    /**
+     * «Сохранить и проверить»: запрос сети машины с переднего плана, чтобы человек увидел и одобрил системный диалог (из фона
+     * его не показать). Это только одобрение/проверка: через 5 с после входа запрос снимаем, дальше его держит сервис.
+     */
+    private fun onCarWifiSave() {
+        val ssid = wlCwSsid?.text?.toString().orEmpty()
+        val pass = wlCwPass?.text?.toString().orEmpty()
+        if (ssid.isEmpty()) {
+            showCwResult(ctx.getString(R.string.wl_cw_need_ssid), R.color.warn)
+            return
+        }
+        CarWifi(ctx).save(ssid, pass)
+        wlCwCheck?.release("recheck")
+        val net = CarNetwork(ctx)
+        wlCwCheck = net
+        showCwResult(ctx.getString(R.string.wl_cw_checking))
+        val fail = {
+            if (wlCwCheck === net) {
+                showCwResult(ctx.getString(R.string.wl_cw_fail), R.color.warn)
+                wlCwCheck = null
+            }
+        }
+        net.request(
+            ssid, pass, CW_CHECK_TIMEOUT_MS,
+            onAvailable = {
+                if (wlCwCheck === net) {
+                    showCwResult(ctx.getString(R.string.wl_cw_ok), R.color.ok)
+                    cwHandler.postDelayed({
+                        if (wlCwCheck === net) {
+                            net.release("check")
+                            wlCwCheck = null
+                        }
+                    }, CW_CHECK_HOLD_MS)
+                }
+            },
+            onUnavailable = { fail() },
+            onLost = { fail() },
+        )
+        refreshWireless()
+    }
+
+    private fun onCarWifiForget() {
+        CarWifi(ctx).clear()
+        wlCwCheck?.release("forget")
+        wlCwCheck = null
+        wlCwSsid?.setText("")
+        wlCwPass?.setText("")
+        wlCwResult?.visibility = View.GONE
+        refreshWireless()
+    }
+
+    private fun carBtGranted() =
+        Build.VERSION.SDK_INT < 31 || ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    /** На Android 12+ перед выбором просим BLUETOOTH_CONNECT (имя устройства, доставка ACL); отказ выбор не блокирует. */
+    private fun onCarPick() {
+        if (!carBtGranted()) {
+            wlAwaitingCarPermission = true
+            host.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQ_CAR_BT)
+            return
+        }
+        CarPairing.start(host)
+    }
+
+    /**
+     * На Android 17+ без ACCESS_LOCAL_NETWORK LAN режется молча: сначала спрашиваем, старт - в onPermissionResult.
+     * BLUETOOTH_CONNECT (Android 12+) - для пробы ветки A, без него беспровод всё равно стартует.
+     */
+    private fun onWirelessStart() {
+        wlNoPermission?.visibility = View.GONE
+        val ask = ArrayList<String>()
+        if (Build.VERSION.SDK_INT >= 37 && NetProbe.localNetworkGranted(ctx) != "granted") ask += Manifest.permission.ACCESS_LOCAL_NETWORK
+        if (!carBtGranted()) ask += Manifest.permission.BLUETOOTH_CONNECT
+        if (ask.isNotEmpty()) {
+            wlAwaitingPermission = true
+            host.requestPermissions(ask.toTypedArray(), REQ_LOCAL_NETWORK)
+            return
+        }
+        startWireless()
+    }
+
+    private fun startWireless() {
+        AppLog.i("кнопка «Ждать машину по Wi-Fi»")
+        ctx.startForegroundService(Intent(ctx, BridgeService::class.java).setAction(BridgeService.ACTION_WIFI_B))
+    }
+
+    private companion object {
+        /** Тот же код, что MainActivity.REQ_LOCAL_NETWORK: результат попадает в её лог. */
+        const val REQ_LOCAL_NETWORK = 37
+        /** BLUETOOTH_CONNECT перед выбором машины (38 занят диалогом CDM, CarPairing.REQ_CAR_PAIR). */
+        const val REQ_CAR_BT = 39
+        /** Проверка Wi-Fi машины из настроек: сколько ждём одобрения и входа, и сколько держим сеть после входа. */
+        const val CW_CHECK_TIMEOUT_MS = 60_000L
+        const val CW_CHECK_HOLD_MS = 5_000L
+    }
 
     private fun note(text: String, color: Int = R.color.on2): TextView =
         ctx.text(text, 13f, 400, ctx.clr(color)).also { body.addView(it, lp(WRAP, WRAP).margins(ctx, 8, 2, 8, 0)) }

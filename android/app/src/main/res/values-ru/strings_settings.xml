@@ -98,4 +98,33 @@
     <string name="fps_15_sub">Легче для слабых ГУ и канала</string>
     <string name="fps_30_title">30 кадров/с</string>
     <string name="fps_30_sub">Плавнее, но тяжелее</string>
+
+    <!-- Беспровод (бета, ветка B) -->
+    <string name="wl_title">По воздуху (бета)</string>
+    <string name="wl_note">Для машин с беспроводным CarLife. Включите точку доступа на телефоне, подключите к ней ГУ (в меню ГУ: Wi-Fi), откройте CarLife на ГУ и нажмите кнопку ниже. Кабель не нужен; если вставить кабель, побеждает USB.</string>
+    <string name="wl_start">Ждать машину по Wi-Fi</string>
+    <string name="wl_stop">Остановить</string>
+    <string name="wl_status_line">Состояние: %1$s</string>
+    <string name="wl_off">выключено</string>
+    <string name="wl_no_permission">Без разрешения “Устройства поблизости” машина не сможет подключиться по Wi-Fi</string>
+    <string name="wl_report">Отправить отчёт о связи по воздуху</string>
+    <string name="wl_car_line">Машина: %1$s</string>
+    <string name="wl_car_none">не выбрана</string>
+    <string name="wl_car_note">Когда телефон подключится к этой машине по Bluetooth, Headswap сам начнёт ждать её по Wi-Fi</string>
+    <string name="wl_car_pick">Выбрать машину</string>
+    <string name="wl_car_forget">Забыть машину</string>
+    <string name="wl_car_no_permission">Без разрешения “Устройства поблизости” события Bluetooth от машины не доходят</string>
+    <string name="wl_car_unavailable">Этот телефон не умеет привязывать машину (нет companion device setup)</string>
+    <string name="wl_cw_note">Если телефон держится за другую сеть Wi-Fi (например, домашнюю), Headswap сам войдёт в точку доступа машины: интернет остаётся на основной сети. Введите имя и пароль, которые показывает ГУ.</string>
+    <string name="wl_cw_line">Wi-Fi машины: %1$s</string>
+    <string name="wl_cw_none">не задан</string>
+    <string name="wl_cw_set">задан: %1$s</string>
+    <string name="wl_cw_ssid_hint">Имя сети (SSID)</string>
+    <string name="wl_cw_pass_hint">Пароль (пусто — открытая сеть)</string>
+    <string name="wl_cw_save">Сохранить и проверить</string>
+    <string name="wl_cw_forget">Удалить</string>
+    <string name="wl_cw_need_ssid">Введите имя сети</string>
+    <string name="wl_cw_checking">Подключаюсь к Wi-Fi машины… подтвердите системный запрос</string>
+    <string name="wl_cw_ok">Подключилась к Wi-Fi машины</string>
+    <string name="wl_cw_fail">Не подключилась: машина вне зоны, неверный пароль или отказ в запросе</string>
 </resources>

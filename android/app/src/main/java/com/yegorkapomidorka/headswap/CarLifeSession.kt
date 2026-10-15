@@ -1,14 +1,13 @@
 package com.yegorkapomidorka.headswap
 
 import android.os.Build
-import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import com.yegorkapomidorka.headswap.aa.AaBridgeCore
 import com.yegorkapomidorka.headswap.aa.CarlifeAudio
 import com.yegorkapomidorka.headswap.aa.AaTranscoder
 import com.yegorkapomidorka.headswap.aa.BitratePolicy
+import com.yegorkapomidorka.headswap.aa.BitrateProfile
 import com.yegorkapomidorka.headswap.aa.CarlifeLink
-import com.yegorkapomidorka.headswap.aa.DrainMeter
 import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.IdrThrottle
 import com.yegorkapomidorka.headswap.aa.CarlifeMediaInfo
@@ -19,15 +18,13 @@ import com.yegorkapomidorka.headswap.aa.TranscodeOutput
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.aa.VideoQueueLimit
 import com.yegorkapomidorka.headswap.aa.VideoTranscoder
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.util.concurrent.Executors
-import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
+import com.yegorkapomidorka.headswap.link.CarTransport
+import com.yegorkapomidorka.headswap.link.TransportCaps
+import com.yegorkapomidorka.headswap.link.diag.WLog
 
 /** Настройки сессии, снятые в момент старта. */
 class SessionConfig(
@@ -45,38 +42,34 @@ class SessionConfig(
 )
 
 /**
- * Одна сессия с ГУ поверх открытого аксессуара: читает поток, отвечает как MD, отдаёт мосту видео/звук/тач, пишет всё в лог.
- * Потоки: reader (чтение + диспетчер), writer (единственный писатель), enc-drain/render (VideoSource заглушки),
+ * Одна сессия с ГУ поверх транспорта (USB-поток или 6 сокетов): отвечает как MD, отдаёт мосту видео/звук/тач, пишет всё в лог.
+ * Потоки: чтение и запись в транспорте (sink и onWritten сериализованы), enc-drain/render (VideoSource заглушки),
  * scheduler (статистика, watchdog тишины, отложенный MODULE_STATUS).
  * Протокол CarLife 2.0 по поведению MD Baidu CarLife 8.6.7, см. docs/carlife-v2-handshake.md.
  */
 class CarLifeSession(
-    private val pfd: ParcelFileDescriptor,
+    private val transport: CarTransport,
     private val cfg: SessionConfig,
     private val bridge: AaBridgeCore,
     private val onClosed: (String) -> Unit,
 ) : VideoSource.Listener, CarlifeLink {
 
-    private class Out(val chan: Int, val inner: ByteArray)
-
     /** Видео-режим хоста, снятый при подключении: одинаков для INIT_DONE, энкодера и тача в течение всей сессии. */
     private val mode: VideoMode = bridge.videoMode
 
-    private val input = FileInputStream(pfd.fileDescriptor)
-    private val output = FileOutputStream(pfd.fileDescriptor)
-    private val queue = LinkedBlockingQueue<Out>()
+    /** Транспорт сессии: usb-aoa, tcp-debug или tcp6. */
+    val transportKind: String get() = transport.caps.kind
 
-    // видео-очередь: считаем только видео (в queue ещё звук и команды); слив измеряет writeLoop
-    private val queuedVideoBytes = AtomicLong()
-    private val queuedVideoFrames = AtomicInteger()
-    private val drain = DrainMeter()
-    private val bitratePolicy = BitratePolicy(mode.bitrate)
+    /** Воздух (6 сокетов): своя лесенка битрейта, PAUSE-keepalive чаще, WL-строки видео. USB и tcp-debug - как было. */
+    private val air = transport.caps == TransportCaps.TCP6
+    private val bitratePolicy = BitratePolicy(mode.bitrate, profile = if (air) BitrateProfile.WIFI else BitrateProfile.USB)
+    private val pauseKeepaliveMs = if (air) PAUSE_KEEPALIVE_AIR_MS else PAUSE_KEEPALIVE_MS
+    private var overflows = 0
+    private var maxQueueFrames = 0
     private val placeholderIdr = IdrThrottle()
     @Volatile private var lastOverflowMs = NEVER_MS
     private var passthroughBitrateLogged = false
     private var spsFixLogged = false
-    private val parser = FrameParser()
-    private val assembler = InnerAssembler()
     private val closed = AtomicBoolean(false)
     private val sched: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "cl-sched") }
     private val metaExec = Executors.newSingleThreadExecutor { r -> Thread(r, "cl-meta").also { it.isDaemon = true } }
@@ -84,13 +77,8 @@ class CarLifeSession(
     private var lastArtJpeg = ByteArray(0)
     private val turnIcons = HashMap<Int, ByteArray>()
     @Volatile private var metaMusicOffLogged = false
-    private var reader: Thread? = null
-    private var writer: Thread? = null
 
     private val t0 = SystemClock.elapsedRealtime()
-    @Volatile private var lastRx = 0L
-    @Volatile private var rxBytes = 0L
-    @Volatile private var desync = false
 
     // протокол
     @Volatile private var matchSent = false
@@ -154,10 +142,14 @@ class CarLifeSession(
         CarLifeState.videoMode = mode
         CarLifeState.densityOverride = bridge.densityOverride
         AppLog.i(mode.describe(bridge.densityOverride))
+        AppLog.i("сессия: транспорт=${transport.caps.kind} (${transport.label})")
+        WLog.ev(WLog.LINK, "session", "transport" to transport.caps.kind)
+        if (air) {
+            WLog.ev(WLog.VIDEO, "policy", "profile" to bitratePolicy.profile.name, "startKbps" to bitratePolicy.startBps / 1000,
+                "ceilingKbps" to bitratePolicy.ceilingBps / 1000, "mode" to mode.name, "transcode" to bridge.transcodeEnabled)
+        }
         CarLifeState.status = "соединено, жду HU_PROTOCOL_VERSION"
-        lastRx = SystemClock.elapsedRealtime()
-        writer = Thread({ writeLoop() }, "cl-writer").also { it.start() }
-        reader = Thread({ readLoop() }, "cl-reader").also { it.start() }
+        transport.start(::dispatch, ::logTx, ::close)
         sched.scheduleWithFixedDelay({ tick() }, 1, 1, TimeUnit.SECONDS)
         sched.scheduleWithFixedDelay({ adaptBitrate() }, 1000, BITRATE_POLL_MS, TimeUnit.MILLISECONDS)
     }
@@ -166,6 +158,12 @@ class CarLifeSession(
         if (!closed.compareAndSet(false, true)) return
         AppLog.i("сессия: закрытие, причина: $reason")
         bridge.onCarlifeClosed(this)
+        if (air) {
+            WLog.ev(WLog.VIDEO, "summary", "frames" to vFrames, "dropped" to vDropped, "overflows" to overflows, "maxQueue" to maxQueueFrames,
+                "downs" to bitratePolicy.downs, "ups" to bitratePolicy.ups, "minKbps" to bitratePolicy.minBps / 1000,
+                "lastKbps" to bitratePolicy.current / 1000)
+        }
+        WLog.ev(WLog.LINK, "session-end", "transport" to transport.caps.kind, "aliveS" to (SystemClock.elapsedRealtime() - t0) / 1000, "why" to reason)
         logSummary(reason)
         CarLifeState.status = "закрыто: $reason"
         try {
@@ -179,54 +177,12 @@ class CarLifeSession(
             AppLog.e("остановка видео", e)
         }
         source = null
-        try {
-            pfd.close()
-        } catch (_: Exception) {
-        }
-        writer?.interrupt()
-        reader?.interrupt()
-        try {
-            input.close()
-        } catch (_: Exception) {
-        }
-        try {
-            output.close()
-        } catch (_: Exception) {
-        }
+        transport.close()
         AppLog.i("сессия: закрыта")
         onClosed(reason)
     }
 
     // ---------------- чтение ----------------
-
-    private fun readLoop() {
-        val buf = ByteArray(Wire.CHUNK)
-        try {
-            while (!closed.get()) {
-                val n = input.read(buf)
-                if (n < 0) {
-                    close("EOF чтения (ГУ отключилось)")
-                    return
-                }
-                lastRx = SystemClock.elapsedRealtime()
-                rxBytes += n
-                AppLog.detail("RAW rx read=$n bytes: ${Hex.compact(buf.copyOf(minOf(n, 32)), 32)}")
-                if (desync) continue
-                try {
-                    parser.feed(buf, 0, n) { chan, inner -> assembler.feed(chan, inner) { c, i -> dispatch(c, i) } }
-                } catch (e: ProtocolDesync) {
-                    desync = true
-                    AppLog.e("РАССИНХРОН потока: ${e.message}; дальше только сырой дамп")
-                    AppLog.detail(Hex.dump(buf.copyOf(n), 256))
-                }
-            }
-        } catch (e: Exception) {
-            if (!closed.get()) {
-                AppLog.e("ошибка чтения", e)
-                close("ошибка чтения: ${e.message}")
-            }
-        }
-    }
 
     private fun dispatch(chan: Int, inner: ByteArray) {
         if (Ch.isCmdStyle(chan)) {
@@ -294,6 +250,7 @@ class CarLifeSession(
                 huMinor = min ?: 0
                 CarLifeState.protocol = "ГУ шлёт версию $huVersion"
                 AppLog.i("== ВЕРСИЯ ПРОТОКОЛА ГУ: major=$maj minor=$min")
+                WLog.ev(WLog.HS, "HU_PROTOCOL_VERSION", "version" to huVersion)
                 matchSent = true
                 // стартовая пачка сразу, ничего не ждём от ГУ: MATCH, FOREGROUND, SCREEN_ON, MD_INFO
                 val info = deviceInfo()
@@ -310,14 +267,20 @@ class CarLifeSession(
             Msg.HU_INFO -> {
                 huInfo = PbText.render(m.body, Schemas.deviceInfo)
                 AppLog.i("== HU_INFO: $huInfo")
-                PbReader.parse(m.body)?.let { bridge.onHuInfo(PbReader.str(it, 13), PbReader.str(it, 14)) }
+                PbReader.parse(m.body)?.let {
+                    WLog.ev(WLog.HS, "HU_INFO", "manufacturer" to PbReader.str(it, 13), "model" to PbReader.str(it, 14))
+                    bridge.onHuInfo(PbReader.str(it, 13), PbReader.str(it, 14))
+                }
                 logDesay()
                 // ответа нет: Baidu только сохраняет (CarlifeDeviceInfoManager.setCarDeviceInfo)
             }
             Msg.STATISTIC_INFO -> {
                 huStatistic = PbText.render(m.body, Schemas.statisticsInfo)
                 AppLog.i("== STATISTIC_INFO: $huStatistic")
-                PbReader.parse(m.body)?.let { bridge.onHuStatistic(PbReader.str(it, 4)) }
+                PbReader.parse(m.body)?.let {
+                    WLog.ev(WLog.HS, "STATISTIC_INFO", "channel" to PbReader.str(it, 4))
+                    bridge.onHuStatistic(PbReader.str(it, 4))
+                }
                 logDesay()
                 for (c in Handshake.onStatisticInfo(sendFeatureConfigRequest = true)) sendCmd(c.type, c.body)
             }
@@ -456,6 +419,7 @@ class CarLifeSession(
         val rf = f?.let { PbReader.int(it, 3) } ?: 0
         requested = "${rw}x$rh fps=$rf"
         AppLog.i("== ГУ ПРОСИТ РАЗРЕШЕНИЕ: ${rw}x$rh fps=$rf")
+        WLog.ev(WLog.HS, "VIDEO_ENCODER_INIT", "size" to "${rw}x$rh", "fps" to rf)
         if (videoInited && pendingW > 0) {
             // как VideoMsgHandler (:84-88): повторный INIT -> только INIT_DONE с прежним размером
             AppLog.i("== повторный INIT, отвечаю INIT_DONE ${pendingW}x$pendingH fps=$pendingFps")
@@ -509,6 +473,7 @@ class CarLifeSession(
         val enc = fc.value(FEATURE_CONTENT_ENCRYPTION)
         encryptionNeeded = enc?.let { it == 1 }
         AppLog.i("== CONTENT_ENCRYPTION=${enc ?: "нет в списке"}, CONNECT_TYPE=${fc.value("CONNECT_TYPE") ?: "нет"}")
+        WLog.ev(WLog.HS, "FEATURE_CONFIG", "keys" to fc.items.size, "CONNECT_TYPE" to fc.value("CONNECT_TYPE"), "CONTENT_ENCRYPTION" to enc)
         if (enc == 1) {
             AppLog.i("== !!! ГУ ТРЕБУЕТ ШИФРОВАНИЕ КАНАЛА (CONTENT_ENCRYPTION=1): нужна цепочка RSA/AES (0x1006A..0x1006E), пока не реализована")
         }
@@ -541,7 +506,7 @@ class CarLifeSession(
                 cur.requestKeyFrame()
                 return
             }
-            val s = VideoSource(pendingW, pendingH, pendingFps, mode.bitrate, this)
+            val s = VideoSource(pendingW, pendingH, pendingFps, if (air) bitratePolicy.current else mode.bitrate, this)
             s.banner = text
             try {
                 s.start()
@@ -595,15 +560,18 @@ class CarLifeSession(
      * и ждёт IDR (мост: outGotIdr=false; заглушка: csdPending=true), P после потерянного кадра слать нельзя.
      */
     private fun videoOverflow(): Boolean {
-        val over = VideoQueueLimit.overflow(queuedVideoFrames.get(), queuedVideoBytes.get(), drain.bytesPerSec)
-        if (over) lastOverflowMs = SystemClock.elapsedRealtime()
+        val over = VideoQueueLimit.overflow(transport.queuedVideoFrames, transport.queuedVideoBytes, transport.drainBytesPerSec)
+        if (over) {
+            lastOverflowMs = SystemClock.elapsedRealtime()
+            overflows++
+        }
         return over
     }
 
     override fun videoStats(): LinkVideoStats {
-        val bytes = queuedVideoBytes.get()
-        val rate = drain.bytesPerSec
-        return LinkVideoStats(rate, VideoQueueLimit.backlogMs(bytes, rate), queuedVideoFrames.get(), bytes)
+        val bytes = transport.queuedVideoBytes
+        val rate = transport.drainBytesPerSec
+        return LinkVideoStats(rate, VideoQueueLimit.backlogMs(bytes, rate), transport.queuedVideoFrames, bytes)
     }
 
     /**
@@ -620,15 +588,22 @@ class CarLifeSession(
                 }
                 return
             }
-            if (!bridge.isTranscoding) return
+            // на воздухе политика ведёт и заглушку (CBR на потолке, пока AA стартует); на USB заглушку не трогаем
+            val placeholder = if (air && !bridge.isTranscoding) source else null
+            if (!bridge.isTranscoding && placeholder == null) return
             val now = SystemClock.elapsedRealtime()
-            val rate = drain.bytesPerSec
-            val real = VideoQueueLimit.backlogMs(queuedVideoBytes.get(), rate)
+            val rate = transport.drainBytesPerSec
+            val qf = transport.queuedVideoFrames
+            if (qf > maxQueueFrames) maxQueueFrames = qf
+            val real = VideoQueueLimit.backlogMs(transport.queuedVideoBytes, rate)
             val sinceOverflow = lastOverflowMs.let { if (it == NEVER_MS) -1L else now - it }
             val old = bitratePolicy.current
             val bps = bitratePolicy.update(now, VideoQueueLimit.policyBacklogMs(real, sinceOverflow), rate) ?: return
-            if (bridge.setEncoderBitrate(bps)) {
-                AppLog.i("видео: битрейт энкодера ${old / 1000} -> ${bps / 1000} кбит/с (${bitratePolicy.lastReason}; потолок ${bitratePolicy.ceilingBps / 1000})")
+            if (placeholder?.setBitrate(bps) ?: bridge.setEncoderBitrate(bps)) {
+                val who = if (placeholder != null) "заглушки" else "энкодера"
+                AppLog.i("видео: битрейт $who ${old / 1000} -> ${bps / 1000} кбит/с (${bitratePolicy.lastReason}; потолок ${bitratePolicy.ceilingBps / 1000})")
+                if (air) WLog.ev(WLog.VIDEO, "bitrate", "fromKbps" to old / 1000, "toKbps" to bps / 1000,
+                    "src" to if (placeholder != null) "placeholder" else "aa", "why" to bitratePolicy.lastReason)
             }
         } catch (e: Exception) {
             AppLog.e("адаптация битрейта", e)
@@ -638,7 +613,7 @@ class CarLifeSession(
     /** Аудио моста: канал MEDIA/TTS, заголовок 12 байт; time = millis & 0xFFFFFFFF в DATA, 0 в INIT/STOP (как Baidu). */
     override fun sendAudio(channel: Int, type: Int, payload: ByteArray): Boolean {
         if (closed.get()) return false
-        if (payload.isNotEmpty() && queue.size > MAX_AUDIO_QUEUE) return false   // звук не должен душить видео в очереди
+        if (payload.isNotEmpty() && transport.queueSize(channel) > MAX_AUDIO_QUEUE) return false   // звук не должен душить видео в очереди
         val isData = type == CarlifeAudio.MEDIA_DATA || type == CarlifeAudio.TTS_DATA
         val time = if (isData) (System.currentTimeMillis() and 0xFFFFFFFFL).toInt() else 0
         send(channel, Wire.dataInner(type, time, payload))
@@ -826,53 +801,25 @@ class CarLifeSession(
 
     private fun send(chan: Int, inner: ByteArray) {
         if (closed.get()) return
-        if (chan == Ch.VIDEO) {
-            queuedVideoBytes.addAndGet(inner.size.toLong())
-            queuedVideoFrames.incrementAndGet()
-        }
-        queue.put(Out(chan, inner))
+        transport.send(chan, inner)
     }
 
-    private fun writeLoop() {
-        try {
-            while (!closed.get()) {
-                val o = queue.take()
-                val video = o.chan == Ch.VIDEO
-                if (video) {
-                    queuedVideoBytes.addAndGet(-o.inner.size.toLong())
-                    queuedVideoFrames.decrementAndGet()
-                }
-                // заголовок отдельным write, тело следом кусками <= 16384 (спека §1.4)
-                val t0 = System.nanoTime()
-                for (part in Wire.writeSequence(o.chan, o.inner)) output.write(part)
-                output.flush()
-                drain.onWrite(SystemClock.elapsedRealtime(), video, o.inner.size, System.nanoTime() - t0)
-                logTx(o)
-            }
-        } catch (_: InterruptedException) {
-        } catch (e: Exception) {
-            if (!closed.get()) {
-                AppLog.e("ошибка записи", e)
-                close("ошибка записи: ${e.message}")
-            }
-        }
-    }
-
-    private fun logTx(o: Out) {
-        if (Ch.isCmdStyle(o.chan)) {
-            val m = Wire.parseCmd(o.inner) ?: return
+    /** После записи в транспорт (нить писателя). */
+    private fun logTx(chan: Int, inner: ByteArray) {
+        if (Ch.isCmdStyle(chan)) {
+            val m = Wire.parseCmd(inner) ?: return
             val decoded = if (m.body.isEmpty()) null else PbText.render(m.body, Schemas.byType[m.type])
             // прогресс трека - раз в секунду, обновление дистанции (action 2) - тоже: в файл, не в UI
             val quiet = m.type == Msg.MEDIA_PROGRESS_BAR ||
                 (m.type == Msg.NAVI_NEXT_TURN_INFO && PbReader.parse(m.body)?.let { PbReader.int(it, 1) } == 2)
-            AppLog.msg("TX", o.chan, o.inner.size, m.type, m.declaredLen, decoded, o.inner, ui = !quiet)
+            AppLog.msg("TX", chan, inner.size, m.type, m.declaredLen, decoded, inner, ui = !quiet)
         } else {
-            val m = Wire.parseData(o.inner) ?: return
-            if (o.chan != Ch.VIDEO) { // аудио моста: INIT/STOP всегда, DATA - первые и каждый 200-й
+            val m = Wire.parseData(inner) ?: return
+            if (chan != Ch.VIDEO) { // аудио моста: INIT/STOP всегда, DATA - первые и каждый 200-й
                 audioTx++
                 if (m.data.size <= 16 || audioTx <= 3 || audioTx % 200 == 0L) {
                     AppLog.i(
-                        "TX ${Ch.name(o.chan)} ${Msg.hex(m.type)} ${Msg.name(m.type)} len=${m.data.size} time=${m.time} #$audioTx" +
+                        "TX ${Ch.name(chan)} ${Msg.hex(m.type)} ${Msg.name(m.type)} len=${m.data.size} time=${m.time} #$audioTx" +
                             (if (m.data.size <= 16) " ${Hex.compact(m.data, 16)}" else ""), ui = false
                     )
                 }
@@ -880,16 +827,17 @@ class CarLifeSession(
             }
             if (m.data.isEmpty()) { // keepalive: VIDEO_DATA len=0 (Recorder.sendEmptyPacketForeground)
                 vBeats++
-                if (vBeats <= 3) AppLog.msg("TX", o.chan, o.inner.size, m.type, m.declaredLen, null, o.inner)
+                if (vBeats <= 3) AppLog.msg("TX", chan, inner.size, m.type, m.declaredLen, null, inner)
                 return
             }
             vFrames++
             vBytes += m.data.size
+            if (vFrames == 1L) WLog.ev(WLog.HS, "first-video", "bytes" to m.data.size)
             val key = AnnexB.nalTypes(m.data).contains(5)
             if (key) vKeys++
             val nals = AnnexB.nalTypes(m.data)
             if (vFrames <= 5 || key) {
-                AppLog.msg("TX", o.chan, o.inner.size, m.type, m.declaredLen, "nal=$nals", o.inner, ui = vFrames <= 5)
+                AppLog.msg("TX", chan, inner.size, m.type, m.declaredLen, "nal=$nals", inner, ui = vFrames <= 5)
             }
         }
     }
@@ -954,17 +902,17 @@ class CarLifeSession(
         // Пустых keepalive 0x20001 len=0 при идущем видео НЕТ: кадры обеспечивает энкодер (repeat-previous-frame-after
         // 100 мс). На PAUSE (ГУ на своём источнике) канал иначе молчит: Desay G6S (Mazda CX-5) через ~22 с тишины
         // рвёт USB (EIO, лог Ивана 2026-10-12), поэтому шлём пустой VIDEO_DATA, как Baidu sendEmptyPacketBackground.
-        if (paused && PAUSE_KEEPALIVE_ENABLED && now - lastVideoTx >= PAUSE_KEEPALIVE_MS) {
-            if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_DATA раз в ${PAUSE_KEEPALIVE_MS} мс, чтобы канал не молчал")
+        if (paused && PAUSE_KEEPALIVE_ENABLED && now - lastVideoTx >= pauseKeepaliveMs) {
+            if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_DATA раз в ${pauseKeepaliveMs} мс, чтобы канал не молчал")
             lastVideoTx = now
             send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), ByteArray(0)))
         }
-        if (rxBytes == 0L && now - t0 > SILENCE_MS && (now - t0) % 10_000 < 1000) {
+        if (transport.rxBytes == 0L && now - t0 > SILENCE_MS && (now - t0) % 10_000 < 1000) {
             AppLog.i("ГУ не прислало ни одного байта за ${(now - t0) / 1000} с (ждём HU_PROTOCOL_VERSION)")
             CarLifeState.status = "ГУ молчит, байт от него нет"
         }
         if (now - lastStatsAt >= 5000 && (vFrames > 0 || vBeats > 0)) {
-            AppLog.i("видео: отправлено кадров=$vFrames (ключевых=$vKeys) байт=$vBytes heartbeat=$vBeats сброшено=$vDropped очередь=${queue.size} (+${vFrames - lastStatsFrames} за ${(now - lastStatsAt) / 1000}с)")
+            AppLog.i("видео: отправлено кадров=$vFrames (ключевых=$vKeys) байт=$vBytes heartbeat=$vBeats сброшено=$vDropped очередь=${transport.queueSize(Ch.VIDEO)} (+${vFrames - lastStatsFrames} за ${(now - lastStatsAt) / 1000}с)")
             lastStatsAt = now
             lastStatsFrames = vFrames
             CarLifeState.video = "$chosen; кадров=$vFrames hb=$vBeats"
@@ -973,7 +921,7 @@ class CarLifeSession(
 
     private fun logSummary(reason: String) {
         val sb = StringBuilder("== РЕЗЮМЕ СЕССИИ (${(SystemClock.elapsedRealtime() - t0) / 1000} с, причина: $reason)\n")
-        sb.append("  принято байт: $rxBytes\n")
+        sb.append("  принято байт: ${transport.rxBytes}\n")
         sb.append("  версия протокола ГУ: $huVersion\n")
         sb.append("  HU_AUTHEN_REQUEST: ${if (sawAuthRequest) "ПРИШЁЛ randomValue=$authRandom" else "не приходил"}\n")
         sb.append("  HU_AUTHEN_RESULT: ${huAuthResult ?: "не приходил"}\n")
@@ -1028,6 +976,9 @@ class CarLifeSession(
         private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
         private const val PAUSE_KEEPALIVE_MS = 2_000L
+
+        /** На воздухе раз в ~1 с (тик таймера 1 с, порог чуть меньше): ГУ на Wi-Fi рвут видео-сокет быстрее (план 5.2 п.4). */
+        private const val PAUSE_KEEPALIVE_AIR_MS = 900L
 
         /** Пустой VIDEO_DATA раз в 2 с, пока ГУ держит PAUSE. */
         @Volatile @JvmStatic var PAUSE_KEEPALIVE_ENABLED = true

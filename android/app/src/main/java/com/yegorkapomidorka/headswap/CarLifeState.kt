@@ -19,6 +19,18 @@ object CarLifeState {
     @Volatile var densityOverride: Int = AaDensity.AUTO
     @Volatile var running: Boolean = false
 
+    /** Беспровод (бета, ветка B): что сейчас происходит, для экрана; null - режим не включён. */
+    @Volatile var wireless: String? = null
+
+    /** Bluetooth-проба ветки A: что прислала ГУ по RFCOMM `carlife`; null - проба не запускалась. */
+    @Volatile var btProbe: String? = null
+
+    /** Авторежим беспровода: выбранная машина рядом по Bluetooth (пишет BridgeService). */
+    @Volatile var carAuto: Boolean = false
+
+    /** Запрос сети Wi-Fi машины: idle / requesting / available / unavailable (пишет BridgeService). */
+    @Volatile var carNet: String = "idle"
+
     fun resetSession() {
         protocol = "-"
         auth = "-"
@@ -27,5 +39,6 @@ object CarLifeState {
     }
 
     fun summary(): String =
-        "статус: $status\nаксессуар: $accessory\nпротокол: $protocol\nauth: $auth\nвидео: $video\nтач: $touch"
+        "статус: $status\nаксессуар: $accessory\nпротокол: $protocol\nauth: $auth\nвидео: $video\nтач: $touch" +
+            (wireless?.let { "\nбеспровод: $it" } ?: "")
 }

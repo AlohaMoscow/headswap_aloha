@@ -210,6 +210,8 @@ class ServerAutomationTest {
         /** Действие из actions, после которого поверх настроек появляется экран согласия AA ("open" = сразу). */
         val consentAfter: String? = null,
         val consentIds: List<String> = listOf("touch_outside", "exit_button", "dialog_title", "dialog_car_info"),
+        /** После «Остановить» окно настроек AA закрывается само (OnePlus, лог тестера 2026-10-15). */
+        val closeOnStop: Boolean = false,
     ) : ServerUi {
         var t = 0L
         val actions = ArrayList<String>()
@@ -257,6 +259,7 @@ class ServerAutomationTest {
                 actions.add("stop")
                 serverRunning = false
                 lag = stopLagMenus
+                if (closeOnStop) opened = false
             } else {
                 actions.add("start")
                 if (!startIgnored) serverRunning = true
@@ -300,6 +303,16 @@ class ServerAutomationTest {
         assertTrue(log.any { it.contains("подтверждено") || it.contains("«Остановить…»") })
         assertTrue(aa.returned)
         assertTrue("весь сценарий укладывается в разумное время: ${o.tookMs}", o.tookMs < 15_000)
+    }
+
+    @Test
+    fun aaWindowClosedAfterStopIsReopened() {
+        val aa = FakeAa(serverRunning = true, closeOnStop = true)
+        val (o, log) = run(aa)
+        assertEquals(o.toString(), AutoResult.OK, o.result)
+        assertEquals(listOf("open", "more", "stop", "open", "more", "start", "more", "back", "return"), aa.actions)
+        assertTrue(aa.serverRunning)
+        assertTrue(log.any { it.contains("открываю настройки заново") })
     }
 
     @Test

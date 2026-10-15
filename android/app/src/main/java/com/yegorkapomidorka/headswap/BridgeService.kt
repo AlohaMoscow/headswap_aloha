@@ -3,6 +3,7 @@ package com.yegorkapomidorka.headswap
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -11,11 +12,13 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.usb.UsbManager
+import android.net.Network
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import com.yegorkapomidorka.headswap.aa.AaBridgeCore
 import com.yegorkapomidorka.headswap.aa.AaConnector
 import com.yegorkapomidorka.headswap.aa.AaCertsMissingException
@@ -32,12 +35,30 @@ import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
 import com.yegorkapomidorka.headswap.autosrv.AutoServerPolicy
 import com.yegorkapomidorka.headswap.autosrv.Trigger
+import com.yegorkapomidorka.headswap.link.CarTransport
+import com.yegorkapomidorka.headswap.link.LinkSetupException
+import com.yegorkapomidorka.headswap.link.StreamTransport
+import com.yegorkapomidorka.headswap.link.Tcp6Listener
+import com.yegorkapomidorka.headswap.link.TransportCaps
+import com.yegorkapomidorka.headswap.link.bt.CarlifeBtProbe
+import com.yegorkapomidorka.headswap.link.car.AutoOffDebounce
+import com.yegorkapomidorka.headswap.link.car.CAR_NET_DELAY_MS
+import com.yegorkapomidorka.headswap.link.car.CAR_NET_TIMEOUT_MS
+import com.yegorkapomidorka.headswap.link.car.CarNetEvent
+import com.yegorkapomidorka.headswap.link.car.CarNetPolicy
+import com.yegorkapomidorka.headswap.link.car.CarNetState
+import com.yegorkapomidorka.headswap.link.car.CarNetwork
+import com.yegorkapomidorka.headswap.link.car.CarWifi
+import com.yegorkapomidorka.headswap.link.diag.NetProbe
+import com.yegorkapomidorka.headswap.link.diag.WLog
+import com.yegorkapomidorka.headswap.link.wifi.HotspotBeacon
+import com.yegorkapomidorka.headswap.link.wifi.LanIface
 import com.yegorkapomidorka.headswap.ui.HeadswapNotification
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 
 /**
- * Foreground-сервис (connectedDevice): держит ParcelFileDescriptor аксессуара и сессию с ГУ.
+ * Foreground-сервис (connectedDevice): держит транспорт (USB-аксессуар или debug-TCP) и сессию с ГУ.
  * AA-сторона моста (BridgeHost) живёт на время сервиса, а не одной USB-сессии: обрыв USB закрывает
  * CarLife-сессию, AA остаётся живой BridgeHost.GRACE_MS и подхватывается следующей USB-сессией.
  * Всё состояние сервиса (session, host, stopRequested) трогает только главная нить.
@@ -51,8 +72,45 @@ class BridgeService : Service() {
     private var session: CarLifeSession? = null
     private var host: BridgeHost? = null
     private var stopRequested = false
+    /** debug tcp6: слушатель ждёт 6/6 (нить debug-tcp6); Стоп его отменяет. */
+    @Volatile private var pendingTcp6: Tcp6Listener? = null
+    /** Идёт подъём tcp6/беспровода (от старта до 6/6 или отказа); сервис в это время не гасим. Только главная нить. */
+    private var linkWaiting = false
+    /** Беспровод (бета, ветка B) включён пользователем: после обрыва снова ждём машину. Пишет главная нить, читает и коннектор (автозапуск сервера AA). */
+    @Volatile private var wifiBMode = false
+    /**
+     * Авторежим: выбранная машина рядом по Bluetooth (ACL_CONNECTED), ожидание по Wi-Fi держим, пока она рядом.
+     * Пишет главная нить, читают колбэки статуса. Зеркало в CarLifeState.carAuto для отчёта.
+     */
+    @Volatile private var autoMode = false
+        set(v) {
+            field = v
+            CarLifeState.carAuto = v
+        }
+    /** Ожидание запущено/принято авторежимом: после ухода машины его не возобновляем. Только главная нить. */
+    private var autoStarted = false
+    private val autoOff = AutoOffDebounce(AUTO_OFF_DEBOUNCE_MS) { SystemClock.elapsedRealtime() }
+    private val autoOffTick = Runnable { if (autoOff.fire()) applyAutoOff() }
+    /** Подсказка «подключи телефон к Wi-Fi машины» уже показана (один раз на заход авторежима). */
+    private var hintShown = false
+    private val hintTick = Runnable { showWifiHint() }
+    /** Вход в Wi-Fi машины (WifiNetworkSpecifier); создаётся при первом запросе: без сети машины (и на USB) его нет вовсе. */
+    private var carNetImpl: CarNetwork? = null
+    private val carNet: CarNetwork
+        get() = carNetImpl ?: CarNetwork(this) { CarLifeState.carNet = it.label }.also { carNetImpl = it }
+    private val carNetBusy: Boolean
+        get() = carNetImpl?.state.let { it == CarNetState.REQUESTING || it == CarNetState.AVAILABLE }
+    /** Начало ожидания по Wi-Fi (авто или ручного): от него считается [CAR_NET_DELAY_MS]. Только главная нить. */
+    private var waitSince = 0L
+    /** 6/6 получены, сессия вот-вот стартует: запрос сети машины уже не нужен. Только главная нить. */
+    private var sixReady = false
+    /** Ожидание сознательно прерывается ради нового маяка в сети машины: ветка отказа в startTcp6 это не сдача. Только главная нить. */
+    private var restartingForCarNet = false
+    private val carNetTick = Runnable { requestCarNet() }
     private var wakeLock: PowerManager.WakeLock? = null
     private val audioDiag = AudioDiag()
+    /** Ветка A, диагностика: RFCOMM `carlife` слушаем, пока ждём машину по Wi-Fi. */
+    private val btProbe by lazy { CarlifeBtProbe(this) }
     /** Автозапуск пропущен из-за неподключённой службы спецвозможностей: RETRY запустит его, когда она появится. */
     @Volatile private var serverStartPending = false
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "bridge-grace").also { it.isDaemon = true } }
@@ -61,13 +119,15 @@ class BridgeService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == UsbManager.ACTION_USB_ACCESSORY_DETACHED) {
                 AppLog.i("USB_ACCESSORY_DETACHED")
-                session?.close("аксессуар отключён (broadcast)")
+                // беспроводную сессию отключение USB-аксессуара не касается
+                session?.takeIf { it.transportKind == TransportCaps.USB_AOA.kind }?.close("аксессуар отключён (broadcast)")
             }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        alive = true
         AppLog.init(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.notif_channel_bridge), NotificationManager.IMPORTANCE_LOW))
@@ -83,6 +143,15 @@ class BridgeService : Service() {
         if (intent?.action == ACTION_STOP) {
             AppLog.i("сервис: стоп по команде")
             stopRequested = true
+            wifiBMode = false
+            autoMode = false      // до следующего ACL_CONNECTED
+            autoStarted = false
+            cancelAutoOff()
+            cancelHint()
+            stopCarNet(CarNetEvent.STOP, "stop")
+            CarLifeState.wireless = null
+            btProbe.stop("стоп")
+            pendingTcp6?.abort()
             val s = session
             if (s != null) {
                 s.close("остановлено пользователем")        // onSessionClosed увидит stopRequested: AA закрывается сразу
@@ -90,6 +159,15 @@ class BridgeService : Service() {
                 val h = host
                 if (h != null) h.shutdown("стоп пользователем") else finish()
             }
+            return START_NOT_STICKY
+        }
+        // автостарт по Bluetooth машины: обрабатываем до проверки session, при идущей сессии нужен только флаг
+        if (intent?.action == ACTION_WIFI_B_AUTO) {
+            onCarAuto()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_WIFI_B_AUTO_OFF) {
+            onCarAutoOff()
             return START_NOT_STICKY
         }
         if (session != null) {
@@ -110,10 +188,31 @@ class BridgeService : Service() {
                     } else if (session != null) {
                         pfd.close()
                     } else {
-                        startSession(pfd, "TCP 127.0.0.1:$dbgPort")
+                        startSession(StreamTransport.fromPfd(pfd, TransportCaps.TCP_DEBUG, "TCP 127.0.0.1:$dbgPort"))
                     }
                 }
             }, "debug-tcp").start()
+            return START_NOT_STICKY
+        }
+
+        // только debug-сборка: беспроводной формат, 6 TCP-сокетов на 127.0.0.1 (adb forward), ГУ подключается сама
+        if (DebugTransport.tcp6(intent)) {
+            startTcp6Debug(DebugTransport.tcp6Bind(intent))
+            return START_NOT_STICKY
+        }
+        // беспровод, ветка B (хотспот телефона + маяк): кнопка в настройках бета-сборки или debug-вход
+        if (intent?.action == ACTION_WIFI_B || DebugTransport.wifiB(intent)) {
+            if (!BuildConfig.WIRELESS_BETA && !DebugTransport.wifiB(intent)) {
+                AppLog.i("сервис: беспровод в этой сборке выключен")
+                failStart()
+                return START_NOT_STICKY
+            }
+            wifiBMode = true
+            autoStarted = false      // ручной запуск: уход машины по Bluetooth его не гасит
+            stopRequested = false
+            waitSince = SystemClock.elapsedRealtime()
+            startWifiB()
+            btProbe.start()      // после WLog.begin в startWifiB: t= в строках WL bt от начала попытки
             return START_NOT_STICKY
         }
 
@@ -144,12 +243,285 @@ class BridgeService : Service() {
             return START_NOT_STICKY
         }
         AppLog.i("сервис: аксессуар открыт: ${MainActivity.describe(acc)}")
-        startSession(pfd, MainActivity.describe(acc))
+        if (wifiBMode || pendingTcp6 != null) {
+            // кабель побеждает воздух: ожидание машины по Wi-Fi отменяем, после USB-сессии беспровод не возобновляем
+            AppLog.i("сервис: кабель подключён, ожидание по Wi-Fi отменяю (USB побеждает)")
+            WLog.ev(WLog.LINK, "usb-wins")
+            wifiBMode = false
+            autoStarted = false
+            cancelHint()
+            stopCarNet(CarNetEvent.USB_WINS, "usb")
+            CarLifeState.wireless = null
+            btProbe.stop("кабель")
+            pendingTcp6?.abort()
+        }
+        startSession(StreamTransport.fromPfd(pfd, TransportCaps.USB_AOA, MainActivity.describe(acc)))
         return START_NOT_STICKY
     }
 
-    private fun startSession(pfd: android.os.ParcelFileDescriptor, accessory: String) {
-        CarLifeState.accessory = accessory
+    /** debug tcp6: слушать 6 портов на loopback, ждать ГУ (pc-headunit --transport tcp6), затем обычная сессия. */
+    private fun startTcp6Debug(bind: String) = startTcp6("tcp6", bind, TCP6_WAIT_MS, beacon = null)
+
+    /**
+     * Ветка B (хотспот телефона): маяк «CarlifeHost» на 7999 и ответчик 8999, 6 портов на 0.0.0.0, пускаем только
+     * адреса из подсетей, куда идёт маяк. Хотспот включает человек. Пока только debug-вход (`--ez debug_wifi_b true`).
+     */
+    private fun startWifiB() {
+        CarLifeState.wireless = waitingText("…")
+        // телефон уже в сети машины (WifiNetworkSpecifier): маяк и ответчик только в ней, сокеты привязаны к этой сети
+        val carIface = carNetImpl?.ifaceName
+        val carNetwork = if (carIface != null) carNetImpl?.current else null
+        val beacon = HotspotBeacon(
+            ifaces = { LanIface.scan().let { all -> if (carNetwork != null) all.filter { it.name == carIface } else all } },
+            bindNetwork = carNetwork,
+            onIfaces = { list ->
+                CarLifeState.wireless = if (list.isEmpty()) getString(R.string.wl_state_no_hotspot)
+                else waitingText(list.joinToString(", ") { it.name })
+            },
+        )
+        startTcp6("wifi-b", "0.0.0.0", WIFI_B_WAIT_MS, beacon)
+        if (linkWaiting) WLog.ev(WLog.LINK, "car-wifi", "carWifi" to if (CarWifi(this).isSet) "set" else "unset", "bound" to (carNetwork != null))
+        if (autoMode && !hintShown && linkWaiting) {
+            main.removeCallbacks(hintTick)
+            main.postDelayed(hintTick, AUTO_HINT_MS)
+        }
+        if (linkWaiting) scheduleCarNet()
+    }
+
+    /** Запрос сети машины: через [CAR_NET_DELAY_MS] от начала ожидания (если сеть задана). */
+    private fun scheduleCarNet() {
+        main.removeCallbacks(carNetTick)
+        if (!CarWifi(this).isSet) return
+        main.postDelayed(carNetTick, (CAR_NET_DELAY_MS - (SystemClock.elapsedRealtime() - waitSince)).coerceAtLeast(0))
+    }
+
+    private fun requestCarNet() {
+        val w = CarWifi(this)
+        val ssid = w.ssid ?: return
+        val ok = CarNetPolicy.shouldRequest(
+            carWifiSet = w.isSet,
+            autoOrManualWaiting = wifiBMode && linkWaiting && !stopRequested,
+            sessionActive = session != null,
+            usbActive = session?.transportKind == TransportCaps.USB_AOA.kind,
+            alreadyRequesting = carNetBusy,
+            waitedMs = SystemClock.elapsedRealtime() - waitSince,
+            sixOfSixReady = sixReady,
+        )
+        if (!ok) return
+        carNet.request(ssid, w.pass, CAR_NET_TIMEOUT_MS, ::onCarNetAvailable, ::onCarNetUnavailable, ::onCarNetLost)
+    }
+
+    /** Остановка ожидания (или смерть сервиса): снять отложенный запрос и, по [CarNetPolicy], сам запрос сети. */
+    private fun stopCarNet(event: CarNetEvent, why: String) {
+        main.removeCallbacks(carNetTick)
+        restartingForCarNet = false
+        if (CarNetPolicy.shouldRelease(event)) carNetImpl?.release(why)
+    }
+
+    private fun onCarNetAvailable(@Suppress("UNUSED_PARAMETER") network: Network) = restartForCarNet()
+
+    /** Сеть машины появилась или пропала, пока ждём: ожидание заново, чтобы маяк шёл (или перестал идти) через неё. Сессию не трогаем. */
+    private fun restartForCarNet() {
+        if (!wifiBMode || stopRequested || session != null || sixReady || !linkWaiting) return
+        val l = pendingTcp6
+        if (l == null) {      // слушатель ещё открывается (или уже отдал результат): повторим, пока ждём
+            main.postDelayed({ restartForCarNet() }, 300)
+            return
+        }
+        restartingForCarNet = true
+        WLog.ev(WLog.LINK, "rearm", "after" to "car-net")
+        l.abort()
+    }
+
+    private fun onCarNetUnavailable(reason: String) {
+        if (autoMode && !hintShown) showWifiHint()      // сети машины не будет: пусть человек подключит Wi-Fi сам
+    }
+
+    private fun onCarNetLost() {
+        if (!wifiBMode || stopRequested || session != null) return
+        restartForCarNet()
+        scheduleCarNet()
+    }
+
+    /** Статус ожидания; в авторежиме с пометкой, что машина рядом по Bluetooth. */
+    private fun waitingText(ifaces: String) = getString(if (autoMode) R.string.wl_state_auto else R.string.wl_state_waiting, ifaces)
+
+    /** ACL_CONNECTED выбранной машины: ждать по Wi-Fi, пока она рядом. Идущую сессию (USB или воздух) не трогаем. */
+    private fun onCarAuto() {
+        if (!BuildConfig.WIRELESS_BETA) {
+            AppLog.i("сервис: беспровод в этой сборке выключен")
+            failStart()
+            return
+        }
+        cancelAutoOff()
+        autoMode = true
+        autoStarted = true
+        if (session != null) {
+            WLog.ev(WLog.TRIGGER, "auto-mark", "why" to "session", "kind" to session?.transportKind)
+            return
+        }
+        if (wifiBMode && linkWaiting) {
+            WLog.ev(WLog.TRIGGER, "auto-mark", "why" to "waiting")      // всплеск ACL: ожидание уже идёт
+            return
+        }
+        hintShown = false
+        wifiBMode = true
+        stopRequested = false
+        waitSince = SystemClock.elapsedRealtime()
+        startWifiB()
+        btProbe.start()
+        WLog.ev(WLog.TRIGGER, "auto-start")
+    }
+
+    /** ACL_DISCONNECTED выбранной машины: гасим не сразу (всплески ACL у ГУ), а через [AUTO_OFF_DEBOUNCE_MS]. */
+    private fun onCarAutoOff() {
+        if (session == null && host == null && !linkWaiting && !wifiBMode) {
+            // сервис поднят с нуля только ради отбоя (процесс убит, ресивер дошёл до пустого сервиса): гасить нечего
+            autoMode = false
+            finish()
+            return
+        }
+        autoOff.arm()
+        main.removeCallbacks(autoOffTick)
+        main.postDelayed(autoOffTick, AUTO_OFF_DEBOUNCE_MS)
+        WLog.ev(WLog.TRIGGER, "auto-off-armed", "ms" to AUTO_OFF_DEBOUNCE_MS)
+    }
+
+    private fun cancelAutoOff() {
+        autoOff.cancel()
+        main.removeCallbacks(autoOffTick)
+    }
+
+    /** Машина ушла по Bluetooth и новый ACL_CONNECTED не пришёл: авторежим выключаем. USB-сессию не трогаем никогда. */
+    private fun applyAutoOff() {
+        autoMode = false
+        cancelHint()
+        if (session != null) {
+            // сессия идёт (воздух: ГУ может держать Wi-Fi дольше Bluetooth; кабель - не наше дело); после её конца ожидание не возобновим
+            WLog.ev(WLog.TRIGGER, "auto-off", "session" to true)
+            return
+        }
+        if (wifiBMode && autoStarted) {
+            // порядок важен: режим выключен до abort, ветка отказа в startTcp6 увидит wifiBMode=false
+            wifiBMode = false
+            autoStarted = false
+            CarLifeState.wireless = null
+            btProbe.stop("машина ушла")
+            stopCarNet(CarNetEvent.AUTO_OFF, "auto-off")
+            pendingTcp6?.abort()
+            WLog.ev(WLog.TRIGGER, "auto-off", "stopped" to true)
+            failStart()
+        } else {
+            WLog.ev(WLog.TRIGGER, "auto-off", "stopped" to false)
+        }
+    }
+
+    private fun cancelHint() {
+        main.removeCallbacks(hintTick)
+        getSystemService(NotificationManager::class.java).cancel(HINT_NOTIF_ID)
+    }
+
+    /** 30 с ожидания в авторежиме, а 6/6 нет: ГУ, возможно, не в сети телефона. Нажатие открывает панель Wi-Fi. */
+    private fun showWifiHint() {
+        if (!autoMode || !wifiBMode || !linkWaiting || session != null || hintShown) return
+        // сеть машины запрашивается или уже получена: человеку подключать Wi-Fi не нужно, подсказка придёт по onUnavailable
+        if (carNetBusy) return
+        hintShown = true
+        val open = PendingIntent.getActivity(
+            this, 2, Intent(Settings.Panel.ACTION_WIFI).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val n = Notification.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_headswap)
+            .setContentTitle(getString(R.string.wl_hint_title))
+            .setContentText(getString(R.string.wl_hint_text))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(HINT_NOTIF_ID, n)
+        WLog.ev(WLog.TRIGGER, "wifi-hint")
+    }
+
+    private fun startTcp6(kind: String, bind: String, waitMs: Long, beacon: HotspotBeacon?) {
+        if (linkWaiting) {
+            AppLog.i("сервис: $kind: уже жду ГУ, повторный старт игнорирую")
+            return
+        }
+        linkWaiting = true
+        sixReady = false
+        WLog.begin(kind, "bind" to bind, "ACCESS_LOCAL_NETWORK" to NetProbe.localNetworkGranted(this))
+        AppLog.i("сервис: $kind, слушаю 6 портов на $bind, жду ГУ ${waitMs / 1000} с")
+        CarLifeState.status = "$kind: жду ГУ"
+        val waitStart = SystemClock.elapsedRealtime()
+        Thread({
+            val result: Any = try {
+                val peerOk: (java.net.InetAddress) -> Boolean =
+                    if (beacon == null) { _ -> true } else { a -> beacon.current.any { it.contains(a) } }
+                val l = Tcp6Listener(java.net.InetAddress.getByName(bind), peerOk = peerOk).open()
+                pendingTcp6 = l
+                beacon?.start()
+                l.await(waitMs, "$kind $bind")
+            } catch (e: Exception) {
+                e
+            } finally {
+                pendingTcp6 = null
+            }
+            beacon?.stop(if (result is CarTransport) "6/6" else "нет ГУ")
+            main.post {
+                linkWaiting = false
+                val restarting = restartingForCarNet
+                restartingForCarNet = false
+                when {
+                    result is CarTransport && session != null -> result.close()
+                    result is CarTransport -> {
+                        sixReady = true
+                        if (beacon != null) {
+                            cancelHint()      // 6/6: подсказка про Wi-Fi больше не нужна
+                            CarLifeState.wireless = getString(R.string.wl_state_connected)
+                        }
+                        startSession(result)
+                    }
+                    // abort ради нового маяка в сети машины: не сдача, режим и статус не трогаем, через паузу ждём заново
+                    restarting && beacon != null && wifiBMode && !stopRequested && session == null -> {
+                        main.postDelayed({
+                            if (wifiBMode && !stopRequested && session == null && !linkWaiting) startWifiB()
+                        }, WIFI_B_REARM_MS)
+                    }
+                    else -> {
+                        val msg = (result as Exception).message
+                        if (result !is LinkSetupException) AppLog.e(kind, result)
+                        AppLog.i("сервис: $msg")
+                        // авторежим: машина рядом по Bluetooth, таймаут не сдача, а новый круг ожидания. Отказ раньше срока
+                        // (порт занят и т.п.) сюда не попадает: иначе цикл раз в 1,5 с
+                        val timedOut = SystemClock.elapsedRealtime() - waitStart >= waitMs
+                        if (beacon != null && wifiBMode && autoMode && !stopRequested && session == null && timedOut) {
+                            WLog.ev(WLog.LINK, "rearm", "after" to "timeout-auto")
+                            main.postDelayed({
+                                if (wifiBMode && autoMode && !stopRequested && session == null && !linkWaiting) startWifiB()
+                            }, WIFI_B_REARM_MS)
+                            return@post
+                        }
+                        if (beacon != null && wifiBMode) {
+                            wifiBMode = false
+                            autoStarted = false
+                            cancelHint()
+                            stopCarNet(CarNetEvent.AUTO_OFF, "gave-up")      // ожидание закончилось: сеть машины больше не нужна
+                            btProbe.stop("не дождались")
+                            CarLifeState.wireless = getString(R.string.wl_state_gave_up, (WIFI_B_WAIT_MS / 60_000).toInt())
+                        }
+                        // отмена ожидания кабелем: статус уже USB-сессии, не перетираем
+                        if (session == null) CarLifeState.status = msg ?: "$kind: ошибка"
+                        failStart()
+                    }
+                }
+            }
+        }, "link-$kind").start()
+    }
+
+    private fun startSession(transport: CarTransport) {
+        main.removeCallbacks(carNetTick)      // сессия идёт: новых запросов сети машины нет (сам запрос держим, CarNetEvent.SESSION_START)
+        CarLifeState.accessory = transport.label
+        if (transport.caps.kind != TransportCaps.TCP6.kind) WLog.begin(transport.caps.kind)
 
         val aaPrefs = AaPrefs(this)
         val screenOn = getSystemService(PowerManager::class.java).isInteractive
@@ -176,16 +548,20 @@ class BridgeService : Service() {
             host = h
             if (h == null) {
                 // нет сертификата head unit или мост не собрался: причина уже в AaState.setupError, USB-сессию не открываем
-                try {
-                    pfd.close()
-                } catch (_: Exception) {
-                }
+                transport.close()
                 CarLifeState.status = AaState.setupError ?: "мост не стартовал"
                 failStart()
                 return
             }
         } else {
             AppLog.i("BRIDGE: AA-хост уже есть, переиспользую (grace=${h.isInGrace})")
+        }
+        // на воздухе перекодирование обязательно: в passthrough битрейт не регулируется. Режим хоста не трогаем
+        // (без перекодирования он уже R720, его можно перекодировать), хост не пересоздаём: сервер AA одноразовый
+        val transcode = aaPrefs.transcode || transport.caps == TransportCaps.TCP6
+        if (h.core.transcodeEnabled != transcode) {
+            AppLog.i("BRIDGE видео: ${if (transcode) "воздух, перекодирование включаю принудительно" else "кабель, возвращаю passthrough по настройке"}")
+            h.core.transcodeEnabled = transcode
         }
         if (wakeLock == null) {
             wakeLock = getSystemService(PowerManager::class.java)
@@ -196,7 +572,7 @@ class BridgeService : Service() {
         stopRequested = false
 
         val sref = arrayOfNulls<CarLifeSession>(1)
-        val s = CarLifeSession(pfd, cfg, h.core) { reason -> main.post { onSessionClosed(sref[0]!!, reason) } }
+        val s = CarLifeSession(transport, cfg, h.core) { reason -> main.post { onSessionClosed(sref[0]!!, reason) } }
         sref[0] = s
         session = s
         s.start()
@@ -234,7 +610,7 @@ class BridgeService : Service() {
                 main.post {
                     if (host === ref[0]) host = null
                     AppLog.i("BRIDGE: AA закрыта полностью")
-                    if (session == null && host == null) finish()
+                    if (session == null && host == null && !linkWaiting && !wifiBMode) finish()
                 }
             })
             ref[0] = h
@@ -289,7 +665,8 @@ class BridgeService : Service() {
         }
         val skip = AutoServerPolicy.skipReason(
             trigger, autoPref, AutoServer.isConnected,
-            usbAlive = core.hasCarlifeLink, warmAaSession = false, lastLocked = AutoServer.lastLocked,
+            // беспровод: пока ждём машину по Wi-Fi или она подключена, сервер перезапускать есть для кого
+            usbAlive = core.hasCarlifeLink || wifiBMode, warmAaSession = false, lastLocked = AutoServer.lastLocked,
             startPending = serverStartPending, consentHold = AutoServer.consentPending(),
         )
         if (skip != null) {
@@ -313,6 +690,7 @@ class BridgeService : Service() {
 
     /** Старт не удался: если жив AA-хост (идёт grace), сервис не гасим, иначе finish. */
     private fun failStart() {
+        if (linkWaiting) return      // идёт ожидание машины по воздуху: сервис нужен
         val h = host
         if (h != null && !h.isDead) return
         if (h == null) finish()
@@ -322,16 +700,34 @@ class BridgeService : Service() {
         AppLog.i("сервис: сессия завершена ($reason)")
         if (session !== s) return
         session = null
+        if (wifiBMode && autoStarted && !autoMode && !stopRequested) {
+            // машина ушла по Bluetooth, пока шла беспроводная сессия (ГУ держала Wi-Fi): ожидание заново не начинаем
+            wifiBMode = false
+            autoStarted = false
+            CarLifeState.wireless = null
+            btProbe.stop("машина ушла")
+            stopCarNet(CarNetEvent.AUTO_OFF, "auto-off")
+            WLog.ev(WLog.TRIGGER, "auto-off", "after" to "session")
+        }
         val h = host
         if (h == null) {
-            finish()
+            if (!wifiBMode || stopRequested) finish()
         } else {
             // обрыв USB: CarLife закрыт, AA держим graceMs (или закрываем сразу, если Стоп)
             h.onUsbSessionClosed(immediate = stopRequested)
         }
+        if (wifiBMode && !stopRequested) {
+            // беспровод: ГУ ушла (обрыв Wi-Fi, выключили машину) - снова маяк и ожидание, AA пока тёплая (grace)
+            CarLifeState.wireless = getString(R.string.wl_state_lost)
+            WLog.ev(WLog.LINK, "rearm", "after" to reason)
+            main.postDelayed({
+                if (wifiBMode && !stopRequested && session == null && !linkWaiting) startWifiB()
+            }, WIFI_B_REARM_MS)
+        }
     }
 
     private fun finish() {
+        stopCarNet(CarNetEvent.STOP, "finish")
         CarLifeState.running = false
         try {
             wakeLock?.let { if (it.isHeld) it.release() }
@@ -348,6 +744,13 @@ class BridgeService : Service() {
         } catch (_: Exception) {
         }
         stopRequested = true
+        alive = false
+        autoMode = false
+        cancelAutoOff()
+        cancelHint()
+        stopCarNet(CarNetEvent.DESTROY, "destroy")
+        pendingTcp6?.abort()
+        btProbe.stop("сервис уничтожен")
         audioDiag.stop()
         session?.close("сервис уничтожен")
         host?.shutdown("сервис уничтожен")
@@ -358,9 +761,30 @@ class BridgeService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.yegorkapomidorka.headswap.STOP"
+        /** Беспровод (бета): ждать машину по Wi-Fi, ветка B (хотспот телефона + маяк). */
+        const val ACTION_WIFI_B = "com.yegorkapomidorka.headswap.WIFI_B"
+        /** Выбранная машина подключилась по Bluetooth (ACL_CONNECTED): ждать по Wi-Fi, пока она рядом. */
+        const val ACTION_WIFI_B_AUTO = "com.yegorkapomidorka.headswap.WIFI_B_AUTO"
+        /** Машина отключилась по Bluetooth (ACL_DISCONNECTED): через debounce снять ожидание. */
+        const val ACTION_WIFI_B_AUTO_OFF = "com.yegorkapomidorka.headswap.WIFI_B_AUTO_OFF"
         private const val CHANNEL = "bridge"
         private const val NOTIF_ID = 1
+        private const val HINT_NOTIF_ID = 2
+
+        /** Сервис создан и не уничтожен (один процесс): ресиверу ACL незачем будить пустой сервис ради отбоя. */
+        @Volatile var alive = false
+            private set
         /** Сколько автозапуск ждёт подключения включённой службы спецвозможностей. */
         private const val SERVICE_WAIT_MS = 3_000L
+        /** debug tcp6: сколько ждать все 6 сокетов ГУ. */
+        private const val TCP6_WAIT_MS = 60_000L
+        /** Ветка B: сколько маячить и ждать ГУ (человек включает хотспот и открывает CarLife на ГУ). */
+        private const val WIFI_B_WAIT_MS = 10 * 60_000L
+        /** Пауза перед новым ожиданием после обрыва беспроводной сессии. */
+        private const val WIFI_B_REARM_MS = 1_500L
+        /** Авторежим: сколько ждать нового ACL_CONNECTED после ACL_DISCONNECTED, прежде чем гасить ожидание. */
+        private const val AUTO_OFF_DEBOUNCE_MS = 10_000L
+        /** Авторежим: через сколько ожидания без 6/6 показать подсказку про Wi-Fi. */
+        private const val AUTO_HINT_MS = 30_000L
     }
 }

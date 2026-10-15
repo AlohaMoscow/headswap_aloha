@@ -120,6 +120,16 @@ class ServerAutomation(
         return null
     }
 
+    /** Снова открыть настройки AA и дождаться окна (после «Остановить» оно может закрыться само). */
+    private fun reopenAa(): Boolean {
+        if (!ui.openAaSettings()) return false
+        if (!waitUntil(pageTimeoutMs) { ui.aaVisible() }) return false
+        log("окно AA снова на экране")
+        guard()
+        ui.sleep(300)
+        return true
+    }
+
     fun restart(): AutoOutcome = try {
         runScenario()
     } catch (_: ConsentScreen) {
@@ -150,8 +160,17 @@ class ServerAutomation(
             log("шаг 2: нажала «Остановить сервер головного устройства»")
             ui.sleep(700)
             var started = false
+            var reopened = false
             for (attempt in 1..5) {
-                items = openMenu("шаг 3.$attempt") ?: return done(AutoResult.NOT_FOUND, "после «Остановить» меню не открылось")
+                var next = openMenu("шаг 3.$attempt")
+                if (next == null && !reopened) {
+                    // OnePlus/AA 2026-10: после «Остановить» окно настроек AA закрывается (дамп пустой), «Ещё» искать негде
+                    reopened = true
+                    log("шаг 3.$attempt: окна AA нет после «Остановить» (видно=${ui.aaVisible()}), открываю настройки заново")
+                    if (!reopenAa()) return done(AutoResult.NOT_FOUND, "после «Остановить» окно AA пропало и заново не открылось")
+                    next = openMenu("шаг 3.$attempt (заново)")
+                }
+                items = next ?: return done(AutoResult.NOT_FOUND, "после «Остановить» меню не открылось")
                 if (items.second) {
                     if (!guardedClick { AutoServerText.isStart(it) }) return done(AutoResult.ERROR, "пункт «Запустить…» не нажался")
                     log("шаг 4: нажала «Запустить сервер головного устройства»")

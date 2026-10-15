@@ -12,14 +12,20 @@ val releaseProps = Properties().apply {
 
 android {
     namespace = "com.yegorkapomidorka.headswap"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.yegorkapomidorka.headswap"
         minSdk = 29
-        targetSdk = 36
-        versionCode = 40
-        versionName = "1.2.2"
+        targetSdk = 37
+        versionCode = 41
+        versionName = "2.0.0"
+        // «По воздуху» (беспровод): с 2.0.0 включён во всех сборках; выключить для проверки: gradlew assembleRelease -Pwlbeta=false
+        buildConfigField("boolean", "WIRELESS_BETA", (project.findProperty("wlbeta") != "false").toString())
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
@@ -34,6 +40,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("boolean", "WIRELESS_BETA", "true")
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")

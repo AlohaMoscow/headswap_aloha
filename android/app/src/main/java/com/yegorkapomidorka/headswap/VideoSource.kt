@@ -90,6 +90,18 @@ class VideoSource(
         }
     }
 
+    /** Битрейт на лету (воздух: политика битрейта ведёт и заглушку). false = кодека нет или параметр не принят. */
+    fun setBitrate(bps: Int): Boolean {
+        val c = codec ?: return false
+        return try {
+            c.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bps) })
+            true
+        } catch (e: Exception) {
+            AppLog.e("битрейт заглушки", e)
+            false
+        }
+    }
+
     @Synchronized
     fun stop() {
         if (!running && codec == null) return

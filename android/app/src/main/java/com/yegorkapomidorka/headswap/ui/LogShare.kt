@@ -15,12 +15,17 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.widget.Toast
 import com.yegorkapomidorka.headswap.AppLog
+import com.yegorkapomidorka.headswap.BuildConfig
 import com.yegorkapomidorka.headswap.CarLifeState
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaDensity
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
+import com.yegorkapomidorka.headswap.link.car.CarProfile
+import com.yegorkapomidorka.headswap.link.car.CarWifi
+import com.yegorkapomidorka.headswap.link.diag.NetProbe
+import com.yegorkapomidorka.headswap.link.wifi.LanIface
 import com.yegorkapomidorka.headswap.update.UpdatePrefs
 import java.io.File
 import java.io.RandomAccessFile
@@ -71,6 +76,7 @@ object LogShare {
     const val AUTHORITY = "com.yegorkapomidorka.headswap.logs"
     private const val MAX_FILE_BYTES = 4L * 1024 * 1024
     private const val MAX_LOGS = 5
+    private const val WL_MARK = " WL "
 
     fun logDir(ctx: Context): File = ctx.getExternalFilesDir(null) ?: ctx.filesDir
 
@@ -159,14 +165,37 @@ object LogShare {
             z.putNextEntry(ZipEntry("device.txt"))
             z.write(deviceInfo(ctx).toByteArray(Charsets.UTF_8))
             z.closeEntry()
-            for (f in logFiles(ctx).take(MAX_LOGS)) {
+            val files = logFiles(ctx).take(MAX_LOGS)
+            for (f in files) {
                 z.putNextEntry(ZipEntry("logs/${f.name}"))
                 copyTail(f, z)
                 z.closeEntry()
             }
+            z.putNextEntry(ZipEntry("wireless.log"))
+            z.write(wirelessLog(files.reversed().map { f -> f.name to f.useLines { wirelessLines(it).toList() } }).toByteArray(Charsets.UTF_8))
+            z.closeEntry()
         }
         return out
     }
+
+    /** wireless.log: на каждый файл (от старых к новым) строка `== имя` и его WL-строки; везде пусто - «WL-строк нет». */
+    fun wirelessLog(files: List<Pair<String, List<String>>>): String {
+        val sb = StringBuilder()
+        var any = false
+        for ((name, lines) in files) {
+            sb.append("== ").append(name).append('\n')
+            for (l in wirelessLines(lines)) {
+                sb.append(l).append('\n')
+                any = true
+            }
+        }
+        return if (any) sb.toString() else "WL-строк нет\n"
+    }
+
+    /** Строки беспровода: `HH:mm:ss.SSS WL <фаза> ...`, ищем метку с пробелами вокруг. */
+    fun wirelessLines(lines: Sequence<String>): Sequence<String> = lines.filter { WL_MARK in it }
+
+    fun wirelessLines(lines: List<String>): List<String> = wirelessLines(lines.asSequence()).toList()
 
     /** Файл целиком или только последние MAX_FILE_BYTES (hexdump'ы раздувают лог). */
     private fun copyTail(f: File, to: java.io.OutputStream) {
@@ -215,7 +244,26 @@ object LogShare {
             appendLine(CarLifeState.summary())
             appendLine(AaState.summary())
             appendLine(AutoServer.summary(ctx))
+            appendLine()
+            appendLine("Беспровод")
+            appendLine("  бета: ${BuildConfig.WIRELESS_BETA}")
+            appendLine("  ACCESS_LOCAL_NETWORK: ${NetProbe.localNetworkGranted(ctx)}")
+            appendLine("  сети: ${lanText()}")
+            appendLine("  режим: ${CarLifeState.wireless ?: "выключен"}")
+            appendLine("  Bluetooth carlife: ${CarLifeState.btProbe ?: "не запускался"}")
+            val car = CarProfile(ctx)      // без MAC и имени
+            appendLine("  машина: ${if (car.isSet) "выбрана (CDM id ${car.cdmAssociationId})" else "не выбрана"}")
+            appendLine("  триггер Bluetooth: ${if (CarProfile.triggerEnabled(ctx)) "включён" else "выключен"}")
+            appendLine("  авто: ${if (CarLifeState.carAuto) "да" else "нет"}")
+            appendLine("  Wi-Fi машины: ${if (CarWifi(ctx).isSet) "задан" else "не задан"}")      // без SSID и пароля
+            appendLine("  сеть машины: ${CarLifeState.carNet}")
         }
+    }
+
+    private fun lanText(): String = try {
+        LanIface.scan().joinToString(", ").ifEmpty { "нет" }
+    } catch (e: Exception) {
+        "ошибка ${e.javaClass.simpleName}"
     }
 
     /** Очистить: удалить старые файлы headswap-*.log (текущий оставить). */

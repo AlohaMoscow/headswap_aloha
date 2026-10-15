@@ -16,6 +16,9 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
 import com.yegorkapomidorka.headswap.aa.AaCreds
+import com.yegorkapomidorka.headswap.aa.AaProbe
+import com.yegorkapomidorka.headswap.link.car.CarPairing
+import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.ui.Actions
 import com.yegorkapomidorka.headswap.ui.DevScreen
 import com.yegorkapomidorka.headswap.ui.HomeScreen
@@ -135,6 +138,25 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         current()?.onPermissionResult()
+        if (requestCode == REQ_LOCAL_NETWORK) AppLog.i("ACCESS_LOCAL_NETWORK: ${NetProbe.localNetworkGranted(this)}")
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == CarPairing.REQ_CAR_PAIR) {
+            CarPairing.onResult(this, resultCode, data)
+            current()?.onActivityResultDone()
+        }
+    }
+
+    /** Отладка беспровода: системный запрос ACCESS_LOCAL_NETWORK (Android 17+). Онбординг с ним появится в Э4. */
+    private fun requestLocalNetwork() {
+        if (Build.VERSION.SDK_INT < 37) {
+            AppLog.i("ACCESS_LOCAL_NETWORK: API ${Build.VERSION.SDK_INT}, разрешения нет, локальная сеть открыта")
+            return
+        }
+        requestPermissions(arrayOf(android.Manifest.permission.ACCESS_LOCAL_NETWORK), REQ_LOCAL_NETWORK)
     }
 
     // --- навигация ---
@@ -202,7 +224,14 @@ class MainActivity : Activity() {
             AppLog.i("команда из intent: $cmd")
             when (cmd) {
                 "aa_selftest" -> Actions.aaSelftest(this)
+                "aa_probe" -> AaProbe.run(this)                // проба AA-сессии к 127.0.0.1:5277 без CarLife (targetSdk 37)
+                // проба локальной сети для беспровода: маяк UDP 7999, ответчик 8999 (--ei seconds N --es to <ip>)
+                "net_probe" -> NetProbe.run(this, intent.getIntExtra("seconds", 20), intent.getStringExtra("to"))
+                "net_perm" -> requestLocalNetwork()
                 "open_aa" -> Actions.openAaSettings(this)
+                // автостарт беспровода без Bluetooth машины: то же, что ACL_CONNECTED / ACL_DISCONNECTED выбранной машины
+                "car_auto" -> startForegroundService(Intent(this, BridgeService::class.java).setAction(BridgeService.ACTION_WIFI_B_AUTO))
+                "car_auto_off" -> startForegroundService(Intent(this, BridgeService::class.java).setAction(BridgeService.ACTION_WIFI_B_AUTO_OFF))
                 "aa_server_restart" -> {
                     val delay = intent.getIntExtra("delay_s", 0)
                     if (delay > 0) {
@@ -232,7 +261,7 @@ class MainActivity : Activity() {
                     AppTheme.set(this, intent.getStringExtra("mode") ?: AppTheme.SYSTEM)
                     recreate()
                 }
-                else -> AppLog.i("неизвестная команда '$cmd' (есть aa_selftest, mic_test, transcode_test, open_aa, aa_server_restart)")
+                else -> AppLog.i("неизвестная команда '$cmd' (есть aa_selftest, aa_probe, net_probe, net_perm, mic_test, transcode_test, open_aa, aa_server_restart, car_auto, car_auto_off)")
             }
             if (intent.hasExtra("scroll_y")) current()?.scrollTo(intent.getIntExtra("scroll_y", 0))     // отладка: снимки нижней части экрана
             return
@@ -251,6 +280,7 @@ class MainActivity : Activity() {
 
     companion object {
         const val ACTION_PERMISSION = "com.yegorkapomidorka.headswap.USB_PERMISSION"
+        private const val REQ_LOCAL_NETWORK = 37
 
         /** adb shell am start -n com.yegorkapomidorka.headswap/.MainActivity --es cmd aa_selftest */
         const val EXTRA_CMD = "cmd"
