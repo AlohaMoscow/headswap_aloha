@@ -64,7 +64,7 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     UPDATES("updates", R.string.upd_title, R.drawable.ic_download),
 
     /** Беспровод (бета): только в сборке с BuildConfig.WIRELESS_BETA. */
-    WIRELESS("wireless", R.string.wl_title, R.drawable.ic_plug);
+    WIRELESS("wireless", R.string.wl_title, R.drawable.ic_wifi);
 
     companion object {
         /** Разделы этой сборки: без беты беспровода его нет ни в меню, ни по ключу. */
