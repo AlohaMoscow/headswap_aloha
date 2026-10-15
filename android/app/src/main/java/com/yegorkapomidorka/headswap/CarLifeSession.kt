@@ -158,6 +158,7 @@ class CarLifeSession(
         writer = Thread({ writeLoop() }, "cl-writer").also { it.start() }
         reader = Thread({ readLoop() }, "cl-reader").also { it.start() }
         sched.scheduleWithFixedDelay({ tick() }, 1, 1, TimeUnit.SECONDS)
+        sched.scheduleWithFixedDelay({ pauseHeartbeat() }, PAUSE_KEEPALIVE_MS, PAUSE_KEEPALIVE_MS, TimeUnit.MILLISECONDS)
         sched.scheduleWithFixedDelay({ adaptBitrate() }, 1000, BITRATE_POLL_MS, TimeUnit.MILLISECONDS)
     }
 
@@ -383,6 +384,8 @@ class CarLifeSession(
             Msg.VIDEO_ENCODER_START -> onVideoStart()
             Msg.VIDEO_ENCODER_PAUSE -> {
                 paused = true
+                lastVideoTx = 0L
+                pauseHeartbeat()
                 bridge.onCarlifePause()
                 AppLog.i("видео: PAUSE, кадры не шлю")
             }
@@ -877,7 +880,7 @@ class CarLifeSession(
                 }
                 return
             }
-            if (m.data.isEmpty()) { // keepalive: VIDEO_DATA len=0 (Recorder.sendEmptyPacketForeground)
+            if (m.data.isEmpty()) { // keepalive на PAUSE: VIDEO_HEARTBEAT len=0 (Recorder.sendEmptyPacketBackground)
                 vBeats++
                 if (vBeats <= 3) AppLog.msg("TX", o.chan, o.inner.size, m.type, m.declaredLen, null, o.inner)
                 return
@@ -947,17 +950,23 @@ class CarLifeSession(
     private var lastStatsAt = 0L
     private var lastStatsFrames = 0L
 
+    // Пустых keepalive при идущем видео НЕТ: кадры обеспечивает энкодер (repeat-previous-frame-after 100 мс).
+    // На PAUSE (ГУ в своём меню/на своём источнике) шлём VIDEO_HEARTBEAT 0x20002 len=0 сразу и дальше часто,
+    // как Baidu Recorder.sendEmptyPacketBackground (~50 мс). Иначе ГУ рвут USB: Desay G6S (Mazda CX-5) через ~22 с
+    // тишины (лог Ивана 2026-10-12), VW channel 20082120 через 3,6-3,9 с после PAUSE даже при пустом 0x20001 раз
+    // в 2 с (h93, лог 2026-10-15), после чего реконнект с FOREGROUND выдёргивал юзера из меню ГУ обратно в CarLife.
+    private fun pauseHeartbeat() {
+        if (closed.get() || !paused || !PAUSE_KEEPALIVE_ENABLED) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastVideoTx < PAUSE_KEEPALIVE_MS) return
+        if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_HEARTBEAT раз в ${PAUSE_KEEPALIVE_MS} мс, как Baidu")
+        lastVideoTx = now
+        send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_HEARTBEAT, unixSeconds(), ByteArray(0)))
+    }
+
     private fun tick() {
         if (closed.get()) return
         val now = SystemClock.elapsedRealtime()
-        // Пустых keepalive 0x20001 len=0 при идущем видео НЕТ: кадры обеспечивает энкодер (repeat-previous-frame-after
-        // 100 мс). На PAUSE (ГУ на своём источнике) канал иначе молчит: Desay G6S (Mazda CX-5) через ~22 с тишины
-        // рвёт USB (EIO, лог Ивана 2026-10-12), поэтому шлём пустой VIDEO_DATA, как Baidu sendEmptyPacketBackground.
-        if (paused && PAUSE_KEEPALIVE_ENABLED && now - lastVideoTx >= PAUSE_KEEPALIVE_MS) {
-            if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_DATA раз в ${PAUSE_KEEPALIVE_MS} мс, чтобы канал не молчал")
-            lastVideoTx = now
-            send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), ByteArray(0)))
-        }
         if (rxBytes == 0L && now - t0 > SILENCE_MS && (now - t0) % 10_000 < 1000) {
             AppLog.i("ГУ не прислало ни одного байта за ${(now - t0) / 1000} с (ждём HU_PROTOCOL_VERSION)")
             CarLifeState.status = "ГУ молчит, байт от него нет"
@@ -1026,9 +1035,9 @@ class CarLifeSession(
         private const val BITRATE_POLL_MS = 100L
         private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
-        private const val PAUSE_KEEPALIVE_MS = 2_000L
+        private const val PAUSE_KEEPALIVE_MS = 100L
 
-        /** Пустой VIDEO_DATA раз в 2 с, пока ГУ держит PAUSE. */
+        /** Пустой VIDEO_HEARTBEAT раз в 100 мс, пока ГУ держит PAUSE. */
         @Volatile @JvmStatic var PAUSE_KEEPALIVE_ENABLED = true
         private const val FEATURE_CONTENT_ENCRYPTION = "CONTENT_ENCRYPTION"
 
