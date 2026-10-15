@@ -22,6 +22,8 @@ import com.yegorkapomidorka.headswap.ui.HomeScreen
 import com.yegorkapomidorka.headswap.ui.OnboardingScreen
 import com.yegorkapomidorka.headswap.ui.Screen
 import com.yegorkapomidorka.headswap.ui.SettingsScreen
+import com.yegorkapomidorka.headswap.ui.SettingsSection
+import com.yegorkapomidorka.headswap.ui.SettingsSectionScreen
 import com.yegorkapomidorka.headswap.ui.StepId
 import com.yegorkapomidorka.headswap.ui.UiPrefs
 import com.yegorkapomidorka.headswap.update.Updater
@@ -167,6 +169,8 @@ class MainActivity : Activity() {
 
     fun showSettings() = push("settings", SettingsScreen(this))
 
+    fun showSettingsSection(s: SettingsSection) = push("settings:${s.key}", SettingsSectionScreen(this, s))
+
     fun showDev() = push("dev", DevScreen(this))
 
     /** rerun = показать все шаги; checklist = сразу чеклист готовности. */
@@ -184,6 +188,7 @@ class MainActivity : Activity() {
                 "onboarding" -> showOnboarding()
                 "onboarding_all" -> showOnboarding(rerun = true)
                 "checklist" -> showOnboarding(checklist = true)
+                else -> SettingsSection.byKey(k.removePrefix("settings:"))?.let { showSettingsSection(it) }     // раздел настроек после смены темы/языка
             }
         }
     }
@@ -209,7 +214,11 @@ class MainActivity : Activity() {
                 "mic_test" -> Actions.micTest(this)
                 "transcode_test" -> Actions.transcodeTest(this, intent.getStringExtra("opts") ?: "")
                 "screen_main" -> toHome()
-                "screen_settings" -> { toHome(); showSettings() }
+                "screen_settings" -> {                         // --es section appearance|video|sound|headunit|updates
+                    toHome()
+                    showSettings()
+                    SettingsSection.byKey(intent.getStringExtra("section"))?.let { showSettingsSection(it) }
+                }
                 "screen_dev" -> { toHome(); showDev() }
                 "onboarding" -> {
                     toHome()
