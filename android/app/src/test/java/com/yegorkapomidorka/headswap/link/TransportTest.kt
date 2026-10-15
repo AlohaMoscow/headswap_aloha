@@ -11,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -172,6 +173,38 @@ class TransportTest {
             fail()
         } catch (e: BadInnerHeader) {
             assertTrue(e.message!!.contains("TOUCH"))
+        }
+    }
+
+    @Test
+    fun codecSkipsHeartbeatOnCmd() {
+        // h129, VW CNS3 Tiguan L Pro: 0x20002 с длиной 0 в CMD-сокете, CMD-кадр 8 байт
+        val hb = Wire.cmdInner(Msg.VIDEO_HEARTBEAT, null)
+        val a = Wire.cmdInner(0x0001800F, ByteArray(12) { 3 })
+        val b = Wire.cmdInner(Msg.VIDEO_ENCODER_START, null)
+        val want = listOf(hb, a, hb, b, hb).map { it.toList() }
+        val wire = hb + a + hb + b + hb
+        for (s in listOf<InputStream>(ByteArrayInputStream(wire), Trickle(wire))) {
+            assertEquals(want, readInners(Ch.CMD, BufferedInputStream(s)).map { it.toList() })
+        }
+        // 12-байтный видео-heartbeat [0][тип][метка] в CMD-сокете: хвост метки пропущен, поток не сбит
+        val hb12 = ByteArray(12)
+        Wire.putU32(hb12, 4, Msg.VIDEO_HEARTBEAT)
+        Wire.putU32(hb12, 8, 0x12345678)
+        val got = readInners(Ch.CMD, BufferedInputStream(ByteArrayInputStream(hb12 + a + b)))
+        assertEquals(3, got.size)
+        assertArrayEquals(a, got[1])
+        assertArrayEquals(b, got[2])
+    }
+
+    @Test
+    fun codecRejectsHeartbeatWithBodyOnCmd() {
+        val bad = Wire.cmdInner(Msg.VIDEO_HEARTBEAT, ByteArray(4))
+        try {
+            readInners(Ch.CMD, ByteArrayInputStream(bad))
+            fail()
+        } catch (e: BadInnerHeader) {
+            assertTrue(e.message!!.contains("заголовок 00 04"))
         }
     }
 
