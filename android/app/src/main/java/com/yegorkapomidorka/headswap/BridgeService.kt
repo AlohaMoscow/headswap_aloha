@@ -63,8 +63,8 @@ class BridgeService : Service() {
     @Volatile private var pendingTcp6: Tcp6Listener? = null
     /** Идёт подъём tcp6/беспровода (от старта до 6/6 или отказа); сервис в это время не гасим. Только главная нить. */
     private var linkWaiting = false
-    /** Беспровод (бета, ветка B) включён пользователем: после обрыва снова ждём машину. Только главная нить. */
-    private var wifiBMode = false
+    /** Беспровод (бета, ветка B) включён пользователем: после обрыва снова ждём машину. Пишет главная нить, читает и коннектор (автозапуск сервера AA). */
+    @Volatile private var wifiBMode = false
     private var wakeLock: PowerManager.WakeLock? = null
     private val audioDiag = AudioDiag()
     /** Автозапуск пропущен из-за неподключённой службы спецвозможностей: RETRY запустит его, когда она появится. */
@@ -390,7 +390,8 @@ class BridgeService : Service() {
         }
         val skip = AutoServerPolicy.skipReason(
             trigger, autoPref, AutoServer.isConnected,
-            usbAlive = core.hasCarlifeLink, warmAaSession = false, lastLocked = AutoServer.lastLocked,
+            // беспровод: пока ждём машину по Wi-Fi или она подключена, сервер перезапускать есть для кого
+            usbAlive = core.hasCarlifeLink || wifiBMode, warmAaSession = false, lastLocked = AutoServer.lastLocked,
             startPending = serverStartPending, consentHold = AutoServer.consentPending(),
         )
         if (skip != null) {
