@@ -51,6 +51,16 @@
     <string name="set_rerun_setup">Run setup again</string>
     <string name="set_check_ready">Check readiness</string>
     <string name="set_for_devs">For developers</string>
+    <string name="set_sec_appearance">Appearance</string>
+    <string name="set_sec_sound">Sound and microphone</string>
+    <string name="set_sec_headunit">Head unit</string>
+    <string name="set_mode">Mode</string>
+    <string name="set_help">Help</string>
+    <string name="set_sum_appearance">Language: %1$s · theme: %2$s</string>
+    <string name="set_sum_mic">microphone: %1$s</string>
+    <string name="set_sum_headunit">Certificate %1$s · auto-start %2$s</string>
+    <string name="set_sum_on">on</string>
+    <string name="set_sum_off">off</string>
     <string name="set_footer">Headswap %1$s · bridge for CarLife head units</string>
 
     <!-- Video modes (VideoMode) -->

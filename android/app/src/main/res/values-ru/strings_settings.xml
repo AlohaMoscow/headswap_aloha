@@ -51,6 +51,16 @@
     <string name="set_rerun_setup">Пройти настройку заново</string>
     <string name="set_check_ready">Проверить готовность</string>
     <string name="set_for_devs">Для разработчиков</string>
+    <string name="set_sec_appearance">Внешний вид</string>
+    <string name="set_sec_sound">Звук и микрофон</string>
+    <string name="set_sec_headunit">Головное устройство</string>
+    <string name="set_mode">Режим</string>
+    <string name="set_help">Помощь</string>
+    <string name="set_sum_appearance">Язык: %1$s · тема: %2$s</string>
+    <string name="set_sum_mic">микрофон: %1$s</string>
+    <string name="set_sum_headunit">Сертификат %1$s · автозапуск %2$s</string>
+    <string name="set_sum_on">вкл.</string>
+    <string name="set_sum_off">выкл.</string>
     <string name="set_footer">Headswap %1$s · мост для ГУ с CarLife</string>
 
     <!-- Video modes (VideoMode) -->
