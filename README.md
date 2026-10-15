@@ -25,13 +25,37 @@
 
 ## Совместимость
 
-Подтверждённые автомобили (штатные китайские ГУ с Baidu CarLife):
+Подтверждённые автомобили (штатные ГУ с Baidu CarLife, все для рынка Китая):
 
-1. Honda Vezel 2022–2024
-2. Toyota Corolla Cross 2025
-3. Jetta VS7 — только с Baidu CarLife (версия с J-Link не поддерживается)
-4. Mazda CX-5
-5. Volkswagen Tharu XR 2026
+| Машина | Baidu CarLife |
+| --- | --- |
+| Dongfeng Peugeot 5008 2024 | — |
+| Honda Breeze, 2 поколение | — |
+| Honda CR-V, 6 поколение, дорестайл | — |
+| Honda CR-V 2026 1.5T | 2.0 |
+| Honda CR-V 2026 гибрид (работает с оговорками) | — |
+| Honda Vezel 2022–2024 (GAC Honda) | 2.0 |
+| Hyundai Elantra, 7 поколение, дорестайл | — |
+| Hyundai ix35 2021 | — |
+| Jetta VS5/VS7 (только с Baidu CarLife, версия с J-Link не поддерживается) | 2.0 |
+| Kia K3 2023 | — |
+| Kia Sportage Ace | — |
+| Mazda CX-5 2025–2026 | 2.0 |
+| Mazda CX-50 | — |
+| Mitsubishi Outlander 4 2022 | — |
+| Skoda Kamiq GT 2021 | — |
+| Skoda Octavia Pro | 2.0 |
+| Toyota Corolla Cross 2024–2025 | 2.0 |
+| Toyota Levin | — |
+| Volkswagen Golf 8, комплектация Pro, 2021 | — |
+| Volkswagen ID.Unyx | — |
+| Volkswagen Lamando L | — |
+| Volkswagen Sagitar 2021–2022, дорестайл | 2.0 |
+| Volkswagen T-Roc рестайлинг 2026 | — |
+| Volkswagen Tharu XR 2025–2026 | 2.1 |
+| Volkswagen Tiguan L Pro / Teramont Pro | — |
+
+Актуальный список — на [странице проекта](https://yegorkapomidorka.com/headswap/).
 
 Отчёты о других машинах приветствуются (Telegram и 4PDA ниже). Минимальная версия Android: 10 (API 29).
 
