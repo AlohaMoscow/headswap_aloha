@@ -54,13 +54,38 @@ object InnerCodec {
         val declared = if (cmd) Wire.u16(hdr, 0) else Wire.u32(hdr, 0)
         val type = Wire.u32(hdr, if (cmd) 4 else 8)
         val limit = if (cmd) InnerAssembler.MAX_CMD_DECLARED else Wire.MAX_OUTER_LEN
-        if (declared !in 0..limit) throw BadInnerHeader("длина $declared вне 0..$limit (тип ${Msg.hex(type)})")
-        if (type ushr 16 != chan) throw BadInnerHeader("тип ${Msg.hex(type)} не канала ${Ch.name(chan)}, длина $declared")
+        if (declared !in 0..limit) throw BadInnerHeader("длина $declared вне 0..$limit (тип ${Msg.hex(type)}, заголовок ${hexBytes(hdr)})")
+        // VW CNS3 (Tiguan L Pro, h129) шлёт VIDEO_HEARTBEAT в CMD-сокет в CMD-кадре: 8 байт, длина 0
+        val cmdHb = chan == Ch.CMD && type == Msg.VIDEO_HEARTBEAT && declared == 0
+        if (!cmdHb && type ushr 16 != chan) {
+            throw BadInnerHeader("тип ${Msg.hex(type)} не канала ${Ch.name(chan)}, длина $declared, заголовок ${hexBytes(hdr)}")
+        }
         val inner = ByteArray(hl + declared)
         System.arraycopy(hdr, 0, inner, 0, hl)
         din.readFully(inner, hl, declared)
+        if (cmdHb) skipHeartbeatTail(din)
         return inner
     }
+
+    /**
+     * Heartbeat в CMD-сокете мог прийти и 12-байтным видео-заголовком [длина u32][тип u32][метка u32]: тогда после
+     * прочитанных 8 байт висят 4 байта метки. Смотрим вперёд, только если 12 байт уже в буфере (не блокируемся):
+     * следующий заголовок с CMD-типом через 4 байта, а не сразу, значит хвост есть, пропускаем.
+     */
+    private fun skipHeartbeatTail(din: DataInputStream) {
+        if (!din.markSupported() || din.available() < 12) return
+        val p = ByteArray(12)
+        din.mark(12)
+        din.readFully(p)
+        din.reset()
+        fun cmdType(t: Int) = t ushr 16 == Ch.CMD || t == Msg.VIDEO_HEARTBEAT
+        if (!cmdType(Wire.u32(p, 4)) && cmdType(Wire.u32(p, 8))) {
+            din.skipBytes(4)
+            WLog.ev(WLog.TCP, "hb-cmd-tail", "skipped" to 4)
+        }
+    }
+
+    private fun hexBytes(b: ByteArray) = b.joinToString(" ") { "%02X".format(it) }
 }
 
 class LinkSetupException(msg: String) : Exception(msg)
@@ -259,7 +284,8 @@ class Tcp6Listener(
 
 /**
  * Шесть TCP-сокетов в формате Baidu: каждый канал свой сокет, внешнего заголовка нет. Читатель и писатель на канал.
- * На video-сокет ГУ может слать VIDEO_HEARTBEAT (0x20002, 12 байт): вычитываем и считаем, в протокол не отдаём.
+ * На video-сокет ГУ может слать VIDEO_HEARTBEAT (0x20002, 12 байт), VW CNS3 шлёт его в CMD-сокет (8 байт):
+ * вычитываем и считаем, в протокол не отдаём.
  * Обрыв любого сокета закрывает все (ровно один onClosed с именем канала в причине).
  */
 class MultiSocketTransport internal constructor(
@@ -284,8 +310,9 @@ class MultiSocketTransport internal constructor(
     private val t0 = clock()
     @Volatile private var onClosedCb: ((String) -> Unit)? = null
 
-    // heartbeat ГУ на video-сокете
+    // heartbeat ГУ на video-сокете (VW CNS3 шлёт его в CMD-сокет, тогда считаем ещё и hbCmd)
     @Volatile private var hbCount = 0L
+    @Volatile private var hbCmd = 0L
     private var hbFirstMs = 0L
     private var hbLastMs = 0L
     @Volatile private var hbMaxGapMs = 0L
@@ -338,7 +365,7 @@ class MultiSocketTransport internal constructor(
     }
 
     private fun endStats(): Array<Pair<String, Any?>> = arrayOf(
-        "aliveMs" to clock() - t0, "rx" to rx.get(), "hb" to hbCount, "hbMaxGapMs" to hbMaxGapMs,
+        "aliveMs" to clock() - t0, "rx" to rx.get(), "hb" to hbCount, "hbCmd" to hbCmd, "hbMaxGapMs" to hbMaxGapMs,
     )
 
     private fun closeAll() {
@@ -359,8 +386,8 @@ class MultiSocketTransport internal constructor(
                     return
                 }
                 rx.addAndGet(inner.size.toLong())
-                if (chan == Ch.VIDEO && Wire.u32(inner, 8) == Msg.VIDEO_HEARTBEAT) {
-                    onHeartbeat()
+                if ((chan == Ch.VIDEO || chan == Ch.CMD) && Wire.u32(inner, InnerCodec.hdrLen(chan) - 4) == Msg.VIDEO_HEARTBEAT) {
+                    onHeartbeat(chan)
                     continue
                 }
                 synchronized(dispatchLock) { sink(chan, inner) }
@@ -375,11 +402,12 @@ class MultiSocketTransport internal constructor(
         }
     }
 
-    private fun onHeartbeat() {
+    private fun onHeartbeat(chan: Int) {
         val now = clock()
+        if (chan == Ch.CMD) hbCmd++
         if (hbCount == 0L) {
             hbFirstMs = now
-            WLog.ev(WLog.TCP, "hb-first", "afterMs" to now - t0)
+            WLog.ev(WLog.TCP, "hb-first", "afterMs" to now - t0, "chan" to Ch.name(chan))
         } else {
             val gap = now - hbLastMs
             if (gap > hbMaxGapMs) hbMaxGapMs = gap
