@@ -1,5 +1,6 @@
 package com.yegorkapomidorka.headswap.link.wifi
 
+import android.net.Network
 import android.os.SystemClock
 import com.yegorkapomidorka.headswap.link.diag.WLog
 import java.net.DatagramPacket
@@ -101,6 +102,12 @@ class HotspotBeacon(
     private val clock: () -> Long = { SystemClock.elapsedRealtime() },
     /** Набор сетей изменился (включили/выключили хотспот): для статуса на экране. */
     private val onIfaces: (List<LanIface>) -> Unit = {},
+    /**
+     * Сеть машины, в которую вошёл телефон (WifiNetworkSpecifier): сокеты маяка и ответчика привязываются к ней, чтобы
+     * пакеты не ушли в основную сеть. Свип unicast при этом выключен: сеть машины может быть на wlan1, а не на хотспотном
+     * интерфейсе. Список [ifaces] вызывающий сужает до интерфейса этой сети сам. null - как раньше.
+     */
+    private val bindNetwork: Network? = null,
 ) {
     private val running = AtomicBoolean(false)
     private var sender: Thread? = null
@@ -165,12 +172,12 @@ class HotspotBeacon(
         var lastSweep = Long.MIN_VALUE / 2
         var lastSummary = clock()
         try {
-            DatagramSocket().use { s ->
+            openSender().use { s ->
                 s.broadcast = true
                 while (running.get()) {
                     val now = clock()
                     val list = refresh()
-                    val sweep = now - lastSweep >= sweepMs
+                    val sweep = bindNetwork == null && now - lastSweep >= sweepMs
                     if (sweep) lastSweep = now
                     for (i in list) {
                         val targets = ArrayList<InetAddress>()
@@ -204,10 +211,29 @@ class HotspotBeacon(
         }
     }
 
+    /** Сокет маяка; при [bindNetwork] привязан к сети машины до первой отправки. */
+    private fun openSender(): DatagramSocket {
+        val net = bindNetwork ?: return DatagramSocket()
+        val s = DatagramSocket(null)
+        bindToNetwork(s, net, "beacon")
+        s.bind(InetSocketAddress(0))
+        return s
+    }
+
+    /** Привязка сокета к сети машины; сбой не фатален (пакеты пойдут по маршруту системы), но попадает в лог. */
+    private fun bindToNetwork(s: DatagramSocket, net: Network, what: String) {
+        try {
+            net.bindSocket(s)
+        } catch (e: Exception) {
+            WLog.ev("udp", "bind-net-fail", "sock" to what, "err" to e.javaClass.simpleName)
+        }
+    }
+
     private fun probeLoop() {
         try {
             val s = DatagramSocket(null)
             probeSocket = s
+            if (bindNetwork != null) bindToNetwork(s, bindNetwork, "probe")
             s.reuseAddress = true
             s.bind(InetSocketAddress(probePort))
             WLog.ev("udp", "probe-listen", "port" to s.localPort)

@@ -115,4 +115,16 @@
     <string name="wl_car_forget">Забыть машину</string>
     <string name="wl_car_no_permission">Без разрешения “Устройства поблизости” события Bluetooth от машины не доходят</string>
     <string name="wl_car_unavailable">Этот телефон не умеет привязывать машину (нет companion device setup)</string>
+    <string name="wl_cw_note">Если телефон держится за другую сеть Wi-Fi (например, домашнюю), Headswap сам войдёт в точку доступа машины: интернет остаётся на основной сети. Введите имя и пароль, которые показывает ГУ.</string>
+    <string name="wl_cw_line">Wi-Fi машины: %1$s</string>
+    <string name="wl_cw_none">не задан</string>
+    <string name="wl_cw_set">задан: %1$s</string>
+    <string name="wl_cw_ssid_hint">Имя сети (SSID)</string>
+    <string name="wl_cw_pass_hint">Пароль (пусто — открытая сеть)</string>
+    <string name="wl_cw_save">Сохранить и проверить</string>
+    <string name="wl_cw_forget">Удалить</string>
+    <string name="wl_cw_need_ssid">Введите имя сети</string>
+    <string name="wl_cw_checking">Подключаюсь к Wi-Fi машины… подтвердите системный запрос</string>
+    <string name="wl_cw_ok">Подключилась к Wi-Fi машины</string>
+    <string name="wl_cw_fail">Не подключилась: машина вне зоны, неверный пароль или отказ в запросе</string>
 </resources>

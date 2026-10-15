@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.usb.UsbManager
+import android.net.Network
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -41,9 +42,17 @@ import com.yegorkapomidorka.headswap.link.Tcp6Listener
 import com.yegorkapomidorka.headswap.link.TransportCaps
 import com.yegorkapomidorka.headswap.link.bt.CarlifeBtProbe
 import com.yegorkapomidorka.headswap.link.car.AutoOffDebounce
+import com.yegorkapomidorka.headswap.link.car.CAR_NET_DELAY_MS
+import com.yegorkapomidorka.headswap.link.car.CAR_NET_TIMEOUT_MS
+import com.yegorkapomidorka.headswap.link.car.CarNetEvent
+import com.yegorkapomidorka.headswap.link.car.CarNetPolicy
+import com.yegorkapomidorka.headswap.link.car.CarNetState
+import com.yegorkapomidorka.headswap.link.car.CarNetwork
+import com.yegorkapomidorka.headswap.link.car.CarWifi
 import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.link.diag.WLog
 import com.yegorkapomidorka.headswap.link.wifi.HotspotBeacon
+import com.yegorkapomidorka.headswap.link.wifi.LanIface
 import com.yegorkapomidorka.headswap.ui.HeadswapNotification
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -85,6 +94,19 @@ class BridgeService : Service() {
     /** Подсказка «подключи телефон к Wi-Fi машины» уже показана (один раз на заход авторежима). */
     private var hintShown = false
     private val hintTick = Runnable { showWifiHint() }
+    /** Вход в Wi-Fi машины (WifiNetworkSpecifier); создаётся при первом запросе: без сети машины (и на USB) его нет вовсе. */
+    private var carNetImpl: CarNetwork? = null
+    private val carNet: CarNetwork
+        get() = carNetImpl ?: CarNetwork(this) { CarLifeState.carNet = it.label }.also { carNetImpl = it }
+    private val carNetBusy: Boolean
+        get() = carNetImpl?.state.let { it == CarNetState.REQUESTING || it == CarNetState.AVAILABLE }
+    /** Начало ожидания по Wi-Fi (авто или ручного): от него считается [CAR_NET_DELAY_MS]. Только главная нить. */
+    private var waitSince = 0L
+    /** 6/6 получены, сессия вот-вот стартует: запрос сети машины уже не нужен. Только главная нить. */
+    private var sixReady = false
+    /** Ожидание сознательно прерывается ради нового маяка в сети машины: ветка отказа в startTcp6 это не сдача. Только главная нить. */
+    private var restartingForCarNet = false
+    private val carNetTick = Runnable { requestCarNet() }
     private var wakeLock: PowerManager.WakeLock? = null
     private val audioDiag = AudioDiag()
     /** Ветка A, диагностика: RFCOMM `carlife` слушаем, пока ждём машину по Wi-Fi. */
@@ -126,6 +148,7 @@ class BridgeService : Service() {
             autoStarted = false
             cancelAutoOff()
             cancelHint()
+            stopCarNet(CarNetEvent.STOP, "stop")
             CarLifeState.wireless = null
             btProbe.stop("стоп")
             pendingTcp6?.abort()
@@ -187,6 +210,7 @@ class BridgeService : Service() {
             wifiBMode = true
             autoStarted = false      // ручной запуск: уход машины по Bluetooth его не гасит
             stopRequested = false
+            waitSince = SystemClock.elapsedRealtime()
             startWifiB()
             btProbe.start()      // после WLog.begin в startWifiB: t= в строках WL bt от начала попытки
             return START_NOT_STICKY
@@ -226,6 +250,7 @@ class BridgeService : Service() {
             wifiBMode = false
             autoStarted = false
             cancelHint()
+            stopCarNet(CarNetEvent.USB_WINS, "usb")
             CarLifeState.wireless = null
             btProbe.stop("кабель")
             pendingTcp6?.abort()
@@ -243,15 +268,79 @@ class BridgeService : Service() {
      */
     private fun startWifiB() {
         CarLifeState.wireless = waitingText("…")
-        val beacon = HotspotBeacon(onIfaces = { list ->
-            CarLifeState.wireless = if (list.isEmpty()) getString(R.string.wl_state_no_hotspot)
-            else waitingText(list.joinToString(", ") { it.name })
-        })
+        // телефон уже в сети машины (WifiNetworkSpecifier): маяк и ответчик только в ней, сокеты привязаны к этой сети
+        val carIface = carNetImpl?.ifaceName
+        val carNetwork = if (carIface != null) carNetImpl?.current else null
+        val beacon = HotspotBeacon(
+            ifaces = { LanIface.scan().let { all -> if (carNetwork != null) all.filter { it.name == carIface } else all } },
+            bindNetwork = carNetwork,
+            onIfaces = { list ->
+                CarLifeState.wireless = if (list.isEmpty()) getString(R.string.wl_state_no_hotspot)
+                else waitingText(list.joinToString(", ") { it.name })
+            },
+        )
         startTcp6("wifi-b", "0.0.0.0", WIFI_B_WAIT_MS, beacon)
+        if (linkWaiting) WLog.ev(WLog.LINK, "car-wifi", "carWifi" to if (CarWifi(this).isSet) "set" else "unset", "bound" to (carNetwork != null))
         if (autoMode && !hintShown && linkWaiting) {
             main.removeCallbacks(hintTick)
             main.postDelayed(hintTick, AUTO_HINT_MS)
         }
+        if (linkWaiting) scheduleCarNet()
+    }
+
+    /** Запрос сети машины: через [CAR_NET_DELAY_MS] от начала ожидания (если сеть задана). */
+    private fun scheduleCarNet() {
+        main.removeCallbacks(carNetTick)
+        if (!CarWifi(this).isSet) return
+        main.postDelayed(carNetTick, (CAR_NET_DELAY_MS - (SystemClock.elapsedRealtime() - waitSince)).coerceAtLeast(0))
+    }
+
+    private fun requestCarNet() {
+        val w = CarWifi(this)
+        val ssid = w.ssid ?: return
+        val ok = CarNetPolicy.shouldRequest(
+            carWifiSet = w.isSet,
+            autoOrManualWaiting = wifiBMode && linkWaiting && !stopRequested,
+            sessionActive = session != null,
+            usbActive = session?.transportKind == TransportCaps.USB_AOA.kind,
+            alreadyRequesting = carNetBusy,
+            waitedMs = SystemClock.elapsedRealtime() - waitSince,
+            sixOfSixReady = sixReady,
+        )
+        if (!ok) return
+        carNet.request(ssid, w.pass, CAR_NET_TIMEOUT_MS, ::onCarNetAvailable, ::onCarNetUnavailable, ::onCarNetLost)
+    }
+
+    /** Остановка ожидания (или смерть сервиса): снять отложенный запрос и, по [CarNetPolicy], сам запрос сети. */
+    private fun stopCarNet(event: CarNetEvent, why: String) {
+        main.removeCallbacks(carNetTick)
+        restartingForCarNet = false
+        if (CarNetPolicy.shouldRelease(event)) carNetImpl?.release(why)
+    }
+
+    private fun onCarNetAvailable(@Suppress("UNUSED_PARAMETER") network: Network) = restartForCarNet()
+
+    /** Сеть машины появилась или пропала, пока ждём: ожидание заново, чтобы маяк шёл (или перестал идти) через неё. Сессию не трогаем. */
+    private fun restartForCarNet() {
+        if (!wifiBMode || stopRequested || session != null || sixReady || !linkWaiting) return
+        val l = pendingTcp6
+        if (l == null) {      // слушатель ещё открывается (или уже отдал результат): повторим, пока ждём
+            main.postDelayed({ restartForCarNet() }, 300)
+            return
+        }
+        restartingForCarNet = true
+        WLog.ev(WLog.LINK, "rearm", "after" to "car-net")
+        l.abort()
+    }
+
+    private fun onCarNetUnavailable(reason: String) {
+        if (autoMode && !hintShown) showWifiHint()      // сети машины не будет: пусть человек подключит Wi-Fi сам
+    }
+
+    private fun onCarNetLost() {
+        if (!wifiBMode || stopRequested || session != null) return
+        restartForCarNet()
+        scheduleCarNet()
     }
 
     /** Статус ожидания; в авторежиме с пометкой, что машина рядом по Bluetooth. */
@@ -278,6 +367,7 @@ class BridgeService : Service() {
         hintShown = false
         wifiBMode = true
         stopRequested = false
+        waitSince = SystemClock.elapsedRealtime()
         startWifiB()
         btProbe.start()
         WLog.ev(WLog.TRIGGER, "auto-start")
@@ -317,6 +407,7 @@ class BridgeService : Service() {
             autoStarted = false
             CarLifeState.wireless = null
             btProbe.stop("машина ушла")
+            stopCarNet(CarNetEvent.AUTO_OFF, "auto-off")
             pendingTcp6?.abort()
             WLog.ev(WLog.TRIGGER, "auto-off", "stopped" to true)
             failStart()
@@ -332,7 +423,9 @@ class BridgeService : Service() {
 
     /** 30 с ожидания в авторежиме, а 6/6 нет: ГУ, возможно, не в сети телефона. Нажатие открывает панель Wi-Fi. */
     private fun showWifiHint() {
-        if (!autoMode || !wifiBMode || !linkWaiting || session != null) return
+        if (!autoMode || !wifiBMode || !linkWaiting || session != null || hintShown) return
+        // сеть машины запрашивается или уже получена: человеку подключать Wi-Fi не нужно, подсказка придёт по onUnavailable
+        if (carNetBusy) return
         hintShown = true
         val open = PendingIntent.getActivity(
             this, 2, Intent(Settings.Panel.ACTION_WIFI).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -355,6 +448,7 @@ class BridgeService : Service() {
             return
         }
         linkWaiting = true
+        sixReady = false
         WLog.begin(kind, "bind" to bind, "ACCESS_LOCAL_NETWORK" to NetProbe.localNetworkGranted(this))
         AppLog.i("сервис: $kind, слушаю 6 портов на $bind, жду ГУ ${waitMs / 1000} с")
         CarLifeState.status = "$kind: жду ГУ"
@@ -375,14 +469,23 @@ class BridgeService : Service() {
             beacon?.stop(if (result is CarTransport) "6/6" else "нет ГУ")
             main.post {
                 linkWaiting = false
+                val restarting = restartingForCarNet
+                restartingForCarNet = false
                 when {
                     result is CarTransport && session != null -> result.close()
                     result is CarTransport -> {
+                        sixReady = true
                         if (beacon != null) {
                             cancelHint()      // 6/6: подсказка про Wi-Fi больше не нужна
                             CarLifeState.wireless = getString(R.string.wl_state_connected)
                         }
                         startSession(result)
+                    }
+                    // abort ради нового маяка в сети машины: не сдача, режим и статус не трогаем, через паузу ждём заново
+                    restarting && beacon != null && wifiBMode && !stopRequested && session == null -> {
+                        main.postDelayed({
+                            if (wifiBMode && !stopRequested && session == null && !linkWaiting) startWifiB()
+                        }, WIFI_B_REARM_MS)
                     }
                     else -> {
                         val msg = (result as Exception).message
@@ -402,6 +505,7 @@ class BridgeService : Service() {
                             wifiBMode = false
                             autoStarted = false
                             cancelHint()
+                            stopCarNet(CarNetEvent.AUTO_OFF, "gave-up")      // ожидание закончилось: сеть машины больше не нужна
                             btProbe.stop("не дождались")
                             CarLifeState.wireless = getString(R.string.wl_state_gave_up, (WIFI_B_WAIT_MS / 60_000).toInt())
                         }
@@ -415,6 +519,7 @@ class BridgeService : Service() {
     }
 
     private fun startSession(transport: CarTransport) {
+        main.removeCallbacks(carNetTick)      // сессия идёт: новых запросов сети машины нет (сам запрос держим, CarNetEvent.SESSION_START)
         CarLifeState.accessory = transport.label
         if (transport.caps.kind != TransportCaps.TCP6.kind) WLog.begin(transport.caps.kind)
 
@@ -601,6 +706,7 @@ class BridgeService : Service() {
             autoStarted = false
             CarLifeState.wireless = null
             btProbe.stop("машина ушла")
+            stopCarNet(CarNetEvent.AUTO_OFF, "auto-off")
             WLog.ev(WLog.TRIGGER, "auto-off", "after" to "session")
         }
         val h = host
@@ -621,6 +727,7 @@ class BridgeService : Service() {
     }
 
     private fun finish() {
+        stopCarNet(CarNetEvent.STOP, "finish")
         CarLifeState.running = false
         try {
             wakeLock?.let { if (it.isHeld) it.release() }
@@ -641,6 +748,7 @@ class BridgeService : Service() {
         autoMode = false
         cancelAutoOff()
         cancelHint()
+        stopCarNet(CarNetEvent.DESTROY, "destroy")
         pendingTcp6?.abort()
         btProbe.stop("сервис уничтожен")
         audioDiag.stop()

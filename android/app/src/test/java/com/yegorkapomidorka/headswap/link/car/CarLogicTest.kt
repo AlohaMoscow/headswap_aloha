@@ -73,4 +73,64 @@ class CarLogicTest {
         assertTrue(m.tryAcquire())
         assertEquals(false, m.tryAcquire())
     }
+
+    /** Все условия выполнены; тесты по одному ломают по условию. */
+    private fun request(
+        carWifiSet: Boolean = true,
+        waiting: Boolean = true,
+        session: Boolean = false,
+        usb: Boolean = false,
+        requesting: Boolean = false,
+        waitedMs: Long = CAR_NET_DELAY_MS,
+        sixOfSix: Boolean = false,
+    ) = CarNetPolicy.shouldRequest(carWifiSet, waiting, session, usb, requesting, waitedMs, sixOfSix)
+
+    @Test
+    fun carNetRequestedAfterDelayWhileWaiting() {
+        assertTrue(request())
+        assertTrue(request(waitedMs = CAR_NET_DELAY_MS + 1))
+    }
+
+    @Test
+    fun carNetNotRequestedBeforeDelay() {
+        assertFalse(request(waitedMs = CAR_NET_DELAY_MS - 1))
+        assertFalse(request(waitedMs = 0))
+    }
+
+    @Test
+    fun carNetNotRequestedWithoutCarWifi() {
+        assertFalse(request(carWifiSet = false))
+    }
+
+    @Test
+    fun carNetNotRequestedWhenNotWaiting() {
+        assertFalse(request(waiting = false))
+    }
+
+    @Test
+    fun carNetNotRequestedDuringAnySession() {
+        assertFalse(request(session = true))
+        assertFalse(request(usb = true))
+        assertFalse(request(session = true, usb = true))
+    }
+
+    @Test
+    fun carNetNotRequestedTwiceOrAfterSixOfSix() {
+        assertFalse(request(requesting = true))
+        assertFalse(request(sixOfSix = true))
+    }
+
+    @Test
+    fun carNetReleasedWhenWaitingStopsOrServiceDies() {
+        assertTrue(CarNetPolicy.shouldRelease(CarNetEvent.AUTO_OFF))
+        assertTrue(CarNetPolicy.shouldRelease(CarNetEvent.STOP))
+        assertTrue(CarNetPolicy.shouldRelease(CarNetEvent.USB_WINS))
+        assertTrue(CarNetPolicy.shouldRelease(CarNetEvent.DESTROY))
+    }
+
+    @Test
+    fun carNetHeldAcrossSessions() {
+        assertFalse(CarNetPolicy.shouldRelease(CarNetEvent.SESSION_START))
+        assertFalse(CarNetPolicy.shouldRelease(CarNetEvent.SESSION_END))
+    }
 }

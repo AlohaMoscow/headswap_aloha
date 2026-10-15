@@ -5,10 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
 import android.text.TextUtils
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -27,8 +32,10 @@ import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
+import com.yegorkapomidorka.headswap.link.car.CarNetwork
 import com.yegorkapomidorka.headswap.link.car.CarPairing
 import com.yegorkapomidorka.headswap.link.car.CarProfile
+import com.yegorkapomidorka.headswap.link.car.CarWifi
 import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.update.UpdatePrefs
 import com.yegorkapomidorka.headswap.update.Updater
@@ -297,6 +304,14 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var wlCarWarn: TextView? = null
     private var wlCarForget: View? = null
     private var wlAwaitingCarPermission = false
+    private var wlCwLine: TextView? = null
+    private var wlCwSsid: EditText? = null
+    private var wlCwPass: EditText? = null
+    private var wlCwResult: TextView? = null
+    private var wlCwForget: View? = null
+    /** Запрос сети машины из «Сохранить и проверить»; null - проверки нет. */
+    private var wlCwCheck: CarNetwork? = null
+    private val cwHandler = Handler(Looper.getMainLooper())
     private val body: LinearLayout = ctx.vbox(6).apply { pad(ctx, 16, 4, 16, 16) }
     override val view: View
 
@@ -366,6 +381,20 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         wlCarForget = c.outlineButton(c.getString(R.string.wl_car_forget), heightDp = 56, sp = 16f).apply {
             setOnClickListener { CarPairing.forget(c); refreshWireless() }
         }.also { card.addView(it, lp(MATCH, c.dp(56))) }
+        // Wi-Fi машины: телефон входит в её точку доступа сам (WifiNetworkSpecifier), интернет остаётся на основной сети
+        val cw = CarWifi(c)
+        wlCwLine = c.text("", 15f, 500).also { card.addView(it, lp(MATCH, WRAP).apply { topMargin = c.dp(8) }) }
+        card.addView(c.text(c.getString(R.string.wl_cw_note), 13f, 400, c.clr(R.color.on2)), lp(MATCH, WRAP))
+        wlCwSsid = wifiField(c.getString(R.string.wl_cw_ssid_hint), password = false).apply { setText(cw.ssid.orEmpty()) }
+            .also { card.addView(it, lp(MATCH, c.dp(52))) }
+        wlCwPass = wifiField(c.getString(R.string.wl_cw_pass_hint), password = true).apply { setText(cw.pass) }
+            .also { card.addView(it, lp(MATCH, c.dp(52))) }
+        wlCwResult = c.text("", 13f, 400, c.clr(R.color.on2)).apply { visibility = View.GONE }.also { card.addView(it, lp(MATCH, WRAP)) }
+        card.addView(c.outlineButton(c.getString(R.string.wl_cw_save), heightDp = 56, sp = 16f).apply { setOnClickListener { onCarWifiSave() } },
+            lp(MATCH, c.dp(56)))
+        wlCwForget = c.outlineButton(c.getString(R.string.wl_cw_forget), heightDp = 56, sp = 16f).apply {
+            setOnClickListener { onCarWifiForget() }
+        }.also { card.addView(it, lp(MATCH, c.dp(56))) }
         card.addView(c.linkButton(c.getString(R.string.wl_report), heightDp = 52, sp = 16f).apply { setOnClickListener { LogShare.shareReport(c) } },
             lp(MATCH, c.dp(52)))
         refreshWireless()
@@ -391,6 +420,83 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             if (it.text.toString() != warn) it.text = warn
             it.visibility = if (warn.isEmpty()) View.GONE else View.VISIBLE
         }
+        val cw = CarWifi(c)      // SSID на экране показываем, в логи и отчёт он не уходит
+        val cwText = c.getString(R.string.wl_cw_line, if (cw.isSet) c.getString(R.string.wl_cw_set, cw.ssid) else c.getString(R.string.wl_cw_none))
+        wlCwLine?.let { if (it.text.toString() != cwText) it.text = cwText }
+        wlCwForget?.visibility = if (cw.isSet) View.VISIBLE else View.GONE
+    }
+
+    private fun wifiField(hint: String, password: Boolean): EditText = EditText(ctx).apply {
+        this.hint = hint
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        setTextColor(ctx.clr(R.color.on))
+        setHintTextColor(ctx.clr(R.color.on2))
+        typeface = ctx.sans(400)
+        background = ctx.shape(ctx.clr(R.color.surf2), 14)
+        pad(ctx, 16, 0, 16, 0)
+        isSingleLine = true
+        inputType = InputType.TYPE_CLASS_TEXT or
+            if (password) InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        typeface = ctx.sans(400)      // setInputType для пароля сам ставит моноширинный
+    }
+
+    private fun showCwResult(text: String, color: Int = R.color.on2) {
+        wlCwResult?.apply {
+            this.text = text
+            setTextColor(ctx.clr(color))
+            visibility = View.VISIBLE
+        }
+    }
+
+    /**
+     * «Сохранить и проверить»: запрос сети машины с переднего плана, чтобы человек увидел и одобрил системный диалог (из фона
+     * его не показать). Это только одобрение/проверка: через 5 с после входа запрос снимаем, дальше его держит сервис.
+     */
+    private fun onCarWifiSave() {
+        val ssid = wlCwSsid?.text?.toString().orEmpty()
+        val pass = wlCwPass?.text?.toString().orEmpty()
+        if (ssid.isEmpty()) {
+            showCwResult(ctx.getString(R.string.wl_cw_need_ssid), R.color.warn)
+            return
+        }
+        CarWifi(ctx).save(ssid, pass)
+        wlCwCheck?.release("recheck")
+        val net = CarNetwork(ctx)
+        wlCwCheck = net
+        showCwResult(ctx.getString(R.string.wl_cw_checking))
+        val fail = {
+            if (wlCwCheck === net) {
+                showCwResult(ctx.getString(R.string.wl_cw_fail), R.color.warn)
+                wlCwCheck = null
+            }
+        }
+        net.request(
+            ssid, pass, CW_CHECK_TIMEOUT_MS,
+            onAvailable = {
+                if (wlCwCheck === net) {
+                    showCwResult(ctx.getString(R.string.wl_cw_ok), R.color.ok)
+                    cwHandler.postDelayed({
+                        if (wlCwCheck === net) {
+                            net.release("check")
+                            wlCwCheck = null
+                        }
+                    }, CW_CHECK_HOLD_MS)
+                }
+            },
+            onUnavailable = { fail() },
+            onLost = { fail() },
+        )
+        refreshWireless()
+    }
+
+    private fun onCarWifiForget() {
+        CarWifi(ctx).clear()
+        wlCwCheck?.release("forget")
+        wlCwCheck = null
+        wlCwSsid?.setText("")
+        wlCwPass?.setText("")
+        wlCwResult?.visibility = View.GONE
+        refreshWireless()
     }
 
     private fun carBtGranted() =
@@ -433,6 +539,9 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         const val REQ_LOCAL_NETWORK = 37
         /** BLUETOOTH_CONNECT перед выбором машины (38 занят диалогом CDM, CarPairing.REQ_CAR_PAIR). */
         const val REQ_CAR_BT = 39
+        /** Проверка Wi-Fi машины из настроек: сколько ждём одобрения и входа, и сколько держим сеть после входа. */
+        const val CW_CHECK_TIMEOUT_MS = 60_000L
+        const val CW_CHECK_HOLD_MS = 5_000L
     }
 
     private fun note(text: String, color: Int = R.color.on2): TextView =

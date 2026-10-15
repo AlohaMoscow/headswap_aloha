@@ -23,6 +23,7 @@ import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
 import com.yegorkapomidorka.headswap.link.car.CarProfile
+import com.yegorkapomidorka.headswap.link.car.CarWifi
 import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.link.wifi.LanIface
 import com.yegorkapomidorka.headswap.update.UpdatePrefs
@@ -254,6 +255,8 @@ object LogShare {
             appendLine("  машина: ${if (car.isSet) "выбрана (CDM id ${car.cdmAssociationId})" else "не выбрана"}")
             appendLine("  триггер Bluetooth: ${if (CarProfile.triggerEnabled(ctx)) "включён" else "выключен"}")
             appendLine("  авто: ${if (CarLifeState.carAuto) "да" else "нет"}")
+            appendLine("  Wi-Fi машины: ${if (CarWifi(ctx).isSet) "задан" else "не задан"}")      // без SSID и пароля
+            appendLine("  сеть машины: ${CarLifeState.carNet}")
         }
     }
 

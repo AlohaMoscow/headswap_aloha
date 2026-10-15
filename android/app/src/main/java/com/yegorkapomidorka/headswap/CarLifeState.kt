@@ -28,6 +28,9 @@ object CarLifeState {
     /** Авторежим беспровода: выбранная машина рядом по Bluetooth (пишет BridgeService). */
     @Volatile var carAuto: Boolean = false
 
+    /** Запрос сети Wi-Fi машины: idle / requesting / available / unavailable (пишет BridgeService). */
+    @Volatile var carNet: String = "idle"
+
     fun resetSession() {
         protocol = "-"
         auth = "-"

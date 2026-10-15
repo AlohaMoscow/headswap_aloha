@@ -115,4 +115,16 @@
     <string name="wl_car_forget">Forget car</string>
     <string name="wl_car_no_permission">Without the “Nearby devices” permission Bluetooth events from the car are not delivered</string>
     <string name="wl_car_unavailable">This phone cannot pair a car (no companion device setup)</string>
+    <string name="wl_cw_note">If the phone stays on another Wi-Fi (for example at home), Headswap can join the car hotspot by itself: the internet stays on your main network. Enter the name and password the head unit shows.</string>
+    <string name="wl_cw_line">Car Wi-Fi: %1$s</string>
+    <string name="wl_cw_none">not set</string>
+    <string name="wl_cw_set">set: %1$s</string>
+    <string name="wl_cw_ssid_hint">Network name (SSID)</string>
+    <string name="wl_cw_pass_hint">Password (empty: open network)</string>
+    <string name="wl_cw_save">Save and check</string>
+    <string name="wl_cw_forget">Delete</string>
+    <string name="wl_cw_need_ssid">Enter the network name</string>
+    <string name="wl_cw_checking">Connecting to the car Wi-Fi… confirm the system prompt</string>
+    <string name="wl_cw_ok">Connected to the car Wi-Fi</string>
+    <string name="wl_cw_fail">Could not connect: the car is out of range, the password is wrong or the prompt was declined</string>
 </resources>
