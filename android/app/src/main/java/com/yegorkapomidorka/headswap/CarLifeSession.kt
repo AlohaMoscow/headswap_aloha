@@ -152,7 +152,8 @@ class CarLifeSession(
         AppLog.i("сессия: старт")
         CarLifeState.resetSession()
         CarLifeState.videoMode = mode
-        AppLog.i(mode.describe())
+        CarLifeState.densityOverride = bridge.densityOverride
+        AppLog.i(mode.describe(bridge.densityOverride))
         CarLifeState.status = "соединено, жду HU_PROTOCOL_VERSION"
         lastRx = SystemClock.elapsedRealtime()
         writer = Thread({ writeLoop() }, "cl-writer").also { it.start() }

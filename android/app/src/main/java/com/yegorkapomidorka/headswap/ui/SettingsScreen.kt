@@ -15,6 +15,7 @@ import com.yegorkapomidorka.headswap.AppLocale
 import com.yegorkapomidorka.headswap.AppTheme
 import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
+import com.yegorkapomidorka.headswap.aa.AaDensity
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
@@ -176,7 +177,8 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
 
         val mode = c.getString(if (aa.transcode) R.string.set_transcode_title else R.string.set_direct_title)
         val res = c.getString(aa.videoMode.effective(aa.transcode).titleRes)
-        set(SettingsSection.VIDEO, listOf(mode, res, c.getString(aa.fpsSetting.titleRes)).joinToString(" · "))
+        val dpi = aa.aaDensity.takeIf { it != AaDensity.AUTO }?.let { c.getString(R.string.set_sum_density, it) }
+        set(SettingsSection.VIDEO, listOfNotNull(mode, res, dpi, c.getString(aa.fpsSetting.titleRes)).joinToString(" · "))
 
         if (c.micMissing(aa)) {
             set(SettingsSection.SOUND, c.getString(R.string.mic_no_permission), R.color.warn)
@@ -255,6 +257,11 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var transcodeSeg: Segmented? = null
     private var transcodeNote: TextView? = null
     private var fpsSeg: Segmented? = null
+    private var densityValue: TextView? = null
+    private var densitySub: TextView? = null
+    private var densityMinus: View? = null
+    private var densityPlus: View? = null
+    private var densityAuto: TextView? = null
     private var fpsNote: TextView? = null
     private var certSeg: Segmented? = null
     private var micNote: TextView? = null
@@ -355,6 +362,10 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         }
         note(c.getString(R.string.set_apply_next))
 
+        body.addView(c.sectionTitle(c.getString(R.string.set_aa_density)))
+        body.addView(densityCard(), lp(MATCH, WRAP))
+        note(c.getString(R.string.set_aa_density_note))
+
         body.addView(c.sectionTitle(c.getString(R.string.set_fps)))
         val fps = FpsSetting.values()
         val fSeg = Segmented(c, fps.map { c.getString(it.titleRes) }, 15f) { setFps(fps[it]) }
@@ -388,6 +399,75 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             row.setSelected(m == shown)
             row.setSub(if (blocked) ctx.getString(R.string.set_needs_transcode) else ctx.getString(m.subRes))
             row.view.alpha = if (blocked) 0.45f else 1f
+        }
+        refreshDensity()      // «авто» зависит от режима
+    }
+
+    /** «−  значение  +  Авто»: 11 вариантов (авто и 100..280 через 20) не влезают в Segmented, поэтому степпер. */
+    private fun densityCard(): View {
+        val c = ctx
+        fun stepButton(label: String, desc: String, up: Boolean) = c.text(label, 24f, 500, c.clr(R.color.acc)).apply {
+            gravity = Gravity.CENTER
+            contentDescription = desc
+            background = c.rippleBg(c.shape(c.clr(R.color.pric), 24), 24)
+            isClickable = true
+            setOnClickListener { setDensity(AaDensity.step(aa.aaDensity, autoDensity(), up)) }
+        }
+        val minus = stepButton("−", c.getString(R.string.set_aa_density_smaller), false)
+        val plus = stepButton("+", c.getString(R.string.set_aa_density_larger), true)
+        val value = c.text("", 17f, 600).apply { gravity = Gravity.CENTER }
+        val sub = c.text("", 13f, 400, c.clr(R.color.on2)).apply { gravity = Gravity.CENTER }
+        val auto = c.text(c.getString(R.string.set_aa_density_reset), 15f, 600).apply {
+            gravity = Gravity.CENTER
+            pad(c, 14, 0, 14, 0)
+            isClickable = true
+            setOnClickListener { setDensity(AaDensity.AUTO) }
+        }
+        densityMinus = minus
+        densityPlus = plus
+        densityValue = value
+        densitySub = sub
+        densityAuto = auto
+        val row = c.hbox(10).apply {
+            background = c.shape(c.clr(R.color.surf), 20)
+            pad(c, 12, 10, 12, 10)
+            addView(minus, c.lpDp(c.dp(48), 48))
+            addView(c.vbox(2).apply {
+                addView(value, lp(MATCH, WRAP))
+                addView(sub, lp(MATCH, WRAP))
+            }, lp(0, WRAP, 1f))
+            addView(plus, c.lpDp(c.dp(48), 48))
+            addView(auto, c.lpDp(WRAP, 44))
+        }
+        refreshDensity()
+        return row
+    }
+
+    /** density режима, который реально применится (с учётом passthrough). */
+    private fun autoDensity(): Int = aa.videoMode.effective(aa.transcode).density
+
+    private fun setDensity(v: Int) {
+        aa.aaDensity = v
+        refreshDensity()
+    }
+
+    private fun refreshDensity() {
+        val value = densityValue ?: return
+        val c = ctx
+        val cur = aa.aaDensity
+        val auto = autoDensity()
+        val isAuto = cur == AaDensity.AUTO
+        value.text = if (isAuto) c.getString(R.string.set_aa_density_auto, auto) else c.getString(R.string.set_aa_density_manual, cur)
+        densitySub?.text = if (isAuto) c.getString(R.string.set_aa_density_auto_sub) else c.getString(R.string.set_aa_density_manual_sub, auto)
+        for ((b, up) in listOf(densityMinus to false, densityPlus to true)) {
+            val can = AaDensity.step(cur, auto, up) != cur
+            b?.isEnabled = can
+            b?.alpha = if (can) 1f else 0.35f
+        }
+        densityAuto?.apply {
+            background = c.rippleBg(if (isAuto) c.shape(c.clr(R.color.pric), 22) else c.shape(0, 22, c.clr(R.color.line), 1.5f), 22)
+            setTextColor(c.clr(if (isAuto) R.color.onpric else R.color.on))
+            text = if (isAuto) "✓ ${c.getString(R.string.set_aa_density_reset)}" else c.getString(R.string.set_aa_density_reset)
         }
     }
 

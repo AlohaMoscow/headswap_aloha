@@ -1,5 +1,6 @@
 package com.yegorkapomidorka.headswap
 
+import com.yegorkapomidorka.headswap.aa.AaDensity
 import com.yegorkapomidorka.headswap.aa.VideoMode
 
 /** Состояние для экрана; пишут сервис и сессия, читает activity (один процесс). */
@@ -13,6 +14,9 @@ object CarLifeState {
 
     /** Видео-режим текущей/последней сессии (фактический, с учётом passthrough); null - сессии не было. */
     @Volatile var videoMode: VideoMode? = null
+
+    /** Ручной DPI AA той же сессии (AaDensity.AUTO = density режима). */
+    @Volatile var densityOverride: Int = AaDensity.AUTO
     @Volatile var running: Boolean = false
 
     fun resetSession() {

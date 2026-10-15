@@ -26,6 +26,16 @@
 
     <string name="set_fps">Frame rate</string>
     <string name="set_fps_note">Applies on the next connection. In direct passthrough the frame rate cannot be changed.</string>
+    <string name="set_aa_density">Android Auto UI scale</string>
+    <string name="set_aa_density_auto">Auto · %1$d dpi</string>
+    <string name="set_aa_density_manual">%1$d dpi</string>
+    <string name="set_aa_density_auto_sub">as set for the resolution</string>
+    <string name="set_aa_density_manual_sub">manual, auto for this resolution: %1$d</string>
+    <string name="set_aa_density_reset">Auto</string>
+    <string name="set_aa_density_smaller">Smaller</string>
+    <string name="set_aa_density_larger">Larger</string>
+    <string name="set_aa_density_note">Higher dpi means larger. Applies on the next connection. At high dpi Android Auto may switch layout: one column instead of the split screen.</string>
+    <string name="set_sum_density">%1$d dpi</string>
 
     <string name="set_cert">Head unit certificate</string>
     <string name="set_cert_hint">Change it if Android Auto does not connect</string>
