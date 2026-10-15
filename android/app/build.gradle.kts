@@ -20,8 +20,8 @@ android {
         targetSdk = 37
         versionCode = 40
         versionName = "1.2.2"
-        // беспровод (бета): пункт в настройках и ветка B; бета-APK для тестеров: gradlew assembleRelease -Pwlbeta=true
-        buildConfigField("boolean", "WIRELESS_BETA", (project.findProperty("wlbeta") == "true").toString())
+        // «По воздуху» (беспровод): с 2.0.0 включён во всех сборках; выключить для проверки: gradlew assembleRelease -Pwlbeta=false
+        buildConfigField("boolean", "WIRELESS_BETA", (project.findProperty("wlbeta") != "false").toString())
     }
 
     buildFeatures {
