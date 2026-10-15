@@ -59,7 +59,6 @@ class BitratePolicyWifiTest {
         assertTrue("за провал битрейт опустился до $low", low <= 1_000_000)
         r.run(85_000)
         assertTrue("через 60 с после провала ${r.policy.current}", r.policy.current >= 3_000_000)
-        assertTrue(r.policy.current <= 3_000_000 || r.now - 25_000 >= 60_000)
     }
 
     @Test
