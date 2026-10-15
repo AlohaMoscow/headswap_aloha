@@ -37,6 +37,7 @@ import com.yegorkapomidorka.headswap.link.LinkSetupException
 import com.yegorkapomidorka.headswap.link.StreamTransport
 import com.yegorkapomidorka.headswap.link.Tcp6Listener
 import com.yegorkapomidorka.headswap.link.TransportCaps
+import com.yegorkapomidorka.headswap.link.bt.CarlifeBtProbe
 import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.link.diag.WLog
 import com.yegorkapomidorka.headswap.link.wifi.HotspotBeacon
@@ -67,6 +68,8 @@ class BridgeService : Service() {
     @Volatile private var wifiBMode = false
     private var wakeLock: PowerManager.WakeLock? = null
     private val audioDiag = AudioDiag()
+    /** Ветка A, диагностика: RFCOMM `carlife` слушаем, пока ждём машину по Wi-Fi. */
+    private val btProbe by lazy { CarlifeBtProbe(this) }
     /** Автозапуск пропущен из-за неподключённой службы спецвозможностей: RETRY запустит его, когда она появится. */
     @Volatile private var serverStartPending = false
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "bridge-grace").also { it.isDaemon = true } }
@@ -100,6 +103,7 @@ class BridgeService : Service() {
             stopRequested = true
             wifiBMode = false
             CarLifeState.wireless = null
+            btProbe.stop("стоп")
             pendingTcp6?.abort()
             val s = session
             if (s != null) {
@@ -149,6 +153,7 @@ class BridgeService : Service() {
             }
             wifiBMode = true
             stopRequested = false
+            btProbe.start()
             startWifiB()
             return START_NOT_STICKY
         }
@@ -186,6 +191,7 @@ class BridgeService : Service() {
             WLog.ev(WLog.LINK, "usb-wins")
             wifiBMode = false
             CarLifeState.wireless = null
+            btProbe.stop("кабель")
             pendingTcp6?.abort()
         }
         startSession(StreamTransport.fromPfd(pfd, TransportCaps.USB_AOA, MainActivity.describe(acc)))
@@ -245,6 +251,7 @@ class BridgeService : Service() {
                         AppLog.i("сервис: $msg")
                         if (beacon != null && wifiBMode) {
                             wifiBMode = false
+                            btProbe.stop("не дождались")
                             CarLifeState.wireless = getString(R.string.wl_state_gave_up, (WIFI_B_WAIT_MS / 60_000).toInt())
                         }
                         // отмена ожидания кабелем: статус уже USB-сессии, не перетираем
@@ -467,6 +474,7 @@ class BridgeService : Service() {
         }
         stopRequested = true
         pendingTcp6?.abort()
+        btProbe.stop("сервис уничтожен")
         audioDiag.stop()
         session?.close("сервис уничтожен")
         host?.shutdown("сервис уничтожен")

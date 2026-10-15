@@ -18,6 +18,9 @@ object CarLifeState {
     /** Беспровод (бета, ветка B): что сейчас происходит, для экрана; null - режим не включён. */
     @Volatile var wireless: String? = null
 
+    /** Bluetooth-проба ветки A: что прислала ГУ по RFCOMM `carlife`; null - проба не запускалась. */
+    @Volatile var btProbe: String? = null
+
     fun resetSession() {
         protocol = "-"
         auth = "-"

@@ -246,6 +246,7 @@ object LogShare {
             appendLine("  ACCESS_LOCAL_NETWORK: ${NetProbe.localNetworkGranted(ctx)}")
             appendLine("  сети: ${lanText()}")
             appendLine("  режим: ${CarLifeState.wireless ?: "выключен"}")
+            appendLine("  Bluetooth carlife: ${CarLifeState.btProbe ?: "не запускался"}")
         }
     }
 

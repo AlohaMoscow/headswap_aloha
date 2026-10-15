@@ -195,7 +195,8 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         refreshMic()
         if (wlAwaitingPermission) {
             wlAwaitingPermission = false
-            if (NetProbe.localNetworkGranted(ctx) == "granted") startWireless() else wlNoPermission.visibility = View.VISIBLE
+            val lan = Build.VERSION.SDK_INT < 37 || NetProbe.localNetworkGranted(ctx) == "granted"
+            if (lan) startWireless() else wlNoPermission.visibility = View.VISIBLE
         }
     }
 
@@ -423,12 +424,20 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         if (wlStatus.text.toString() != text) wlStatus.text = text
     }
 
-    /** На Android 17+ без ACCESS_LOCAL_NETWORK LAN режется молча: сначала спрашиваем, старт - в onPermissionResult. */
+    /**
+     * На Android 17+ без ACCESS_LOCAL_NETWORK LAN режется молча: сначала спрашиваем, старт - в onPermissionResult.
+     * BLUETOOTH_CONNECT (Android 12+) - для пробы ветки A, без него беспровод всё равно стартует.
+     */
     private fun onWirelessStart() {
         wlNoPermission.visibility = View.GONE
-        if (Build.VERSION.SDK_INT >= 37 && NetProbe.localNetworkGranted(ctx) != "granted") {
+        val ask = ArrayList<String>()
+        if (Build.VERSION.SDK_INT >= 37 && NetProbe.localNetworkGranted(ctx) != "granted") ask += Manifest.permission.ACCESS_LOCAL_NETWORK
+        if (Build.VERSION.SDK_INT >= 31 && ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            ask += Manifest.permission.BLUETOOTH_CONNECT
+        }
+        if (ask.isNotEmpty()) {
             wlAwaitingPermission = true
-            host.requestPermissions(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK), REQ_LOCAL_NETWORK)
+            host.requestPermissions(ask.toTypedArray(), REQ_LOCAL_NETWORK)
             return
         }
         startWireless()
