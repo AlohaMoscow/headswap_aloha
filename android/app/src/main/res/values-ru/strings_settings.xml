@@ -26,6 +26,16 @@
 
     <string name="set_fps">Частота кадров</string>
     <string name="set_fps_note">Применится при следующем подключении. В прямом пробросе частота не регулируется.</string>
+    <string name="set_aa_density">Масштаб интерфейса AA</string>
+    <string name="set_aa_density_auto">Авто · %1$d dpi</string>
+    <string name="set_aa_density_manual">%1$d dpi</string>
+    <string name="set_aa_density_auto_sub">как задано для разрешения</string>
+    <string name="set_aa_density_manual_sub">вручную, авто для разрешения: %1$d</string>
+    <string name="set_aa_density_reset">Авто</string>
+    <string name="set_aa_density_smaller">Мельче</string>
+    <string name="set_aa_density_larger">Крупнее</string>
+    <string name="set_aa_density_note">Больше dpi — крупнее. Применится при следующем подключении. При высоком dpi Android Auto может переключить раскладку: одна колонка вместо разделённого экрана.</string>
+    <string name="set_sum_density">%1$d dpi</string>
 
     <string name="set_cert">Сертификат ГУ</string>
     <string name="set_cert_hint">Смените, если Android Auto не подключается</string>
@@ -51,6 +61,16 @@
     <string name="set_rerun_setup">Пройти настройку заново</string>
     <string name="set_check_ready">Проверить готовность</string>
     <string name="set_for_devs">Для разработчиков</string>
+    <string name="set_sec_appearance">Внешний вид</string>
+    <string name="set_sec_sound">Звук и микрофон</string>
+    <string name="set_sec_headunit">Головное устройство</string>
+    <string name="set_mode">Режим</string>
+    <string name="set_help">Помощь</string>
+    <string name="set_sum_appearance">Язык: %1$s · тема: %2$s</string>
+    <string name="set_sum_mic">микрофон: %1$s</string>
+    <string name="set_sum_headunit">Сертификат %1$s · автозапуск %2$s</string>
+    <string name="set_sum_on">вкл.</string>
+    <string name="set_sum_off">выкл.</string>
     <string name="set_footer">Headswap %1$s · мост для ГУ с CarLife</string>
 
     <!-- Video modes (VideoMode) -->

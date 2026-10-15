@@ -18,8 +18,8 @@ android {
         applicationId = "com.yegorkapomidorka.headswap"
         minSdk = 29
         targetSdk = 37
-        versionCode = 38
-        versionName = "1.2.0"
+        versionCode = 39
+        versionName = "1.2.1"
         // беспровод (бета): пункт в настройках и ветка B; бета-APK для тестеров: gradlew assembleRelease -Pwlbeta=true
         buildConfigField("boolean", "WIRELESS_BETA", (project.findProperty("wlbeta") == "true").toString())
     }

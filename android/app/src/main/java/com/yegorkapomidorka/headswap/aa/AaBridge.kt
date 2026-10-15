@@ -120,6 +120,9 @@ class AaBridgeCore(
      * его же берут CarLife-сессия (INIT_DONE, энкодер) и маппинг тача. Prefs отсюда не читаются.
      */
     @Volatile var videoMode: VideoMode = VideoMode.DEFAULT
+
+    /** Ручной DPI интерфейса AA, снятый вместе с videoMode (AaDensity.AUTO = density режима). Только SDR, на кроп и тач не влияет. */
+    @Volatile var densityOverride: Int = AaDensity.AUTO
     private var transcoder: VideoTranscoder? = null
     private var encCsd: ByteArray? = null
     private var outGotIdr = false

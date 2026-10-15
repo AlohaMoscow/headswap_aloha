@@ -140,7 +140,8 @@ class CarLifeSession(
         AppLog.i("сессия: старт")
         CarLifeState.resetSession()
         CarLifeState.videoMode = mode
-        AppLog.i(mode.describe())
+        CarLifeState.densityOverride = bridge.densityOverride
+        AppLog.i(mode.describe(bridge.densityOverride))
         AppLog.i("сессия: транспорт=${transport.caps.kind} (${transport.label})")
         WLog.ev(WLog.LINK, "session", "transport" to transport.caps.kind)
         if (air) {

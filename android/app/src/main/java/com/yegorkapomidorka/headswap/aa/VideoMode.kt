@@ -74,20 +74,27 @@ enum class VideoMode(
         return sx.coerceIn(0, cw - 1) to sy.coerceIn(0, ch - 1)
     }
 
-    /** Опции SDR для AA этого режима. */
-    fun sdOptions(fullAudio: Boolean) = AapSdOptions(
-        resolution = aaResolution, density = density, marginW = marginW, marginH = marginH, fullAudio = fullAudio,
+    /** Density, которая уйдёт в SDR: ручная из настроек или своя у режима (AaDensity.AUTO). На кроп и тач не влияет. */
+    fun densityFor(densityOverride: Int): Int = if (densityOverride == AaDensity.AUTO) density else densityOverride
+
+    /** Опции SDR для AA этого режима; densityOverride - ручной DPI интерфейса AA (AaDensity.AUTO = density режима). */
+    fun sdOptions(fullAudio: Boolean, densityOverride: Int = AaDensity.AUTO) = AapSdOptions(
+        resolution = aaResolution, density = densityFor(densityOverride), marginW = marginW, marginH = marginH, fullAudio = fullAudio,
     )
 
-    /** Строка для лога: «видео-режим WIDE: AA 1280x720 margins 0x240 density 160, CarLife 1280x480, кроп v 0.167..0.833». */
-    fun describe(): String {
+    /**
+     * Строка для лога: «видео-режим WIDE: AA 1280x720 margins 0x240 density 160, CarLife 1280x480, кроп v 0.167..0.833».
+     * С ручным DPI: «density 200 (вручную, авто 160)».
+     */
+    fun describe(densityOverride: Int = AaDensity.AUTO): String {
         fun f(v: Float) = String.format(Locale.US, "%.3f", v)
         val cropText = if (crop.isNone) "без кропа" else buildString {
             append("кроп")
             if (crop.u0 != 0f) append(" u ${f(crop.u0)}..${f(crop.u1)}")
             if (crop.v0 != 0f) append(" v ${f(crop.v0)}..${f(crop.v1)}")
         }
-        return "видео-режим $name: AA $aaResolution margins ${marginW}x$marginH density $density, CarLife ${outW}x$outH, $cropText"
+        val dens = if (densityOverride == AaDensity.AUTO) "$density" else "$densityOverride (вручную, авто $density)"
+        return "видео-режим $name: AA $aaResolution margins ${marginW}x$marginH density $dens, CarLife ${outW}x$outH, $cropText"
     }
 
     companion object {
@@ -95,5 +102,34 @@ enum class VideoMode(
 
         /** По имени из prefs; неизвестное/пустое = по умолчанию. */
         fun parse(key: String?): VideoMode = values().firstOrNull { it.name == key } ?: DEFAULT
+    }
+}
+
+/**
+ * Ручной DPI интерфейса AA (поле density в VideoConfiguration SDR). Абсолютное значение, а не процент от авто:
+ * раскладку AA определяет ширина в dp = aaW * 160 / density, то есть именно абсолютная density.
+ */
+object AaDensity {
+    /** Не переопределять: density режима. */
+    const val AUTO = 0
+    const val MIN = 100
+    const val MAX = 280
+    const val STEP = 20
+
+    /** Допустимые ручные значения: 100, 120 .. 280. */
+    val VALUES: List<Int> = (MIN..MAX step STEP).toList()
+
+    /** Из prefs: вне сетки/диапазона = авто. */
+    fun parse(v: Int): Int = if (v in VALUES) v else AUTO
+
+    /**
+     * Шаг «-»/«+» в UI. Из авто - на ближайшее значение сетки строго ниже/выше density режима
+     * (у R1440 авто 320 выше максимума, поэтому «+» оттуда ничего не даёт, «-» ставит 280).
+     * На краю сетки остаётся как было.
+     */
+    fun step(current: Int, auto: Int, up: Boolean): Int {
+        val base = if (current == AUTO) auto else current
+        return if (up) VALUES.firstOrNull { it > base } ?: current
+        else VALUES.lastOrNull { it < base } ?: current
     }
 }

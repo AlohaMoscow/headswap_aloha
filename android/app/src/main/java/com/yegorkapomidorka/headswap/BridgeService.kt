@@ -430,12 +430,16 @@ class BridgeService : Service() {
         var h = host
         // режим фиксируется на подключение; тёплая AA с другой геометрией не годится (SDR уже ушёл), её закрываем
         val wantMode = aaPrefs.videoMode.effective(aaPrefs.transcode)
+        val wantDensity = aaPrefs.aaDensity
         if (h != null && !h.isDead && h.core.videoMode != wantMode) {
             AppLog.i("BRIDGE: видео-режим сменился (${h.core.videoMode.name} -> ${wantMode.name}), тёплую AA закрываю и поднимаю заново")
             h.shutdown("смена видео-режима")
+        } else if (h != null && !h.isDead && h.core.densityOverride != wantDensity) {
+            AppLog.i("BRIDGE: DPI AA сменился (${h.core.densityOverride} -> $wantDensity, 0 = авто), тёплую AA закрываю и поднимаю заново")
+            h.shutdown("смена DPI AA")
         }
         if (h == null || h.isDead) {
-            h = createHost(aaPrefs, wantMode, previous = h)
+            h = createHost(aaPrefs, wantMode, wantDensity, previous = h)
             host = h
             if (h == null) {
                 // нет сертификата head unit или мост не собрался: причина уже в AaState.setupError, USB-сессию не открываем
@@ -471,7 +475,7 @@ class BridgeService : Service() {
     }
 
     /** Новый AA-хост: ядро, коннектор, сертификаты. null = мост не поднялся (причина в AaState.setupError). */
-    private fun createHost(aaPrefs: AaPrefs, mode: VideoMode, previous: BridgeHost?): BridgeHost? {
+    private fun createHost(aaPrefs: AaPrefs, mode: VideoMode, densityOverride: Int, previous: BridgeHost?): BridgeHost? {
         return try {
             val loaded = AaCreds.load(this, aaPrefs.certSet)
             AaState.setupError = null
@@ -485,12 +489,13 @@ class BridgeService : Service() {
             core.usbAudioEnabled = aaPrefs.usbAudio
             core.transcodeEnabled = aaPrefs.transcode
             core.videoMode = mode
+            core.densityOverride = densityOverride
             core.expectFeatureConfig = true
             if (aaPrefs.videoMode != mode) AppLog.i("BRIDGE видео-режим ${aaPrefs.videoMode.name} недоступен без перекодирования, использую ${mode.name}")
             // аудио-синки (MEDIA/SPEECH) объявляются в момент запроса телефона, когда уже известно решение по звуку
             val conn = AaConnector(
                 core, loaded.creds, log,
-                options = { AapOptions(sdProvider = { mode.sdOptions(fullAudio = core.audioViaUsb) }) },
+                options = { AapOptions(sdProvider = { mode.sdOptions(fullAudio = core.audioViaUsb, densityOverride = densityOverride) }) },
                 serverPrep = { phase -> prepareServer(core, phase) },
             )
             AppLog.i("BRIDGE звук по USB: ${if (aaPrefs.usbAudio) "включён (решение по FEATURE_CONFIG ГУ)" else "выключен в UI"}")
