@@ -1,4 +1,4 @@
-import java.util.Properties
+﻿import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -18,8 +18,8 @@ android {
         applicationId = "com.yegorkapomidorka.headswap"
         minSdk = 29
         targetSdk = 37
-        versionCode = 39
-        versionName = "1.2.1"
+        versionCode = 40
+        versionName = "1.2.2"
         // беспровод (бета): пункт в настройках и ветка B; бета-APK для тестеров: gradlew assembleRelease -Pwlbeta=true
         buildConfigField("boolean", "WIRELESS_BETA", (project.findProperty("wlbeta") == "true").toString())
     }
