@@ -21,6 +21,9 @@ object CarLifeState {
     /** Bluetooth-проба ветки A: что прислала ГУ по RFCOMM `carlife`; null - проба не запускалась. */
     @Volatile var btProbe: String? = null
 
+    /** Авторежим беспровода: выбранная машина рядом по Bluetooth (пишет BridgeService). */
+    @Volatile var carAuto: Boolean = false
+
     fun resetSession() {
         protocol = "-"
         auth = "-"

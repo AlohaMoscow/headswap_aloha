@@ -24,6 +24,8 @@ import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
+import com.yegorkapomidorka.headswap.link.car.CarPairing
+import com.yegorkapomidorka.headswap.link.car.CarProfile
 import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.update.UpdatePrefs
 import com.yegorkapomidorka.headswap.update.Updater
@@ -65,6 +67,10 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private lateinit var wlStatus: TextView
     private lateinit var wlNoPermission: TextView
     private var wlAwaitingPermission = false
+    private lateinit var wlCarLine: TextView
+    private lateinit var wlCarWarn: TextView
+    private lateinit var wlCarForget: View
+    private var wlAwaitingCarPermission = false
     override val view: View
 
     init {
@@ -197,6 +203,11 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             wlAwaitingPermission = false
             val lan = Build.VERSION.SDK_INT < 37 || NetProbe.localNetworkGranted(ctx) == "granted"
             if (lan) startWireless() else wlNoPermission.visibility = View.VISIBLE
+        }
+        if (wlAwaitingCarPermission) {
+            wlAwaitingCarPermission = false
+            CarPairing.start(host)      // отказ выбор не блокирует: предупреждение покажет refreshWireless
+            refreshWireless()
         }
     }
 
@@ -412,6 +423,18 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             lp(MATCH, c.dp(60)).apply { topMargin = c.dp(4) })
         card.addView(c.outlineButton(c.getString(R.string.wl_stop), heightDp = 56, sp = 16f).apply { setOnClickListener { Actions.stopBridge(c) } },
             lp(MATCH, c.dp(56)))
+        // выбор машины: дальше при её Bluetooth-подключении ожидание по Wi-Fi стартует само
+        wlCarLine = c.text("", 15f, 500)
+        card.addView(wlCarLine, lp(MATCH, WRAP).apply { topMargin = c.dp(8) })
+        card.addView(c.text(c.getString(R.string.wl_car_note), 13f, 400, c.clr(R.color.on2)), lp(MATCH, WRAP))
+        wlCarWarn = c.text("", 13f, 400, c.clr(R.color.warn)).apply { visibility = View.GONE }
+        card.addView(wlCarWarn, lp(MATCH, WRAP))
+        card.addView(c.outlineButton(c.getString(R.string.wl_car_pick), heightDp = 56, sp = 16f).apply { setOnClickListener { onCarPick() } },
+            lp(MATCH, c.dp(56)))
+        wlCarForget = c.outlineButton(c.getString(R.string.wl_car_forget), heightDp = 56, sp = 16f).apply {
+            setOnClickListener { CarPairing.forget(c); refreshWireless() }
+        }
+        card.addView(wlCarForget, lp(MATCH, c.dp(56)))
         card.addView(c.linkButton(c.getString(R.string.wl_report), heightDp = 52, sp = 16f).apply { setOnClickListener { LogShare.shareReport(c) } },
             lp(MATCH, c.dp(52)))
         refreshWireless()
@@ -420,8 +443,38 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
 
     private fun refreshWireless() {
         if (!::wlStatus.isInitialized) return
-        val text = ctx.getString(R.string.wl_status_line, CarLifeState.wireless ?: ctx.getString(R.string.wl_off))
+        val c = ctx
+        val text = c.getString(R.string.wl_status_line, CarLifeState.wireless ?: c.getString(R.string.wl_off))
         if (wlStatus.text.toString() != text) wlStatus.text = text
+        val car = CarProfile(c)
+        val carText = c.getString(R.string.wl_car_line, if (car.isSet) car.btName ?: car.btMac ?: "" else c.getString(R.string.wl_car_none))
+        if (wlCarLine.text.toString() != carText) wlCarLine.text = carText
+        wlCarForget.visibility = if (car.isSet) View.VISIBLE else View.GONE
+        // без BLUETOOTH_CONNECT (31+) система не доставляет ACL выбранной машины: триггер молчит
+        val warn = when {
+            !CarPairing.available(c) -> c.getString(R.string.wl_car_unavailable)
+            car.isSet && !carBtGranted() -> c.getString(R.string.wl_car_no_permission)
+            else -> ""
+        }
+        if (wlCarWarn.text.toString() != warn) wlCarWarn.text = warn
+        wlCarWarn.visibility = if (warn.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    private fun carBtGranted() =
+        Build.VERSION.SDK_INT < 31 || ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    /** На Android 12+ перед выбором просим BLUETOOTH_CONNECT (имя устройства, доставка ACL); отказ выбор не блокирует. */
+    private fun onCarPick() {
+        if (!carBtGranted()) {
+            wlAwaitingCarPermission = true
+            host.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQ_CAR_BT)
+            return
+        }
+        CarPairing.start(host)
+    }
+
+    override fun onActivityResultDone() {
+        refreshWireless()
     }
 
     /**
@@ -451,6 +504,8 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private companion object {
         /** Тот же код, что MainActivity.REQ_LOCAL_NETWORK: результат попадает в её лог. */
         const val REQ_LOCAL_NETWORK = 37
+        /** BLUETOOTH_CONNECT перед выбором машины (38 занят диалогом CDM, CarPairing.REQ_CAR_PAIR). */
+        const val REQ_CAR_BT = 39
     }
 
     private fun setMic(m: MicMode) {

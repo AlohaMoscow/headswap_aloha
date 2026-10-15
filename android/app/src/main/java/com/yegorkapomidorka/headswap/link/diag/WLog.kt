@@ -17,6 +17,8 @@ object WLog {
     const val HS = "hs"
     const val VIDEO = "video"
     const val BT = "bt"
+    /** Автостарт по Bluetooth машины (выбор, ACL, авторежим сервиса). */
+    const val TRIGGER = "trigger"
 
     @Volatile var clock: () -> Long = { SystemClock.elapsedRealtime() }
     @Volatile var sink: (String) -> Unit = { AppLog.i(it, ui = false) }

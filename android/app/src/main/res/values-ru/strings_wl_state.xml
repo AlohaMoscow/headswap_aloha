@@ -5,5 +5,8 @@
     <string name="wl_state_no_hotspot">нет точки доступа: включите хотспот на телефоне</string>
     <string name="wl_state_connected">машина подключилась по Wi-Fi</string>
     <string name="wl_state_lost">связь потеряна, жду машину снова</string>
+    <string name="wl_state_auto">машина рядом по Bluetooth, жду по Wi-Fi (%1$s)</string>
+    <string name="wl_hint_title">Машина рядом, но по Wi-Fi не подключилась</string>
+    <string name="wl_hint_text">Подключите телефон к Wi-Fi машины или включите точку доступа. Нажмите, чтобы открыть Wi-Fi.</string>
     <string name="wl_state_gave_up">машина не подключилась за %1$d мин</string>
 </resources>

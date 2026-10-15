@@ -21,6 +21,7 @@ import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
+import com.yegorkapomidorka.headswap.link.car.CarProfile
 import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.link.wifi.LanIface
 import com.yegorkapomidorka.headswap.update.UpdatePrefs
@@ -247,6 +248,10 @@ object LogShare {
             appendLine("  сети: ${lanText()}")
             appendLine("  режим: ${CarLifeState.wireless ?: "выключен"}")
             appendLine("  Bluetooth carlife: ${CarLifeState.btProbe ?: "не запускался"}")
+            val car = CarProfile(ctx)      // без MAC и имени
+            appendLine("  машина: ${if (car.isSet) "выбрана (CDM id ${car.cdmAssociationId})" else "не выбрана"}")
+            appendLine("  триггер Bluetooth: ${if (CarProfile.triggerEnabled(ctx)) "включён" else "выключен"}")
+            appendLine("  авто: ${if (CarLifeState.carAuto) "да" else "нет"}")
         }
     }
 

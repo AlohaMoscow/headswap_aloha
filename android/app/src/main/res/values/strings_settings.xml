@@ -88,4 +88,11 @@
     <string name="wl_off">off</string>
     <string name="wl_no_permission">Without the “Nearby devices” permission the car cannot connect over Wi-Fi</string>
     <string name="wl_report">Send wireless report</string>
+    <string name="wl_car_line">Car: %1$s</string>
+    <string name="wl_car_none">not selected</string>
+    <string name="wl_car_note">When the phone connects to this car over Bluetooth, Headswap starts waiting for it over Wi-Fi by itself</string>
+    <string name="wl_car_pick">Select car</string>
+    <string name="wl_car_forget">Forget car</string>
+    <string name="wl_car_no_permission">Without the “Nearby devices” permission Bluetooth events from the car are not delivered</string>
+    <string name="wl_car_unavailable">This phone cannot pair a car (no companion device setup)</string>
 </resources>

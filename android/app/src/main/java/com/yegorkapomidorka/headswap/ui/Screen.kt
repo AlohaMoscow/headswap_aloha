@@ -26,6 +26,9 @@ abstract class Screen(val host: MainActivity) {
 
     open fun onPermissionResult() {}
 
+    /** Вернулся результат стороннего activity/диалога (выбор машины через CDM). */
+    open fun onActivityResultDone() {}
+
     /** Отладка (adb --ei scroll_y N): прокрутить экран, чтобы снять нижнюю часть. */
     fun scrollTo(y: Int) {
         fun find(v: View): ScrollView? {
