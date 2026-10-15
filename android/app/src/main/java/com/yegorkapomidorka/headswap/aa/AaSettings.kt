@@ -31,6 +31,11 @@ class AaPrefs(ctx: Context) {
         get() = VideoMode.parse(sp.getString("videoMode", VideoMode.DEFAULT.name))
         set(v) = sp.edit().putString("videoMode", v.name).apply()
 
+    /** Ручной DPI интерфейса AA (AaDensity), 0 = авто (density режима). Читается один раз на подключение. */
+    var aaDensity: Int
+        get() = AaDensity.parse(sp.getInt("aaDensity", AaDensity.AUTO))
+        set(v) = sp.edit().putInt("aaDensity", AaDensity.parse(v)).apply()
+
     /** Частота кадров (имя FpsSetting, по умолчанию Авто). Читается один раз на подключение. */
     var fpsSetting: FpsSetting
         get() = FpsSetting.parse(sp.getString("fpsSetting", FpsSetting.DEFAULT.name))

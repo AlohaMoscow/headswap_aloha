@@ -17,6 +17,7 @@ import android.widget.Toast
 import com.yegorkapomidorka.headswap.AppLog
 import com.yegorkapomidorka.headswap.CarLifeState
 import com.yegorkapomidorka.headswap.R
+import com.yegorkapomidorka.headswap.aa.AaDensity
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
@@ -200,7 +201,8 @@ object LogShare {
             appendLine()
             appendLine("Настройки моста")
             appendLine("  видео: ${if (aa.transcode) "перекодирование" else "passthrough"}")
-            appendLine("  разрешение видео: выбрано ${aa.videoMode.name}, в сессии: ${CarLifeState.videoMode?.describe() ?: "сессии не было"}")
+            appendLine("  разрешение видео: выбрано ${aa.videoMode.name}, в сессии: ${CarLifeState.videoMode?.describe(CarLifeState.densityOverride) ?: "сессии не было"}")
+            appendLine("  масштаб интерфейса AA: ${if (aa.aaDensity == AaDensity.AUTO) "авто" else "${aa.aaDensity} dpi"}")
             appendLine("  частота кадров: ${aa.fpsSetting.name}")
             appendLine("  звук по USB: ${aa.usbAudio}")
             appendLine("  сертификат: ${aa.certSet}")

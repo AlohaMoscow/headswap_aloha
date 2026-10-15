@@ -26,6 +26,16 @@
 
     <string name="set_fps">Частота кадров</string>
     <string name="set_fps_note">Применится при следующем подключении. В прямом пробросе частота не регулируется.</string>
+    <string name="set_aa_density">Масштаб интерфейса AA</string>
+    <string name="set_aa_density_auto">Авто · %1$d dpi</string>
+    <string name="set_aa_density_manual">%1$d dpi</string>
+    <string name="set_aa_density_auto_sub">как задано для разрешения</string>
+    <string name="set_aa_density_manual_sub">вручную, авто для разрешения: %1$d</string>
+    <string name="set_aa_density_reset">Авто</string>
+    <string name="set_aa_density_smaller">Мельче</string>
+    <string name="set_aa_density_larger">Крупнее</string>
+    <string name="set_aa_density_note">Больше dpi — крупнее. Применится при следующем подключении. При высоком dpi Android Auto может переключить раскладку: одна колонка вместо разделённого экрана.</string>
+    <string name="set_sum_density">%1$d dpi</string>
 
     <string name="set_cert">Сертификат ГУ</string>
     <string name="set_cert_hint">Смените, если Android Auto не подключается</string>

@@ -183,4 +183,80 @@ class VideoModeTest {
         core.onCarlifeTouch(0, 640, 500)
         assertTrue(logs.toString(), logs.any { it.contains("640,500") && it.contains("640,479") })
     }
+
+    @Test
+    fun densityAutoIsModeDensity() {
+        for (m in VideoMode.values()) {
+            assertEquals(m.name, m.density, m.densityFor(AaDensity.AUTO))
+            assertEquals(m.name, m.density, m.sdOptions(false).density)
+            assertEquals(m.name, m.density, m.sdOptions(false, AaDensity.AUTO).density)
+        }
+        // авто = прежний SDR байт в байт
+        assertEquals(hex(M.serviceDiscoveryResponse(VideoMode.R720.sdOptions(false)).payload),
+            hex(M.serviceDiscoveryResponse(VideoMode.R720.sdOptions(false, AaDensity.AUTO)).payload))
+    }
+
+    @Test
+    fun densityOverrideReplacesOnlyDensity() {
+        for (m in VideoMode.values()) {
+            val auto = m.sdOptions(true)
+            val o = m.sdOptions(true, 200)
+            assertEquals(m.name, 200, o.density)
+            assertEquals(m.name, auto.copy(density = 200), o)      // разрешение, margin-ы, звук - как в авто
+        }
+        // R720 с 200: VideoConfiguration ... density 200 (c8 01) вместо 160 (a0 01)
+        val r720 = hex(M.serviceDiscoveryResponse(VideoMode.R720.sdOptions(false, 200)).payload)
+        assertTrue(r720, r720.contains("0802100218002000" + "28c801"))
+        val r800 = hex(M.serviceDiscoveryResponse(VideoMode.R800.sdOptions(false, 100)).payload)
+        assertTrue(r800, r800.contains("0801100218002000" + "2864"))       // density 100
+    }
+
+    @Test
+    fun densityOverrideDoesNotTouchCropOrTouch() {
+        // кроп и тач - свойства режима, override в них не участвует; проверяем на ядре моста с override
+        for (m in VideoMode.values()) {
+            val crop = m.crop
+            val touch = listOf(0 to 0, m.outW / 2 to m.outH / 2, m.outW - 1 to m.outH - 1).map { (x, y) -> m.mapTouch(x, y) }
+            m.sdOptions(false, 280)
+            assertEquals(m.name, crop, m.crop)
+            assertEquals(m.name, touch, listOf(0 to 0, m.outW / 2 to m.outH / 2, m.outW - 1 to m.outH - 1).map { (x, y) -> m.mapTouch(x, y) })
+        }
+        val core = AaBridgeCore({ _, _ -> })
+        val peer = FakePeer()
+        core.peer = peer
+        core.videoMode = VideoMode.WIDE
+        core.densityOverride = 120
+        core.onCarlifeTouch(0, 640, 0)
+        core.onCarlifeTouch(1, 640, 500)
+        assertEquals(listOf(Triple(0, 640, 0), Triple(1, 640, 479)), peer.touches.toList())
+    }
+
+    @Test
+    fun densityDescribeMarksOverride() {
+        assertEquals(VideoMode.R720.describe(), VideoMode.R720.describe(AaDensity.AUTO))
+        assertEquals(
+            "видео-режим R720: AA 1280x720 margins 0x0 density 200 (вручную, авто 160), CarLife 1280x720, без кропа",
+            VideoMode.R720.describe(200),
+        )
+    }
+
+    @Test
+    fun densityParseAndStep() {
+        assertEquals(listOf(100, 120, 140, 160, 180, 200, 220, 240, 260, 280), AaDensity.VALUES)
+        assertEquals(AaDensity.AUTO, AaDensity.parse(0))
+        assertEquals(200, AaDensity.parse(200))
+        assertEquals(AaDensity.AUTO, AaDensity.parse(210))      // вне сетки
+        assertEquals(AaDensity.AUTO, AaDensity.parse(320))      // вне диапазона
+        assertEquals(AaDensity.AUTO, AaDensity.parse(80))
+        // из авто - соседнее значение от density режима
+        assertEquals(180, AaDensity.step(AaDensity.AUTO, 160, up = true))
+        assertEquals(140, AaDensity.step(AaDensity.AUTO, 160, up = false))
+        assertEquals(100, AaDensity.step(AaDensity.AUTO, 120, up = false))
+        assertEquals(280, AaDensity.step(AaDensity.AUTO, 320, up = false))      // R1440: авто выше максимума
+        assertEquals(AaDensity.AUTO, AaDensity.step(AaDensity.AUTO, 320, up = true))
+        // на краях стоим
+        assertEquals(280, AaDensity.step(280, 160, up = true))
+        assertEquals(100, AaDensity.step(100, 160, up = false))
+        assertEquals(220, AaDensity.step(200, 160, up = true))
+    }
 }
