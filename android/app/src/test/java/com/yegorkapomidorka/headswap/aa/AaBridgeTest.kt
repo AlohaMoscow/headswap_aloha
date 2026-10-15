@@ -67,10 +67,15 @@ class FakeLink : CarlifeLink {
 }
 
 class FakePeer : AaPeer {
+    /** Проекция одного пальца (action, x, y) первого указателя - для старых проверок. */
     val touches = CopyOnWriteArrayList<Triple<Int, Int, Int>>()
+
+    /** Полная форма: (action, action_index, пальцы). */
+    val events = CopyOnWriteArrayList<Triple<Int, Int, List<TouchPoint>>>()
     @Volatile var keyframes = 0
-    override fun sendTouch(action: Int, x: Int, y: Int) {
-        touches.add(Triple(action, x, y))
+    override fun sendTouch(action: Int, actionIndex: Int, points: List<TouchPoint>) {
+        events.add(Triple(action, actionIndex, points))
+        touches.add(Triple(action, points[0].x, points[0].y))
     }
 
     override fun requestKeyFrame() {
@@ -231,6 +236,80 @@ class AaBridgeCoreTest {
         core.onCarlifeTouch(0, 5, 5)                          // AA не подключён: игнор без исключений
         assertEquals(3, peer.touches.size)
         assertTrue(logs.any { it.contains("DOWN 40,675") })
+    }
+
+    private fun pts(vararg p: Int) = p.toList().chunked(3).map { TouchPoint(it[0], it[1], it[2]) }
+
+    @Test
+    fun pinchSecondFingerUpFirst() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onCarlifeTouch(0, 100, 100)
+        core.onCarlifeTouch(5 or (1 shl 8), 100, 100, 300, 300)        // 261
+        core.onCarlifeTouch(2, 90, 90, 310, 310)
+        core.onCarlifeTouch(2, 85, 85)                                 // px/py = 0: второй палец на прежнем месте
+        core.onCarlifeTouch(2, 80, 80, 320, 320)
+        core.onCarlifeTouch(6 or (1 shl 8), 80, 80, 320, 320)          // 262
+        core.onCarlifeTouch(2, 81, 81)
+        core.onCarlifeTouch(1, 81, 81)
+        assertEquals(
+            listOf(
+                Triple(0, 0, pts(0, 100, 100)),
+                Triple(5, 1, pts(0, 100, 100, 1, 300, 300)),
+                Triple(2, 0, pts(0, 90, 90, 1, 310, 310)),
+                Triple(2, 0, pts(0, 85, 85, 1, 310, 310)),
+                Triple(2, 0, pts(0, 80, 80, 1, 320, 320)),
+                Triple(6, 1, pts(0, 80, 80, 1, 320, 320)),
+                Triple(2, 0, pts(0, 81, 81)),
+                Triple(1, 0, pts(0, 81, 81)),
+            ),
+            peer.events.toList(),
+        )
+        assertTrue(logs.any { it.contains("POINTER_DOWN[1] пальцев 2") })
+    }
+
+    @Test
+    fun pinchFirstFingerUpKeepsId() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onCarlifeTouch(0, 10, 10)
+        core.onCarlifeTouch(261, 10, 10, 50, 50)
+        core.onCarlifeTouch(6, 12, 12, 52, 52)                         // поднят палец индекса 0
+        core.onCarlifeTouch(2, 55, 55)                                 // оставшийся палец теперь в x,y, id 1
+        core.onCarlifeTouch(1, 56, 56)
+        core.onCarlifeTouch(0, 7, 7)                                   // новый жест: снова id 0
+        core.onCarlifeTouch(1, 7, 7)
+        assertEquals(
+            listOf(
+                Triple(0, 0, pts(0, 10, 10)),
+                Triple(5, 1, pts(0, 10, 10, 1, 50, 50)),
+                Triple(6, 0, pts(0, 12, 12, 1, 52, 52)),
+                Triple(2, 0, pts(1, 55, 55)),
+                Triple(1, 0, pts(1, 56, 56)),
+                Triple(0, 0, pts(0, 7, 7)),
+                Triple(1, 0, pts(0, 7, 7)),
+            ),
+            peer.events.toList(),
+        )
+    }
+
+    @Test
+    fun pinchLostPointerUpAndThirdFinger() {
+        val peer = FakePeer()
+        core.peer = peer
+        core.onCarlifeTouch(0, 10, 10)
+        core.onCarlifeTouch(261, 10, 10)                               // без pointer-полей: второй палец в x,y (как Baidu)
+        core.onCarlifeTouch(5 or (2 shl 8), 10, 10, 20, 20)            // третий палец: не передаём
+        core.onCarlifeTouch(1, 11, 11)                                 // POINTER_UP потерян: сначала снимаем второй
+        assertEquals(
+            listOf(
+                Triple(0, 0, pts(0, 10, 10)),
+                Triple(5, 1, pts(0, 10, 10, 1, 10, 10)),
+                Triple(6, 1, pts(0, 10, 10, 1, 10, 10)),
+                Triple(1, 0, pts(0, 11, 11)),
+            ),
+            peer.events.toList(),
+        )
     }
 
     @Test

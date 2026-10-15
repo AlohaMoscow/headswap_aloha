@@ -55,8 +55,16 @@ class AapStats {
  * Своя нить; sendTouch/requestStop можно звать из любой. log(line, ui): ui=false для потока видео-кадров.
  */
 /** Что мост требует от AA-сессии. */
+/** Палец AA-тача: pointer_id и координаты кадра AA. */
+data class TouchPoint(val id: Int, val x: Int, val y: Int)
+
 interface AaPeer {
-    fun sendTouch(action: Int, x: Int, y: Int)
+    /** Тач со всеми активными пальцами; action_index - позиция в [points] пальца, вызвавшего POINTER_DOWN/UP. */
+    fun sendTouch(action: Int, actionIndex: Int, points: List<TouchPoint>)
+
+    /** Один палец с id 0. */
+    fun sendTouch(action: Int, x: Int, y: Int) = sendTouch(action, 0, listOf(TouchPoint(0, x, y)))
+
     fun requestKeyFrame()
 
     /** Нажатие кнопки (Android KeyEvent keycode): down, затем up. По умолчанию игнорируется. */
@@ -148,16 +156,16 @@ class AapSession(
         if (stopReason == null) stopReason = reason
     }
 
-    /** action 0 DOWN, 1 UP, 2 MOVE; координаты в пикселях кадра 1280x720. Игнорируется до готовности сессии. */
-    override fun sendTouch(action: Int, x: Int, y: Int) {
+    /** action 0 DOWN, 1 UP, 2 MOVE, 5 POINTER_DOWN, 6 POINTER_UP; координаты в пикселях кадра AA. Игнорируется до готовности сессии. */
+    override fun sendTouch(action: Int, actionIndex: Int, points: List<TouchPoint>) {
         if (!established || stopReason != null) {
-            log("AA touch($action,$x,$y) пропущен: сессия ${if (established) "завершается" else "ещё не готова"}", true)
+            log("AA touch($action,$actionIndex,$points) пропущен: сессия ${if (established) "завершается" else "ещё не готова"}", true)
             return
         }
         try {
             // uint64 нс, строго > 0 и монотонно; System.nanoTime() сам по себе может быть отрицательным/произвольным
             val ts = System.nanoTime() - clockBaseNs + 1_000_000_000L
-            outQueue.offer(MsgJob(M.touchEvent(action, x, y, ts), false, "touch ts=${ts}ns"))
+            outQueue.offer(MsgJob(M.touchEvent(action, actionIndex, points, ts), false, "touch ts=${ts}ns"))
         } catch (e: Throwable) {
             log("AA ошибка постановки touch в очередь: ${e.javaClass.simpleName}: ${e.message}", true)
         }
