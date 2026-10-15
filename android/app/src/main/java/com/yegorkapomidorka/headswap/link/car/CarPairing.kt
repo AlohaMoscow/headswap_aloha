@@ -33,15 +33,45 @@ object CarPairing {
         ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP) &&
             ctx.getSystemService(CompanionDeviceManager::class.java) != null
 
+    /** Имя, выбранное в нашем списке: CDM на 33+ отдаёт displayName, но у части прошивок это MAC. */
+    @Volatile private var pickedName: String? = null
+
+    /**
+     * Сначала свой список спаренных устройств с именами (системный диалог CDM показывает всё вокруг, часто одними MAC),
+     * затем CDM подтверждает одно выбранное устройство (фильтр по адресу, singleDevice).
+     */
+    @SuppressLint("MissingPermission")
     fun start(activity: Activity) {
-        val cdm = activity.getSystemService(CompanionDeviceManager::class.java)
-        if (cdm == null || !available(activity)) {
+        if (!available(activity)) {
             WLog.ev(WLog.TRIGGER, "pair-fail", "err" to "unavailable")
             return
         }
+        val bonded = try {
+            activity.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.bondedDevices.orEmpty()
+                .map { (try { it.name } catch (_: SecurityException) { null } ?: it.address) to it.address }
+                .sortedBy { it.first.lowercase() }
+        } catch (e: SecurityException) {
+            emptyList()
+        }
+        if (bonded.isEmpty()) {
+            WLog.ev(WLog.TRIGGER, "pair-list", "bonded" to 0)
+            associate(activity, null, null)      // нет разрешения или спаренных: системный диалог как есть
+            return
+        }
+        android.app.AlertDialog.Builder(activity)
+            .setTitle(com.yegorkapomidorka.headswap.R.string.wl_car_pick)
+            .setItems(bonded.map { it.first }.toTypedArray()) { _, i -> associate(activity, bonded[i].second, bonded[i].first) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun associate(activity: Activity, mac: String?, name: String?) {
+        val cdm = activity.getSystemService(CompanionDeviceManager::class.java) ?: return
+        pickedName = name
+        val filter = BluetoothDeviceFilter.Builder().apply { if (mac != null) setAddress(mac) }.build()
         val request = AssociationRequest.Builder()
-            .addDeviceFilter(BluetoothDeviceFilter.Builder().build())
-            .setSingleDevice(false)
+            .addDeviceFilter(filter)
+            .setSingleDevice(mac != null)
             .build()
         try {
             if (Build.VERSION.SDK_INT >= 33) cdm.associate(request, activity.mainExecutor, ModernCallback(activity))
@@ -125,7 +155,8 @@ object CarPairing {
                 WLog.ev(WLog.TRIGGER, "forget-fail", "err" to e.javaClass.simpleName)
             }
         }
-        profile.save(mac, name ?: if (sameMac) profile.btName else null, keepId)
+        // имя из нашего списка надёжнее displayName CDM (у части прошивок там MAC)
+        profile.save(mac, pickedName ?: name ?: if (sameMac) profile.btName else null, keepId)
         CarProfile.enableTrigger(ctx, true)
         WLog.ev(WLog.TRIGGER, "paired", "dev" to WLog.maskMac(mac), "cdm" to id)
         observe(ctx, mac)
