@@ -153,8 +153,8 @@ class BridgeService : Service() {
             }
             wifiBMode = true
             stopRequested = false
-            btProbe.start()
             startWifiB()
+            btProbe.start()      // после WLog.begin в startWifiB: t= в строках WL bt от начала попытки
             return START_NOT_STICKY
         }
 
