@@ -406,9 +406,13 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         card.addView(wlStatus, lp(MATCH, WRAP))
         wlNoPermission = c.text(c.getString(R.string.wl_no_permission), 13f, 400, c.clr(R.color.warn)).apply { visibility = View.GONE }
         card.addView(wlNoPermission, lp(MATCH, WRAP))
-        card.addView(c.tonalButton(c.getString(R.string.wl_start)).apply { setOnClickListener { onWirelessStart() } }, lp(MATCH, WRAP))
-        card.addView(c.outlineButton(c.getString(R.string.wl_stop), heightDp = 52, sp = 15f).apply { setOnClickListener { Actions.stopBridge(c) } }, lp(MATCH, WRAP))
-        card.addView(c.linkButton(c.getString(R.string.wl_report)).apply { setOnClickListener { LogShare.shareReport(c) } }, lp(MATCH, WRAP))
+        // высота кнопок задаётся явно (как на других экранах): pill с WRAP сжимается до высоты текста
+        card.addView(c.primaryButton(c.getString(R.string.wl_start), heightDp = 60, sp = 17f).apply { setOnClickListener { onWirelessStart() } },
+            lp(MATCH, c.dp(60)).apply { topMargin = c.dp(4) })
+        card.addView(c.outlineButton(c.getString(R.string.wl_stop), heightDp = 56, sp = 16f).apply { setOnClickListener { Actions.stopBridge(c) } },
+            lp(MATCH, c.dp(56)))
+        card.addView(c.linkButton(c.getString(R.string.wl_report), heightDp = 52, sp = 16f).apply { setOnClickListener { LogShare.shareReport(c) } },
+            lp(MATCH, c.dp(52)))
         refreshWireless()
         return card
     }
