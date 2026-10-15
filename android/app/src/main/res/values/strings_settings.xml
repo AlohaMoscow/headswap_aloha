@@ -61,6 +61,7 @@
     <string name="set_rerun_setup">Run setup again</string>
     <string name="set_check_ready">Check readiness</string>
     <string name="set_for_devs">For developers</string>
+    <string name="set_support">Support Yegor</string>
     <string name="set_sec_appearance">Appearance</string>
     <string name="set_sec_sound">Sound and microphone</string>
     <string name="set_sec_headunit">Head unit</string>

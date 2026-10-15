@@ -111,6 +111,9 @@ private fun Context.updateStatus(): Pair<String, Int> {
     }
 }
 
+/** Страница «Поддержать Егора» на сайте (реквизиты там, в приложении их нет). */
+private const val SUPPORT_URL = "https://yegorkapomidorka.com/headswap/support/"
+
 /** Главный экран настроек: разделы с текущими значениями, помощь, версия. */
 class SettingsScreen(host: MainActivity) : Screen(host) {
     private val aa = AaPrefs(ctx)
@@ -147,6 +150,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             "?"
         }
         body.addView(c.text(c.getString(R.string.set_footer, ver), 13f, 400, c.clr(R.color.on2)).apply { gravity = Gravity.CENTER }, lp(MATCH, WRAP))
+        body.addView(supportButton(), LinearLayout.LayoutParams(WRAP, c.dp(44)).margins(c, 0, 12, 0, 8).apply { gravity = Gravity.CENTER_HORIZONTAL })
 
         refreshSummaries()
         view = scaffold(c, c.getString(R.string.set_title), { host.back() }, body)
@@ -223,6 +227,28 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             val car = CarProfile(c)
             val carText = if (car.isSet) c.getString(R.string.wl_car_line, car.btName ?: car.btMac ?: "") else null
             set(SettingsSection.WIRELESS, listOfNotNull(CarLifeState.wireless ?: c.getString(R.string.wl_off), carText).joinToString(" · "))
+        }
+    }
+
+    /** «Поддержать Егора»: контурная пилюля под версией, открывает страницу поддержки на сайте. */
+    private fun supportButton(): View {
+        val c = ctx
+        val fg = c.clr(R.color.acc)
+        return c.hbox(8).apply {
+            gravity = Gravity.CENTER
+            pad(c, 18, 0, 18, 0)
+            background = c.rippleBg(c.shape(0, 22, fg, 1.5f), 22)
+            isClickable = true
+            isFocusable = true
+            addView(c.icon(R.drawable.ic_heart, 18, fg))
+            addView(c.text(c.getString(R.string.set_support), 15f, 600, fg))
+            setOnClickListener {
+                try {
+                    c.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(SUPPORT_URL)))
+                } catch (e: Exception) {
+                    AppLog.e("поддержка: браузер не открылся: ${e.message}")
+                }
+            }
         }
     }
 
