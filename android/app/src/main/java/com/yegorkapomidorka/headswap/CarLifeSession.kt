@@ -117,6 +117,8 @@ class CarLifeSession(
     private var huAuthResult: String? = null
     private var touchMode = "не было тачей"
     private var touchCount = 0
+    private var maxFingers = 0
+    private var lastMoveFingers = 0
     private val rxByType = java.util.TreeMap<Int, Int>()
     private var huInfo: String? = null
     private var huStatistic: String? = null
@@ -270,7 +272,7 @@ class CarLifeSession(
 
     private fun isMove(body: ByteArray): Boolean {
         val f = PbReader.parse(body) ?: return false
-        return PbReader.int(f, 1) == 2
+        return ((PbReader.int(f, 1) ?: -1) and 0xFF) == 2
     }
 
     // ---------------- CMD ----------------
@@ -785,40 +787,29 @@ class CarLifeSession(
     // ---------------- TOUCH ----------------
 
     private fun onTouch(m: CmdMsg) {
-        val f = PbReader.parse(m.body) ?: return
-        var action = -1
-        var x = -1
-        var y = -1
-        when (m.type) {
-            Msg.TOUCH_ACTION -> {
-                action = PbReader.int(f, 1) ?: -1
-                x = PbReader.int(f, 2) ?: -1
-                y = PbReader.int(f, 3) ?: -1
-                setTouchMode("TOUCH_ACTION (прозрачный, TRANSPARENT_SEND_TOUCH_EVENT=true)")
-            }
-            Msg.TOUCH_ACTION_BEGIN, Msg.TOUCH_ACTION_DOWN, Msg.TOUCH_ACTION_UP, Msg.TOUCH_ACTION_MOVE,
-            Msg.TOUCH_SINGLE_CLICK, Msg.TOUCH_DOUBLE_CLICK, Msg.TOUCH_LONG_PRESS -> {
-                x = PbReader.int(f, 1) ?: -1
-                y = PbReader.int(f, 2) ?: -1
-                action = when (m.type) {
-                    Msg.TOUCH_ACTION_BEGIN, Msg.TOUCH_ACTION_DOWN -> 0
-                    Msg.TOUCH_ACTION_UP -> 1
-                    Msg.TOUCH_ACTION_MOVE -> 2
-                    else -> 3
-                }
-                setTouchMode("жестовый (отдельные коды 0x68002..0x6800A)")
-            }
-            Msg.TOUCH_CAR_HARD_KEY_CODE -> {
-                val code = PbReader.int(f, 1)
-                AppLog.i("== HARD KEY keycode=$code")
-                if (code != null) bridge.onCarlifeHardKey(code)
-                return
-            }
-            else -> return
+        if (m.type == Msg.TOUCH_CAR_HARD_KEY_CODE) {
+            val code = PbReader.parse(m.body)?.let { PbReader.int(it, 1) }
+            AppLog.i("== HARD KEY keycode=$code")
+            if (code != null) bridge.onCarlifeHardKey(code)
+            return
         }
+        val t = CarlifeTouch.parse(m.type, m.body) ?: return
+        setTouchMode(
+            if (m.type == Msg.TOUCH_ACTION) "TOUCH_ACTION (прозрачный, TRANSPARENT_SEND_TOUCH_EVENT=true)"
+            else "жестовый (отдельные коды 0x68002..0x6800D)"
+        )
         touchCount++
-        if (action in 0..2) bridge.onCarlifeTouch(action, x, y)
-        CarLifeState.touch = "$touchMode; событий=$touchCount; последний act=$action x=$x y=$y"
+        val n = t.fingers
+        if (n > 1 && maxFingers < 2) AppLog.i("== МУЛЬТИТАЧ: ГУ шлёт второй палец (action=${t.action} тело=${m.body.size} байт)")
+        maxFingers = maxOf(maxFingers, n)
+        // для чек-листа щипка: сырой action, пальцы, длина тела; MOVE только при смене числа пальцев, иначе лог раздует
+        if (t.masked != 2 || n != lastMoveFingers) {
+            AppLog.i("TOUCH action=${t.action} пальцев=$n тело=${m.body.size} байт", false)
+            lastMoveFingers = if (t.masked == 2) n else 0
+        }
+        if (t.masked in TOUCH_TO_AA) bridge.onCarlifeTouch(t.action, t.x, t.y, t.px, t.py)
+        CarLifeState.touch = "$touchMode; событий=$touchCount; пальцев макс=$maxFingers; последний act=${t.action} x=${t.x} y=${t.y}" +
+            (if (n > 1) " px=${t.px} py=${t.py}" else "")
     }
 
     private fun setTouchMode(mode: String) {
@@ -1028,6 +1019,9 @@ class CarLifeSession(
 
     companion object {
         const val FPS = Handshake.DEFAULT_FPS
+
+        /** action&255 тача, которые мост переводит в AA: DOWN, UP, MOVE, POINTER_DOWN, POINTER_UP. */
+        private val TOUCH_TO_AA = setOf(0, 1, 2, 5, 6)
         private const val MAX_AUDIO_QUEUE = 180       // звук не принимается, если в общей очереди больше пакетов
         private const val BITRATE_POLL_MS = 100L
         private const val NEVER_MS = Long.MIN_VALUE

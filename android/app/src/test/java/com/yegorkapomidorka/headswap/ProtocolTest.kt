@@ -96,6 +96,43 @@ class ProtocolTest {
     }
 
     @Test
+    fun touchActionParse() {
+        // один палец: тело 8 байт, pointer-полей нет
+        val one = CarlifeTouch.parse(Msg.TOUCH_ACTION, Msgs.touchAction(2, 640, 360))!!
+        assertEquals(CarlifeTouch(2, 640, 360), one)
+        assertEquals(1, one.fingers)
+
+        // POINTER_DOWN индекса 1 (261) со вторым пальцем в полях 4,5
+        val body = Msgs.touchAction(261, 100, 200, 300, 400)
+        assertArrayEquals(hex("08 85 02 10 64 18 C8 01 20 AC 02 28 90 03"), body)
+        val two = CarlifeTouch.parse(Msg.TOUCH_ACTION, body)!!
+        assertEquals(CarlifeTouch(261, 100, 200, 300, 400), two)
+        assertEquals(5, two.masked)
+        assertEquals(2, two.fingers)
+        assertEquals("{action=261 x=100 y=200 pointerx=300 pointery=400}", PbText.render(body, Schemas.touchAction))
+
+        // MOVE двумя пальцами
+        assertEquals(2, CarlifeTouch.parse(Msg.TOUCH_ACTION, Msgs.touchAction(2, 1, 2, 3, 4))!!.fingers)
+        // POINTER_UP индекса 0 без координат второго: всё равно два пальца
+        val up0 = CarlifeTouch.parse(Msg.TOUCH_ACTION, Msgs.touchAction(6, 1, 2))!!
+        assertEquals(6, up0.action)
+        assertEquals(2, up0.fingers)
+    }
+
+    @Test
+    fun touchGestureParse() {
+        val p = PbWriter().int32(1, 10).int32(2, 20).toByteArray()
+        assertEquals(CarlifeTouch(0, 10, 20), CarlifeTouch.parse(Msg.TOUCH_ACTION_DOWN, p))
+        assertEquals(CarlifeTouch(3, 10, 20), CarlifeTouch.parse(Msg.TOUCH_SINGLE_CLICK, p))
+        assertEquals(CarlifeTouch(261, 10, 20), CarlifeTouch.parse(Msg.TOUCH_ACTION_POINTER_DOWN, p))
+        assertEquals(CarlifeTouch(6, 10, 20), CarlifeTouch.parse(Msg.TOUCH_ACTION_POINTER_UP, p))
+        assertEquals(CarlifeTouch(262, 10, 20), CarlifeTouch.parse(Msg.TOUCH_ACTION_OTHERPOINTER_UP, p))
+        val move2 = PbWriter().int32(1, 10).int32(2, 20).int32(3, 30).int32(4, 40).toByteArray()
+        assertEquals(CarlifeTouch(2, 10, 20, 30, 40), CarlifeTouch.parse(Msg.TOUCH_ACTION_MOVE, move2))
+        assertNull(CarlifeTouch.parse(Msg.TOUCH_CAR_HARD_KEY_CODE, p))
+    }
+
+    @Test
     fun videoDataHeader() {
         val h264 = hex("00 00 00 01 67 AA 00 00 00 01 68 BB 00 00 00 01 65 CC DD")
         val inner = Wire.dataInner(Msg.VIDEO_DATA, 0x11223344, h264)

@@ -189,6 +189,23 @@ class AapMessagesTest {
     }
 
     @Test
+    fun touchEventMultiBytes() {
+        // один палец через список: байт-в-байт как touch_down из golden (до мультитача)
+        assertArrayEquals(
+            Golden.hex("0894b4e4f4cb031a0e0a0808800510e802180010001800"),
+            M.touchEvent(M.TOUCH_DOWN, 0, listOf(TouchPoint(0, 640, 360)), 123456789012L).payload,
+        )
+        // InputReport{1: ts=1, 3: TouchEvent{1: {100,50,id 0}, 1: {200,60,id 1}, 2: action_index 1, 3: POINTER_DOWN}}
+        val two = M.touchEvent(M.TOUCH_POINTER_DOWN, 1, listOf(TouchPoint(0, 100, 50), TouchPoint(1, 200, 60)), 1)
+        assertEquals(M.CH_INPUT, two.chan)
+        assertEquals(M.INPUT_EVENT, two.type)
+        assertArrayEquals(
+            Golden.hex("08 01 1a 15 0a 06 08 64 10 32 18 00 0a 07 08 c8 01 10 3c 18 01 10 01 18 05"),
+            two.payload,
+        )
+    }
+
+    @Test
     fun keyEventBytes() {
         // InputReport{1: ts=5, 4: KeyEvent{1: Key{1: 87, 2: true, 3: 0, 4: false}}}
         val down = M.keyEvent(5, 87, true)

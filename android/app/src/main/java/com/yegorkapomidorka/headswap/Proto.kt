@@ -140,8 +140,11 @@ object Schemas {
         1 to int("cnt"), 2 to FieldDef("featureConfig", Kind.MSG, featureConfig),
         3 to bool("huBtAudioSupport"), 4 to str("huBtName"), 5 to str("huBtMAC")
     )
-    val touchAction = schema("CarlifeTouchAction", 1 to int("action"), 2 to int("x"), 3 to int("y"))
-    val touchPoint = schema("CarlifeTouchSinglePoint", 1 to int("x"), 2 to int("y"))
+    val touchAction = schema(
+        "CarlifeTouchAction",
+        1 to int("action"), 2 to int("x"), 3 to int("y"), 4 to int("pointerx"), 5 to int("pointery")
+    )
+    val touchPoint = schema("CarlifeTouchSinglePoint", 1 to int("x"), 2 to int("y"), 3 to int("pointerx"), 4 to int("pointery"))
     val hardKey = schema("CarlifeCarHardKeyCode", 1 to int("keycode"))
     val connectException = schema("CarlifeConnectException", 1 to int("exceptionType"))
     val errorCode = schema("CarlifeErrorCode", 1 to str("errorCode"))
@@ -233,6 +236,9 @@ object Schemas {
         Msg.TOUCH_SINGLE_CLICK to touchPoint,
         Msg.TOUCH_DOUBLE_CLICK to touchPoint,
         Msg.TOUCH_LONG_PRESS to touchPoint,
+        Msg.TOUCH_ACTION_POINTER_DOWN to touchPoint,
+        Msg.TOUCH_ACTION_POINTER_UP to touchPoint,
+        Msg.TOUCH_ACTION_OTHERPOINTER_UP to touchPoint,
         Msg.TOUCH_CAR_HARD_KEY_CODE to hardKey,
     )
 }
@@ -283,5 +289,43 @@ object PbText {
             else sb.append("\\x").append("%02x".format(c))
         }
         return sb.append('"').toString()
+    }
+}
+
+/**
+ * Тач ГУ в виде CarlifeTouchAction: action как у MotionEvent (action&255 - код, action>>8 - индекс пальца),
+ * второй палец в px/py (0,0 = нет). Жестовые коды сводятся к тем же action, как у Baidu CarlifeTouchManager.
+ */
+data class CarlifeTouch(val action: Int, val x: Int, val y: Int, val px: Int = 0, val py: Int = 0) {
+    val masked: Int get() = action and 0xFF
+
+    /** Пальцев в событии: 2, если есть координаты второго или это POINTER_DOWN/UP. */
+    val fingers: Int get() = if (px != 0 || py != 0 || masked == 5 || masked == 6) 2 else 1
+
+    companion object {
+        /** null - не тач (кнопки руля и пр.) или тело не разобралось. Клики/долгое нажатие -> action 3 (в AA не уходят). */
+        fun parse(type: Int, body: ByteArray): CarlifeTouch? {
+            val f = PbReader.parse(body) ?: return null
+            if (type == Msg.TOUCH_ACTION) {
+                return CarlifeTouch(
+                    PbReader.int(f, 1) ?: -1, PbReader.int(f, 2) ?: -1, PbReader.int(f, 3) ?: -1,
+                    PbReader.int(f, 4) ?: 0, PbReader.int(f, 5) ?: 0,
+                )
+            }
+            val action = when (type) {
+                Msg.TOUCH_ACTION_BEGIN, Msg.TOUCH_ACTION_DOWN -> 0
+                Msg.TOUCH_ACTION_UP -> 1
+                Msg.TOUCH_ACTION_MOVE -> 2
+                Msg.TOUCH_SINGLE_CLICK, Msg.TOUCH_DOUBLE_CLICK, Msg.TOUCH_LONG_PRESS -> 3
+                Msg.TOUCH_ACTION_POINTER_DOWN -> 5 or (1 shl 8)
+                Msg.TOUCH_ACTION_POINTER_UP -> 6
+                Msg.TOUCH_ACTION_OTHERPOINTER_UP -> 6 or (1 shl 8)
+                else -> return null
+            }
+            return CarlifeTouch(
+                action, PbReader.int(f, 1) ?: -1, PbReader.int(f, 2) ?: -1,
+                PbReader.int(f, 3) ?: 0, PbReader.int(f, 4) ?: 0,
+            )
+        }
     }
 }

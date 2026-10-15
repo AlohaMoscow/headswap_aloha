@@ -98,6 +98,9 @@ object Msg {
     const val TOUCH_CAR_HARD_KEY_CODE = 0x00068008
     const val TOUCH_UI_ACTION_SOUND = 0x00060009
     const val TOUCH_ACTION_BEGIN = 0x0006800A
+    const val TOUCH_ACTION_POINTER_DOWN = 0x0006800B
+    const val TOUCH_ACTION_POINTER_UP = 0x0006800C
+    const val TOUCH_ACTION_OTHERPOINTER_UP = 0x0006800D
 
     private val names: Map<Int, String> = mapOf(
         HU_PROTOCOL_VERSION to "HU_PROTOCOL_VERSION",
@@ -220,6 +223,9 @@ object Msg {
         TOUCH_CAR_HARD_KEY_CODE to "TOUCH_CAR_HARD_KEY_CODE",
         TOUCH_UI_ACTION_SOUND to "TOUCH_UI_ACTION_SOUND",
         TOUCH_ACTION_BEGIN to "TOUCH_ACTION_BEGIN",
+        TOUCH_ACTION_POINTER_DOWN to "TOUCH_ACTION_POINTER_DOWN",
+        TOUCH_ACTION_POINTER_UP to "TOUCH_ACTION_POINTER_UP",
+        TOUCH_ACTION_OTHERPOINTER_UP to "TOUCH_ACTION_OTHERPOINTER_UP",
     )
 
     fun name(type: Int): String = names[type] ?: "UNKNOWN"
@@ -514,8 +520,13 @@ object Msgs {
 
     fun authenRequest(random: String) = PbWriter().string(1, random).toByteArray()
 
-    fun touchAction(action: Int, x: Int, y: Int) =
-        PbWriter().int32(1, action).int32(2, x).int32(3, y).toByteArray()
+    /** CarlifeTouchAction; pointerx/pointery (второй палец) optional, без них тело как у одного пальца. */
+    fun touchAction(action: Int, x: Int, y: Int, pointerX: Int? = null, pointerY: Int? = null): ByteArray {
+        val w = PbWriter().int32(1, action).int32(2, x).int32(3, y)
+        if (pointerX != null) w.int32(4, pointerX)
+        if (pointerY != null) w.int32(5, pointerY)
+        return w.toByteArray()
+    }
 
     fun deviceInfo(d: DeviceInfo): ByteArray {
         val w = PbWriter()
