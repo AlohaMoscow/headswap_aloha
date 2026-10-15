@@ -505,7 +505,7 @@ class CarLifeSession(
                 cur.requestKeyFrame()
                 return
             }
-            val s = VideoSource(pendingW, pendingH, pendingFps, mode.bitrate, this)
+            val s = VideoSource(pendingW, pendingH, pendingFps, if (air) bitratePolicy.current else mode.bitrate, this)
             s.banner = text
             try {
                 s.start()
@@ -587,7 +587,9 @@ class CarLifeSession(
                 }
                 return
             }
-            if (!bridge.isTranscoding) return
+            // на воздухе политика ведёт и заглушку (CBR на потолке, пока AA стартует); на USB заглушку не трогаем
+            val placeholder = if (air && !bridge.isTranscoding) source else null
+            if (!bridge.isTranscoding && placeholder == null) return
             val now = SystemClock.elapsedRealtime()
             val rate = transport.drainBytesPerSec
             val qf = transport.queuedVideoFrames
@@ -596,9 +598,11 @@ class CarLifeSession(
             val sinceOverflow = lastOverflowMs.let { if (it == NEVER_MS) -1L else now - it }
             val old = bitratePolicy.current
             val bps = bitratePolicy.update(now, VideoQueueLimit.policyBacklogMs(real, sinceOverflow), rate) ?: return
-            if (bridge.setEncoderBitrate(bps)) {
-                AppLog.i("видео: битрейт энкодера ${old / 1000} -> ${bps / 1000} кбит/с (${bitratePolicy.lastReason}; потолок ${bitratePolicy.ceilingBps / 1000})")
-                if (air) WLog.ev(WLog.VIDEO, "bitrate", "fromKbps" to old / 1000, "toKbps" to bps / 1000, "why" to bitratePolicy.lastReason)
+            if (placeholder?.setBitrate(bps) ?: bridge.setEncoderBitrate(bps)) {
+                val who = if (placeholder != null) "заглушки" else "энкодера"
+                AppLog.i("видео: битрейт $who ${old / 1000} -> ${bps / 1000} кбит/с (${bitratePolicy.lastReason}; потолок ${bitratePolicy.ceilingBps / 1000})")
+                if (air) WLog.ev(WLog.VIDEO, "bitrate", "fromKbps" to old / 1000, "toKbps" to bps / 1000,
+                    "src" to if (placeholder != null) "placeholder" else "aa", "why" to bitratePolicy.lastReason)
             }
         } catch (e: Exception) {
             AppLog.e("адаптация битрейта", e)
