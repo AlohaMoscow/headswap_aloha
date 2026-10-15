@@ -95,5 +95,5 @@
     <string name="mock_cancel">Отмена</string>
     <string name="mock_ok">ОК</string>
 
-    <string name="home_wireless">Беспровод: %1$s</string>
+    <string name="home_wireless">По воздуху: %1$s</string>
 </resources>
