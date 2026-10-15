@@ -158,7 +158,7 @@ class CarLifeSession(
         writer = Thread({ writeLoop() }, "cl-writer").also { it.start() }
         reader = Thread({ readLoop() }, "cl-reader").also { it.start() }
         sched.scheduleWithFixedDelay({ tick() }, 1, 1, TimeUnit.SECONDS)
-        sched.scheduleWithFixedDelay({ pauseHeartbeat() }, PAUSE_KEEPALIVE_MS, PAUSE_KEEPALIVE_MS, TimeUnit.MILLISECONDS)
+        sched.scheduleWithFixedDelay({ pauseHeartbeat() }, PAUSE_HEARTBEAT_MS, PAUSE_HEARTBEAT_MS, TimeUnit.MILLISECONDS)
         sched.scheduleWithFixedDelay({ adaptBitrate() }, 1000, BITRATE_POLL_MS, TimeUnit.MILLISECONDS)
     }
 
@@ -384,8 +384,10 @@ class CarLifeSession(
             Msg.VIDEO_ENCODER_START -> onVideoStart()
             Msg.VIDEO_ENCODER_PAUSE -> {
                 paused = true
-                lastVideoTx = 0L
-                pauseHeartbeat()
+                if (bridge.huVw20082120) { // первый heartbeat сразу; Desay - как раньше, через 2 с
+                    lastVideoTx = 0L
+                    pauseHeartbeat()
+                }
                 bridge.onCarlifePause()
                 AppLog.i("видео: PAUSE, кадры не шлю")
             }
@@ -880,7 +882,7 @@ class CarLifeSession(
                 }
                 return
             }
-            if (m.data.isEmpty()) { // keepalive на PAUSE: VIDEO_HEARTBEAT len=0 (Recorder.sendEmptyPacketBackground)
+            if (m.data.isEmpty()) { // keepalive на PAUSE: пустой VIDEO_DATA (Desay) или VIDEO_HEARTBEAT (VW 20082120)
                 vBeats++
                 if (vBeats <= 3) AppLog.msg("TX", o.chan, o.inner.size, m.type, m.declaredLen, null, o.inner)
                 return
@@ -951,17 +953,23 @@ class CarLifeSession(
     private var lastStatsFrames = 0L
 
     // Пустых keepalive при идущем видео НЕТ: кадры обеспечивает энкодер (repeat-previous-frame-after 100 мс).
-    // На PAUSE (ГУ в своём меню/на своём источнике) шлём VIDEO_HEARTBEAT 0x20002 len=0 сразу и дальше часто,
-    // как Baidu Recorder.sendEmptyPacketBackground (~50 мс). Иначе ГУ рвут USB: Desay G6S (Mazda CX-5) через ~22 с
-    // тишины (лог Ивана 2026-10-12), VW channel 20082120 через 3,6-3,9 с после PAUSE даже при пустом 0x20001 раз
-    // в 2 с (h93, лог 2026-10-15), после чего реконнект с FOREGROUND выдёргивал юзера из меню ГУ обратно в CarLife.
+    // На PAUSE (ГУ в своём меню/на своём источнике) keepalive только для ГУ, которым он нужен, остальные не трогаем:
+    // - Desay G6S (Mazda CX-5) через ~22 с тишины рвёт USB (лог Ивана 2026-10-12): пустой VIDEO_DATA 0x20001 раз в 2 с;
+    // - VW channel 20082120 рвёт USB через 3,6-3,9 с после PAUSE даже при 0x20001 раз в 2 с (h93, лог 2026-10-15),
+    //   реконнект с FOREGROUND выдёргивал юзера из меню ГУ в CarLife: VIDEO_HEARTBEAT 0x20002 сразу и раз в 100 мс,
+    //   как Baidu Recorder.sendEmptyPacketBackground (~50 мс).
     private fun pauseHeartbeat() {
         if (closed.get() || !paused || !PAUSE_KEEPALIVE_ENABLED) return
+        val (type, period) = when {
+            bridge.huVw20082120 -> Msg.VIDEO_HEARTBEAT to PAUSE_HEARTBEAT_MS
+            bridge.huDesayG6S -> Msg.VIDEO_DATA to PAUSE_KEEPALIVE_MS
+            else -> return
+        }
         val now = SystemClock.elapsedRealtime()
-        if (now - lastVideoTx < PAUSE_KEEPALIVE_MS) return
-        if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_HEARTBEAT раз в ${PAUSE_KEEPALIVE_MS} мс, как Baidu")
+        if (now - lastVideoTx < period) return
+        if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой ${Msg.name(type)} раз в $period мс, чтобы ГУ не рвало USB")
         lastVideoTx = now
-        send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_HEARTBEAT, unixSeconds(), ByteArray(0)))
+        send(Ch.VIDEO, Wire.dataInner(type, unixSeconds(), ByteArray(0)))
     }
 
     private fun tick() {
@@ -1035,9 +1043,10 @@ class CarLifeSession(
         private const val BITRATE_POLL_MS = 100L
         private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
-        private const val PAUSE_KEEPALIVE_MS = 100L
+        private const val PAUSE_KEEPALIVE_MS = 2_000L  // Desay G6S: пустой VIDEO_DATA
+        private const val PAUSE_HEARTBEAT_MS = 100L    // VW 20082120: пустой VIDEO_HEARTBEAT
 
-        /** Пустой VIDEO_HEARTBEAT раз в 100 мс, пока ГУ держит PAUSE. */
+        /** Keepalive на PAUSE для ГУ, которые без него рвут USB (Desay G6S, VW 20082120). */
         @Volatile @JvmStatic var PAUSE_KEEPALIVE_ENABLED = true
         private const val FEATURE_CONTENT_ENCRYPTION = "CONTENT_ENCRYPTION"
 

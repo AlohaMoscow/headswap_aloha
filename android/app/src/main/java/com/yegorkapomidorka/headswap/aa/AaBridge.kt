@@ -145,6 +145,8 @@ class AaBridgeCore(
     @Volatile private var btAudio = false
     @Volatile var huDesayG6S = false           // ГУ Desay G6S (Mazda CX-5): NAVI=1 глушит штатное радио, маршрутный NAVI не шлём
         private set
+    @Volatile var huVw20082120 = false         // VW (STATISTIC_INFO channel 20082120, h93): без heartbeat рвёт USB через ~3,7 с PAUSE
+        private set
     private val audioInited = HashMap<Int, Boolean>()
     private val audioLogged = HashMap<Int, Long>()
     var audioBytes = 0L
@@ -295,6 +297,7 @@ class AaBridgeCore(
         huPausedAa = false
         gotIdr = false
         huDesayG6S = false                     // HU_INFO / STATISTIC_INFO придут заново в этой сессии
+        huVw20082120 = false                   // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
         meta.onAttach()
         link.showPlaceholder(placeholderText)
@@ -438,9 +441,10 @@ class AaBridgeCore(
         if (manufacturer == DESAY_MANUFACTURER && model == DESAY_G6S_MODEL) huDesayG6S = true
     }
 
-    /** STATISTIC_INFO ГУ разобран: запасной признак Desay G6S - канал сборки прошивки. */
+    /** STATISTIC_INFO ГУ разобран: запасной признак Desay G6S и признак VW 20082120 - канал сборки прошивки. */
     fun onHuStatistic(channel: String?) {
         if (channel == DESAY_G6S_CHANNEL) huDesayG6S = true
+        if (channel == VW_20082120_CHANNEL) huVw20082120 = true
     }
 
     /** CarLife-сессия закрыта (USB EIO / detach / Стоп). AA не трогаем; from - закрываемая ссылка, чужую не отцепляем. */
@@ -1322,6 +1326,7 @@ class AaBridgeCore(
         const val DESAY_MANUFACTURER = "Desay SV Automotive"
         const val DESAY_G6S_MODEL = "G6S"
         const val DESAY_G6S_CHANNEL = "20622116"          // STATISTIC_INFO.channel у Mazda CX-5; Vezel - 20832125, другая Mazda - 21520001
+        const val VW_20082120_CHANNEL = "20082120"        // VW, protocol 1.0, versionName="RADIO" (h93); Tharu CNS3 - 20082122
         const val KEYFRAME_WAIT_MS = 1500L
         const val KEYFRAME_RETRY_MS = 4000L
         private const val NEVER = Long.MIN_VALUE / 4
