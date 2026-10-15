@@ -15,6 +15,7 @@ object WLog {
     const val LINK = "link"
     const val TCP = "tcp"
     const val HS = "hs"
+    const val VIDEO = "video"
 
     @Volatile var clock: () -> Long = { SystemClock.elapsedRealtime() }
     @Volatile var sink: (String) -> Unit = { AppLog.i(it, ui = false) }

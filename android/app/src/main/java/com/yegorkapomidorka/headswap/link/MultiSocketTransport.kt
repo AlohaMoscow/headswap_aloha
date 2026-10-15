@@ -192,6 +192,12 @@ class Tcp6Listener(
             }
             if (peer == null) peer = addr
             setOptions(s)
+            if (chan == Ch.VIDEO) {
+                // малый буфер отправки: иначе очередь прячется в ядре (до МиБ), запись не блокируется и слив не меряется,
+                // политика битрейта на воздухе слепнет (лог VW 15.10: слив 6-19 МиБ/с, битрейт ни разу не сдвинулся)
+                s.sendBufferSize = VIDEO_SNDBUF
+                WLog.ev(WLog.TCP, "sndbuf", "chan" to "VIDEO", "asked" to VIDEO_SNDBUF, "got" to s.sendBufferSize)
+            }
             if (chan == DATA_CHAN) {
                 dataSocket = s
                 WLog.ev(WLog.TCP, "accept", "chan" to "DATA", "port" to port, "peer" to addr.hostAddress)
@@ -232,6 +238,9 @@ class Tcp6Listener(
 
     companion object {
         private const val DATA_CHAN = 0
+
+        /** SO_SNDBUF видео-сокета (ядро удваивает): ~250 мс при 4 Мбит/с. */
+        const val VIDEO_SNDBUF = 64 * 1024
 
         fun setOptions(s: Socket) {
             s.tcpNoDelay = true

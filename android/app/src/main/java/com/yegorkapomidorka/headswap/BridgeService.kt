@@ -289,6 +289,13 @@ class BridgeService : Service() {
         } else {
             AppLog.i("BRIDGE: AA-хост уже есть, переиспользую (grace=${h.isInGrace})")
         }
+        // на воздухе перекодирование обязательно: в passthrough битрейт не регулируется. Режим хоста не трогаем
+        // (без перекодирования он уже R720, его можно перекодировать), хост не пересоздаём: сервер AA одноразовый
+        val transcode = aaPrefs.transcode || transport.caps == TransportCaps.TCP6
+        if (h.core.transcodeEnabled != transcode) {
+            AppLog.i("BRIDGE видео: ${if (transcode) "воздух, перекодирование включаю принудительно" else "кабель, возвращаю passthrough по настройке"}")
+            h.core.transcodeEnabled = transcode
+        }
         if (wakeLock == null) {
             wakeLock = getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "headswap:session")

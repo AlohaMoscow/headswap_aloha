@@ -79,6 +79,28 @@ def test_options_defaults_and_validation():
         C.Options(transport="udp")
     with pytest.raises(ValueError):
         C.Options(transport="tcp6", kill_chan="NOPE")
+    with pytest.raises(ValueError):
+        C.Options(video_kbps=1000)                      # шейпер только для tcp6
+
+
+def test_shaper_limit_and_pacing():
+    hu = C.HeadUnit(C.Options(transport="tcp6", quiet=True, out=Path(tempfile.mkdtemp()),
+                              video_kbps=6000, dip_kbps=1000, dip_at=20.0, dip_for=5.0))
+    assert hu.shaping
+    assert hu.video_limit_kbps(0.0) == 6000             # до первого кадра - базовый предел
+    hu.first_frame_at = 100.0
+    assert hu.video_limit_kbps(119.9) == 6000
+    assert hu.video_limit_kbps(120.0) == 1000
+    assert hu.video_limit_kbps(124.9) == 1000
+    assert hu.video_limit_kbps(125.0) == 6000
+    hu.logf = open(Path(tempfile.mkdtemp()) / "log.txt", "w", encoding="utf-8")
+    hu.first_frame_at = None
+    t = C.time.monotonic()
+    for _ in range(10):
+        hu.shape_wait(7500)                             # 75 000 Б при 6000 кбит/с = 0,1 с
+    took = C.time.monotonic() - t
+    hu.logf.close()
+    assert 0.08 <= took <= 0.3, took
 
 
 # ---- end-to-end против фейкового телефона ----

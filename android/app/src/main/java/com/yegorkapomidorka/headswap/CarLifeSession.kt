@@ -6,6 +6,7 @@ import com.yegorkapomidorka.headswap.aa.AaBridgeCore
 import com.yegorkapomidorka.headswap.aa.CarlifeAudio
 import com.yegorkapomidorka.headswap.aa.AaTranscoder
 import com.yegorkapomidorka.headswap.aa.BitratePolicy
+import com.yegorkapomidorka.headswap.aa.BitrateProfile
 import com.yegorkapomidorka.headswap.aa.CarlifeLink
 import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.IdrThrottle
@@ -22,6 +23,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import com.yegorkapomidorka.headswap.link.CarTransport
+import com.yegorkapomidorka.headswap.link.TransportCaps
 import com.yegorkapomidorka.headswap.link.diag.WLog
 
 /** Настройки сессии, снятые в момент старта. */
@@ -58,7 +60,12 @@ class CarLifeSession(
     /** Транспорт сессии: usb-aoa, tcp-debug или tcp6. */
     val transportKind: String get() = transport.caps.kind
 
-    private val bitratePolicy = BitratePolicy(mode.bitrate)
+    /** Воздух (6 сокетов): своя лесенка битрейта, PAUSE-keepalive чаще, WL-строки видео. USB и tcp-debug - как было. */
+    private val air = transport.caps == TransportCaps.TCP6
+    private val bitratePolicy = BitratePolicy(mode.bitrate, profile = if (air) BitrateProfile.WIFI else BitrateProfile.USB)
+    private val pauseKeepaliveMs = if (air) PAUSE_KEEPALIVE_AIR_MS else PAUSE_KEEPALIVE_MS
+    private var overflows = 0
+    private var maxQueueFrames = 0
     private val placeholderIdr = IdrThrottle()
     @Volatile private var lastOverflowMs = NEVER_MS
     private var passthroughBitrateLogged = false
@@ -136,6 +143,10 @@ class CarLifeSession(
         AppLog.i(mode.describe())
         AppLog.i("сессия: транспорт=${transport.caps.kind} (${transport.label})")
         WLog.ev(WLog.LINK, "session", "transport" to transport.caps.kind)
+        if (air) {
+            WLog.ev(WLog.VIDEO, "policy", "profile" to bitratePolicy.profile.name, "startKbps" to bitratePolicy.startBps / 1000,
+                "ceilingKbps" to bitratePolicy.ceilingBps / 1000, "mode" to mode.name, "transcode" to bridge.transcodeEnabled)
+        }
         CarLifeState.status = "соединено, жду HU_PROTOCOL_VERSION"
         transport.start(::dispatch, ::logTx, ::close)
         sched.scheduleWithFixedDelay({ tick() }, 1, 1, TimeUnit.SECONDS)
@@ -146,6 +157,11 @@ class CarLifeSession(
         if (!closed.compareAndSet(false, true)) return
         AppLog.i("сессия: закрытие, причина: $reason")
         bridge.onCarlifeClosed(this)
+        if (air) {
+            WLog.ev(WLog.VIDEO, "summary", "frames" to vFrames, "dropped" to vDropped, "overflows" to overflows, "maxQueue" to maxQueueFrames,
+                "downs" to bitratePolicy.downs, "ups" to bitratePolicy.ups, "minKbps" to bitratePolicy.minBps / 1000,
+                "lastKbps" to bitratePolicy.current / 1000)
+        }
         WLog.ev(WLog.LINK, "session-end", "transport" to transport.caps.kind, "aliveS" to (SystemClock.elapsedRealtime() - t0) / 1000, "why" to reason)
         logSummary(reason)
         CarLifeState.status = "закрыто: $reason"
@@ -544,7 +560,10 @@ class CarLifeSession(
      */
     private fun videoOverflow(): Boolean {
         val over = VideoQueueLimit.overflow(transport.queuedVideoFrames, transport.queuedVideoBytes, transport.drainBytesPerSec)
-        if (over) lastOverflowMs = SystemClock.elapsedRealtime()
+        if (over) {
+            lastOverflowMs = SystemClock.elapsedRealtime()
+            overflows++
+        }
         return over
     }
 
@@ -571,12 +590,15 @@ class CarLifeSession(
             if (!bridge.isTranscoding) return
             val now = SystemClock.elapsedRealtime()
             val rate = transport.drainBytesPerSec
+            val qf = transport.queuedVideoFrames
+            if (qf > maxQueueFrames) maxQueueFrames = qf
             val real = VideoQueueLimit.backlogMs(transport.queuedVideoBytes, rate)
             val sinceOverflow = lastOverflowMs.let { if (it == NEVER_MS) -1L else now - it }
             val old = bitratePolicy.current
             val bps = bitratePolicy.update(now, VideoQueueLimit.policyBacklogMs(real, sinceOverflow), rate) ?: return
             if (bridge.setEncoderBitrate(bps)) {
                 AppLog.i("видео: битрейт энкодера ${old / 1000} -> ${bps / 1000} кбит/с (${bitratePolicy.lastReason}; потолок ${bitratePolicy.ceilingBps / 1000})")
+                if (air) WLog.ev(WLog.VIDEO, "bitrate", "fromKbps" to old / 1000, "toKbps" to bps / 1000, "why" to bitratePolicy.lastReason)
             }
         } catch (e: Exception) {
             AppLog.e("адаптация битрейта", e)
@@ -875,8 +897,8 @@ class CarLifeSession(
         // Пустых keepalive 0x20001 len=0 при идущем видео НЕТ: кадры обеспечивает энкодер (repeat-previous-frame-after
         // 100 мс). На PAUSE (ГУ на своём источнике) канал иначе молчит: Desay G6S (Mazda CX-5) через ~22 с тишины
         // рвёт USB (EIO, лог Ивана 2026-10-12), поэтому шлём пустой VIDEO_DATA, как Baidu sendEmptyPacketBackground.
-        if (paused && PAUSE_KEEPALIVE_ENABLED && now - lastVideoTx >= PAUSE_KEEPALIVE_MS) {
-            if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_DATA раз в ${PAUSE_KEEPALIVE_MS} мс, чтобы канал не молчал")
+        if (paused && PAUSE_KEEPALIVE_ENABLED && now - lastVideoTx >= pauseKeepaliveMs) {
+            if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_DATA раз в ${pauseKeepaliveMs} мс, чтобы канал не молчал")
             lastVideoTx = now
             send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), ByteArray(0)))
         }
@@ -949,6 +971,9 @@ class CarLifeSession(
         private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
         private const val PAUSE_KEEPALIVE_MS = 2_000L
+
+        /** На воздухе раз в ~1 с (тик таймера 1 с, порог чуть меньше): ГУ на Wi-Fi рвут видео-сокет быстрее (план 5.2 п.4). */
+        private const val PAUSE_KEEPALIVE_AIR_MS = 900L
 
         /** Пустой VIDEO_DATA раз в 2 с, пока ГУ держит PAUSE. */
         @Volatile @JvmStatic var PAUSE_KEEPALIVE_ENABLED = true

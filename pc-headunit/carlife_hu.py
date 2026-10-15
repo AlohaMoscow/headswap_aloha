@@ -368,8 +368,12 @@ class Options:
                  out: Path | None = None, quiet=False, transport="stream", ports: dict[int, int] | None = None,
                  kill_chan: str | None = None, kill_after=10.0, extra_data_socket=False,
                  discover=False, beacon_port=BEACON_PORT, bind_ip="0.0.0.0", discover_timeout=60.0,
-                 probe_8999=False, probe_port=PROBE_PORT):
+                 probe_8999=False, probe_port=PROBE_PORT,
+                 video_kbps=0, dip_kbps=0, dip_at=20.0, dip_for=5.0):
         self.host, self.port, self.duration = host, port, duration
+        # шейпер видео (tcp6): ГУ читает video-сокет не быстрее video_kbps (0 = без ограничения), а с dip_at по
+        # dip_at+dip_for секунд от первого кадра - не быстрее dip_kbps (0 = без провала). Обратное давление настоящее, TCP.
+        self.video_kbps, self.dip_kbps, self.dip_at, self.dip_for = video_kbps, dip_kbps, dip_at, dip_for
         self.no_auth, self.touch_test = no_auth, touch_test
         self.out = out or HERE / "out"
         self.quiet = quiet
@@ -391,6 +395,8 @@ class Options:
             raise ValueError("discover works only with transport tcp6")
         if self.probe_8999 and not self.discover:
             raise ValueError("probe_8999 needs discover")
+        if (self.video_kbps or self.dip_kbps) and self.transport != "tcp6":
+            raise ValueError("video shaping works only with transport tcp6")
         if self.kill_chan and self.kill_chan not in CH_NAMES.values():
             raise ValueError(f"unknown channel {self.kill_chan!r}")
 
@@ -399,6 +405,8 @@ class HeadUnit:
     AUTH_TIMEOUT = 10.0
     TOUCH_DELAY = 15.0
     CONNECT_TIMEOUT = 5.0
+    SHAPE_RCVBUF = 32 * 1024
+    SHAPE_CHUNK = 4096
     KILL_WAIT = 10.0                # tcp6: сколько ждать, пока мост сам закроет остальные сокеты
     PROBE_WAIT = 2.0                # --probe-8999: сколько ждать ответ
 
@@ -430,6 +438,8 @@ class HeadUnit:
         self.auth_status = "NOT SENT" if opts.no_auth else "NO REQUEST YET"
         self.frames = 0
         self.vbytes = 0
+        self.shape_t = 0.0
+        self.shape_kbps = 0
         self.first_frame_at: float | None = None
         self.last_frame_at: float | None = None
         self.vid_size = (1280, 720)
@@ -598,7 +608,10 @@ class HeadUnit:
                 r, _, _ = select.select([sock], [], [], 0.2)
                 if not r:
                     continue
-                data = sock.recv(65536)
+                shaped = chan == CH_VIDEO and self.shaping
+                data = sock.recv(self.SHAPE_CHUNK if shaped else 65536)
+                if shaped and data:
+                    self.shape_wait(len(data))
                 if not data:
                     if self.killed and chan == self.kill_num:
                         return
@@ -612,6 +625,33 @@ class HeadUnit:
             if self.stop.is_set() or (self.killed and chan == self.kill_num):
                 return
             self.peer_gone(chan, f"read error on {name}: {e}")
+
+    @property
+    def shaping(self) -> bool:
+        return bool(self.o.video_kbps or self.o.dip_kbps)
+
+    def video_limit_kbps(self, now: float) -> int:
+        """Текущий предел чтения видео, кбит/с (0 = без ограничения)."""
+        if self.o.dip_kbps and self.first_frame_at is not None:
+            t = now - self.first_frame_at
+            if self.o.dip_at <= t < self.o.dip_at + self.o.dip_for:
+                return self.o.dip_kbps
+        return self.o.video_kbps
+
+    def shape_wait(self, n: int):
+        """Шейпер: после n прочитанных байт спать, чтобы средняя скорость чтения не превышала предел."""
+        now = time.monotonic()
+        kbps = self.video_limit_kbps(now)
+        if kbps != self.shape_kbps:
+            self.log(f"shaper: video read limit {self.shape_kbps or 'none'} -> {kbps or 'none'} kbit/s")
+            self.shape_kbps = kbps
+        if not kbps:
+            self.shape_t = now
+            return
+        self.shape_t = max(self.shape_t, now) + n * 8 / (kbps * 1000)
+        delay = self.shape_t - now
+        if delay > 0:
+            time.sleep(delay)
 
     def peer_gone(self, chan: int, why: str):
         """Мост закрыл (или порвал) сокет канала. После kill это ожидаемый ответ моста на потерю канала."""
@@ -718,7 +758,14 @@ class HeadUnit:
             targets.append((0, "DATA", DATA_PORT))
         for chan, name, port in targets:
             try:
-                s = socket.create_connection((self.host, port), timeout=self.CONNECT_TIMEOUT)
+                if chan == CH_VIDEO and self.shaping:
+                    # малое окно приёма до connect: иначе шейпер копит секунды видео в буфере ПК, давление до телефона не доходит
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.SHAPE_RCVBUF)
+                    s.settimeout(self.CONNECT_TIMEOUT)
+                    s.connect((self.host, port))
+                else:
+                    s = socket.create_connection((self.host, port), timeout=self.CONNECT_TIMEOUT)
                 s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 s.settimeout(None)
             except OSError as e:
@@ -809,6 +856,7 @@ class HeadUnit:
         next_hb = time.monotonic()
         next_fps = time.monotonic() + 5
         fps_frames = 0
+        fps_bytes = 0
         touched = False
         while not self.stop.is_set():
             now = time.monotonic()
@@ -824,9 +872,11 @@ class HeadUnit:
                 self.log("AUTH NO RESPONSE")
             if now >= next_fps:
                 n = self.frames - fps_frames
+                kbps = (self.vbytes - fps_bytes) * 8 / 5 / 1000
                 fps_frames = self.frames
+                fps_bytes = self.vbytes
                 next_fps += 5
-                self.log(f"video: {self.frames} frames, {self.vbytes} B total, {n / 5:.1f} fps (last 5 s)")
+                self.log(f"video: {self.frames} frames, {self.vbytes} B total, {n / 5:.1f} fps, {kbps:.0f} kbit/s (last 5 s)")
             if (self.o.touch_test and not touched and self.first_frame_at is not None
                     and now - self.first_frame_at >= self.TOUCH_DELAY):
                 touched = True
@@ -911,6 +961,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--probe-8999", action="store_true",
                    help=f'--discover: after the beacon send {PROBE_REQUEST.decode()} to the phone, UDP {PROBE_PORT}, '
                         "and log the reply (not required to continue)")
+    p.add_argument("--video-kbps", type=int, default=0, metavar="N",
+                   help="tcp6 shaper: read the VIDEO socket no faster than N kbit/s (default 0 = unlimited)")
+    p.add_argument("--dip-kbps", type=int, default=0, metavar="N",
+                   help="tcp6 shaper: drop the VIDEO read limit to N kbit/s for --dip-for s, --dip-at s after "
+                        "the first frame (e.g. --video-kbps 6000 --dip-kbps 1000 for the 6->1 Mbit/s scenario)")
+    p.add_argument("--dip-at", type=float, default=20.0, metavar="N", help="shaper: dip start, s after the first frame (default 20)")
+    p.add_argument("--dip-for", type=float, default=5.0, metavar="N", help="shaper: dip length, s (default 5)")
     p.add_argument("--duration", type=float, default=120.0, metavar="N",
                    help="stop N seconds after the bridge connects (default 120)")
     p.add_argument("--no-auth", action="store_true", help="do not send HU_AUTHEN_REQUEST")
@@ -922,6 +979,8 @@ def parse_args(argv=None) -> argparse.Namespace:
         p.error("--discover works only with --transport tcp6")
     if a.probe_8999 and not a.discover:
         p.error("--probe-8999 needs --discover")
+    if (a.video_kbps or a.dip_kbps) and a.transport != "tcp6":
+        p.error("--video-kbps/--dip-kbps work only with --transport tcp6")
     return a
 
 
@@ -930,7 +989,8 @@ def main(argv=None) -> int:
     hu = HeadUnit(Options(a.host, a.port, a.duration, a.no_auth, a.touch_test, a.out, transport=a.transport,
                           kill_chan=a.kill_chan, kill_after=a.kill_after, extra_data_socket=a.extra_data_socket,
                           discover=a.discover, beacon_port=a.beacon_port, bind_ip=a.bind_ip,
-                          discover_timeout=a.discover_timeout, probe_8999=a.probe_8999))
+                          discover_timeout=a.discover_timeout, probe_8999=a.probe_8999,
+                          video_kbps=a.video_kbps, dip_kbps=a.dip_kbps, dip_at=a.dip_at, dip_for=a.dip_for))
     hu.run()
     return 0
 
