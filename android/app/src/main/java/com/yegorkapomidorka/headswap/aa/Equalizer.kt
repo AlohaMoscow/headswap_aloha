@@ -44,8 +44,11 @@ enum class EqPreset(val key: String, val settings: EqSettings?) {
     FLAT("flat", EqSettings()),
     BASS("bass", EqSettings(listOf(6, 4, 1, 0, 0, 0, 0), -5)),
     VOCAL("vocal", EqSettings(listOf(-2, -1, 1, 3, 3, 1, 0), -3)),
-    ROCK("rock", EqSettings(listOf(4, 2, -1, -2, 1, 3, 4), -4)),
-    ELECTRONIC("electronic", EqSettings(listOf(5, 3, 0, -1, 1, 3, 4), -4)),
+    /** Удар 160 Гц и гитарное присутствие 2.5k, без суббаса и «воздуха». */
+    ROCK("rock", EqSettings(listOf(3, 4, 0, -1, 3, 2, 0), -5)),
+
+    /** Глубокая «улыбка»: суббас и верх 16k, провал середины. */
+    ELECTRONIC("electronic", EqSettings(listOf(7, 3, -2, -3, 0, 3, 6), -7)),
     CUSTOM("custom", null);
 
     companion object {

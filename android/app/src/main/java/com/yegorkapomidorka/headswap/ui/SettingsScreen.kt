@@ -350,7 +350,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var fpsNote: TextView? = null
     private var certSeg: Segmented? = null
     private var micNote: TextView? = null
-    private val eqSegs = ArrayList<Pair<Segmented, List<EqPreset>>>()
+    private val eqPresetBtns = ArrayList<Pair<TextView, EqPreset>>()
     private val eqBars = ArrayList<SeekBar>()
     private val eqValues = ArrayList<TextView>()
     private var eqPreBar: SeekBar? = null
@@ -870,12 +870,25 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         val c = ctx
         eqUsbNote = note(c.getString(R.string.eq_usb_only), R.color.warn)
         body.addView(c.sectionTitle(c.getString(R.string.eq_presets)))
+        // каждая кнопка отдельная пилюля, по две в ряд
+        val grid = c.vbox(8)
         for (row in EQ_PRESETS.chunked(2)) {
-            val presets = row.map { it.first }
-            val seg = Segmented(c, row.map { c.getString(it.second) }, 15f) { pickEqPreset(presets[it]) }
-            eqSegs.add(seg to presets)
-            body.addView(seg.view, lp(MATCH, WRAP))
+            val line = c.hbox(8)
+            for ((p, titleRes) in row) {
+                val b = c.text(c.getString(titleRes), 15f, 600).apply {
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    pad(c, 8, 0, 8, 0)
+                    isClickable = true
+                    setOnClickListener { pickEqPreset(p) }
+                }
+                eqPresetBtns.add(b to p)
+                line.addView(b, lp(0, c.dp(48), 1f))
+            }
+            grid.addView(line, lp(MATCH, WRAP))
         }
+        body.addView(grid, lp(MATCH, WRAP))
 
         body.addView(c.sectionTitle(c.getString(R.string.eq_bands)))
         val bands = c.card().apply { pad(c, 0, 6, 0, 6) }
@@ -969,7 +982,14 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         eqPreBar?.let { if (it.progress != s.preamp - EQ_PREAMP_MIN) it.progress = s.preamp - EQ_PREAMP_MIN }
         eqPreValue?.text = dbLabel(s.preamp)
         val preset = aa.eqPreset
-        for ((seg, presets) in eqSegs) seg.setSelected(presets.indexOf(preset))
+        val c = ctx
+        for ((b, p) in eqPresetBtns) {
+            val on = p == preset
+            b.background = c.rippleBg(if (on) c.shape(c.clr(R.color.pric), 24) else c.shape(0, 24, c.clr(R.color.line), 1.5f), 24)
+            b.setTextColor(c.clr(if (on) R.color.onpric else R.color.on))
+            val title = c.eqPresetName(p)
+            b.text = if (on) "✓ $title" else title
+        }
         usbNote.visibility = if (aa.usbAudio) View.GONE else View.VISIBLE
     }
 
