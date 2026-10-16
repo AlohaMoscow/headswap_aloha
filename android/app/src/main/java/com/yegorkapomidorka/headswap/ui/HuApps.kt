@@ -34,6 +34,11 @@ object HuApps {
             "https://github.com/AndreyPavlenko/Fermata/releases", R.string.apps_fermata_desc,
         ),
         HuApp(
+            "ParkedTube", "dev.codex.aaparkedyoutube",
+            "https://github.com/gadmin2151/ParkedTube/releases", R.string.apps_parkedtube_desc,
+            R.string.apps_aabrowser_req, minSdk = 35,
+        ),
+        HuApp(
             "AABrowser", "com.kododake.aabrowser",
             "https://github.com/kododake/AABrowser/releases", R.string.apps_aabrowser_desc,
             R.string.apps_aabrowser_req, minSdk = 35,

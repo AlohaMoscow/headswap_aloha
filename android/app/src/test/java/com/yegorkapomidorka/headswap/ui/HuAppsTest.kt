@@ -8,11 +8,15 @@ import org.junit.Test
 
 class HuAppsTest {
     private val fermata = HuApps.CATALOG.first { it.name == "Fermata Auto" }
+    private val parkedTube = HuApps.CATALOG.first { it.name == "ParkedTube" }
     private val browser = HuApps.CATALOG.first { it.name == "AABrowser" }
 
     @Test
-    fun catalogHasTwoAppsWithGithubReleases() {
-        assertEquals(listOf("me.aap.fermata.auto.dear.google.why", "com.kododake.aabrowser"), HuApps.CATALOG.map { it.pkg })
+    fun catalogHasThreeAppsWithGithubReleases() {
+        assertEquals(
+            listOf("me.aap.fermata.auto.dear.google.why", "dev.codex.aaparkedyoutube", "com.kododake.aabrowser"),
+            HuApps.CATALOG.map { it.pkg },
+        )
         assertTrue(HuApps.CATALOG.all { it.url.startsWith("https://github.com/") && it.url.endsWith("/releases") })
     }
 
@@ -32,6 +36,14 @@ class HuAppsTest {
     }
 
     @Test
+    fun parkedTubeNeedsAndroid15() {
+        assertEquals(35, parkedTube.minSdk)
+        assertTrue(HuApps.status(parkedTube, { false }, 34).unsupported)
+        assertFalse(HuApps.status(parkedTube, { false }, 35).unsupported)
+        assertTrue(parkedTube.reqRes != null)
+    }
+
+    @Test
     fun fermataHasNoSdkRestriction() {
         assertFalse(HuApps.status(fermata, { false }, 26).unsupported)
         assertNull(fermata.reqRes)
@@ -41,6 +53,8 @@ class HuAppsTest {
     fun installedCountIgnoresSdk() {
         assertEquals(0, HuApps.installedCount({ false }, 36))
         assertEquals(1, HuApps.installedCount({ it == browser.pkg }, 36))
-        assertEquals(2, HuApps.installedCount({ true }, 30))
+        assertEquals(1, HuApps.installedCount({ it == parkedTube.pkg }, 36))
+        assertEquals(HuApps.CATALOG.size, HuApps.installedCount({ true }, 30))
+        assertEquals(3, HuApps.CATALOG.size)
     }
 }

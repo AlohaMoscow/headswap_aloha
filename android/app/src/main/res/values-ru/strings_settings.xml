@@ -102,6 +102,7 @@
     <string name="apps_download">Скачать</string>
     <string name="apps_open">Открыть</string>
     <string name="apps_fermata_desc">Видео с телефона, YouTube, зеркало экрана</string>
+    <string name="apps_parkedtube_desc">YouTube на весь экран магнитолы, русская клавиатура</string>
     <string name="apps_aabrowser_desc">Браузер на весь экран магнитолы</string>
     <string name="apps_aabrowser_req">Нужен Android 15+</string>
     <string name="apps_unsupported">На этом телефоне не пойдёт: нужен Android 15 или новее.</string>
