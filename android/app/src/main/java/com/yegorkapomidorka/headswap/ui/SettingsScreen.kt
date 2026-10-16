@@ -140,9 +140,6 @@ private fun Context.updateStatus(): Pair<String, Int> {
     }
 }
 
-/** Страница «Поддержать Егора» на сайте (реквизиты там, в приложении их нет). */
-private const val SUPPORT_URL = "https://yegorkapomidorka.com/headswap/support/"
-
 /** Главный экран настроек: разделы с текущими значениями, помощь, версия. */
 class SettingsScreen(host: MainActivity) : Screen(host) {
     private val aa = AaPrefs(ctx)
@@ -260,7 +257,11 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         }
     }
 
-    /** «Поддержать Егора»: контурная пилюля под версией, открывает страницу поддержки на сайте. */
+    /**
+     * «Поддержать Егора»: контурная пилюля под версией, открывает страницу поддержки на сайте
+     * (реквизиты там, в приложении их нет). URL по языку: ru — СБП на /headswap/support/,
+     * остальные — PayPal на /headswap/en/#donate (R.string.set_support_url).
+     */
     private fun supportButton(): View {
         val c = ctx
         val fg = c.clr(R.color.acc)
@@ -274,7 +275,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             addView(c.text(c.getString(R.string.set_support), 15f, 600, fg))
             setOnClickListener {
                 try {
-                    c.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(SUPPORT_URL)))
+                    c.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(c.getString(R.string.set_support_url))))
                 } catch (e: Exception) {
                     AppLog.e("поддержка: браузер не открылся: ${e.message}")
                 }
