@@ -100,8 +100,8 @@
     <string name="fps_30_title">30 fps</string>
     <string name="fps_30_sub">Smoother, but heavier</string>
 
-    <!-- Wireless (beta, branch B) -->
-    <string name="wl_title">Wireless (beta)</string>
+    <!-- Wireless (branch B) -->
+    <string name="wl_title">Wireless</string>
     <string name="wl_note">For cars with wireless CarLife. Turn on the hotspot on the phone, connect the head unit to it (head unit menu: Wi-Fi), open CarLife on the head unit and tap the button below. No cable needed; if you plug one in, USB wins.</string>
     <string name="wl_start">Wait for the car over Wi-Fi</string>
     <string name="wl_stop">Stop</string>
