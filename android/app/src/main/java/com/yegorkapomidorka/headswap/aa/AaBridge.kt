@@ -150,6 +150,11 @@ class AaBridgeCore(
         private set
     private val audioInited = HashMap<Int, Boolean>()
     private val audioLogged = HashMap<Int, Long>()
+
+    /** Эквалайзер музыки (только CarLife MEDIA); настройки читаются на каждом буфере, меняются из UI на лету. */
+    private val equalizer = Equalizer(48000, 2)
+    var eqProvider: () -> EqSettings = { EqLive.settings }
+    private var eqLogged: EqSettings? = null
     var audioBytes = 0L
         private set
     var audioDropped = 0L
@@ -702,6 +707,15 @@ class AaBridgeCore(
                 mediaGateDrops = 0
                 musicStatus(1)
             }
+        }
+        if (ch == CarlifeAudio.CH_MEDIA) {
+            val eq = eqProvider()
+            if (eq != eqLogged) {
+                eqLogged = eq
+                log("BRIDGE EQ: ${if (eq.isFlat) "без обработки" else "полосы ${eq.bandsCsv()} дБ, preamp ${eq.preamp} дБ"}", false)
+            }
+            equalizer.update(eq)
+            equalizer.process(pcm)
         }
         var off = 0
         while (off < pcm.size) {
