@@ -77,6 +77,9 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     EQ("eq", R.string.eq_title, R.drawable.ic_equalizer),
     HEADUNIT("headunit", R.string.set_sec_headunit, R.drawable.ic_car),
 
+    /** Каталог чужих AA-приложений (Fermata Auto, AABrowser) и предупреждение про видео в движении. */
+    APPS("apps", R.string.set_sec_apps, R.drawable.ic_open),
+
     /** Беспровод: только в сборке с BuildConfig.WIRELESS_BETA. */
     WIRELESS("wireless", R.string.wl_title, R.drawable.ic_wifi),
     UPDATES("updates", R.string.upd_title, R.drawable.ic_download);
@@ -247,6 +250,9 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             set(SettingsSection.HEADUNIT, c.getString(R.string.set_sum_headunit, aa.certSet.uppercase(), auto))
         }
 
+        val appsInstalled = HuApps.installedCount({ HuApps.isInstalled(c, it) }, Build.VERSION.SDK_INT)
+        set(SettingsSection.APPS, c.getString(R.string.set_sum_apps, appsInstalled, HuApps.CATALOG.size))
+
         val (upd, color) = c.updateStatus()
         set(SettingsSection.UPDATES, upd, color)
 
@@ -359,6 +365,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var eqUsbNote: TextView? = null
     private var eqEntrySub: TextView? = null
     private var eqEntryRow: View? = null
+    private val appRows = ArrayList<AppRow>()
     private var svcStatus: TextView? = null
     private var svcButton: TextView? = null
     private var updStatus: TextView? = null
@@ -388,6 +395,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             SettingsSection.SOUND -> buildSound()
             SettingsSection.EQ -> buildEq()
             SettingsSection.HEADUNIT -> buildHeadunit()
+            SettingsSection.APPS -> buildApps()
             SettingsSection.UPDATES -> body.addView(updateCard(), lp(MATCH, WRAP).margins(ctx, 0, 8, 0, 0))
             SettingsSection.WIRELESS -> body.addView(wirelessCard(), lp(MATCH, WRAP).margins(ctx, 0, 8, 0, 0))
         }
@@ -399,8 +407,10 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         refreshMic()
         refreshEq()
         refreshEqEntry()
+        refreshApps()
         refreshUpdate()
         refreshWireless()
+        if (section == SettingsSection.APPS) maybeShowAppsWarning()
     }
 
     override fun tick() {
@@ -1096,6 +1106,91 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         )
         status.setTextColor(c.clr(if (connected) R.color.ok else R.color.warn))
         svcButton?.visibility = if (connected) View.GONE else View.VISIBLE
+    }
+
+    // --- приложения для магнитолы ---
+
+    /** Вьюхи строки каталога, которые меняются при возврате на экран. */
+    private class AppRow(val app: HuApp, val status: TextView, val unsupported: TextView, val download: View, val open: View)
+
+    private fun buildApps() {
+        val c = ctx
+        body.addView(
+            c.hbox(12).apply {
+                background = c.shape(c.clr(R.color.warnc), 16)
+                pad(c, 14, 12, 14, 12)
+                addView(c.icon(R.drawable.ic_alert, 22, c.clr(R.color.warn)))
+                addView(c.text(c.getString(R.string.apps_warn_banner), 14f, 500).apply { lineHeight = c.dp(20) }, lp(0, WRAP, 1f))
+            },
+            lp(MATCH, WRAP).margins(c, 0, 8, 0, 0),
+        )
+
+        body.addView(c.sectionTitle(c.getString(R.string.apps_list_title)))
+        val card = c.card()
+        for ((i, app) in HuApps.CATALOG.withIndex()) {
+            if (i > 0) card.addView(c.divider())
+            card.addView(appRow(app), lp(MATCH, WRAP))
+        }
+        body.addView(card, lp(MATCH, WRAP))
+
+        body.addView(c.sectionTitle(c.getString(R.string.apps_hint_title)))
+        note(c.getString(R.string.apps_hint_text))
+        refreshApps()
+    }
+
+    private fun appRow(app: HuApp): View {
+        val c = ctx
+        fun button(label: String, onClick: () -> Unit) = c.text(label, 15f, 600, c.clr(R.color.acc)).apply {
+            gravity = Gravity.CENTER
+            pad(c, 14, 0, 14, 0)
+            background = c.rippleBg(null, 20)
+            isClickable = true
+            setOnClickListener { onClick() }
+        }
+        val status = c.text("", 14f, 500, c.clr(R.color.on2))
+        val unsupported = c.text(c.getString(R.string.apps_unsupported), 13f, 400, c.clr(R.color.warn)).apply { visibility = View.GONE }
+        val download = button(c.getString(R.string.apps_download)) { HuApps.download(c, app) }
+        val open = button(c.getString(R.string.apps_open)) { HuApps.open(c, app) }
+        appRows.add(AppRow(app, status, unsupported, download, open))
+        return c.vbox(6).apply {
+            pad(c, 16, 12, 12, 8)
+            addView(c.hbox(8).apply {
+                addView(c.text(app.name, 17f, 500), lp(0, WRAP, 1f))
+                addView(status)
+            })
+            addView(c.text(c.getString(app.descRes), 14f, 400, c.clr(R.color.on2)))
+            app.reqRes?.let { addView(c.text(c.getString(it), 13f, 400, c.clr(R.color.on2))) }
+            addView(unsupported)
+            addView(c.hbox(4).apply {
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                addView(download, c.lpDp(WRAP, 44))
+                addView(open, c.lpDp(WRAP, 44))
+            }, lp(MATCH, WRAP))
+        }
+    }
+
+    /** Статус по PackageManager: зовётся при каждом возврате на экран (после браузера и установщика). */
+    private fun refreshApps() {
+        val c = ctx
+        for (r in appRows) {
+            val st = HuApps.status(c, r.app)
+            r.status.text = c.getString(if (st.installed) R.string.apps_installed else R.string.apps_not_installed)
+            r.status.setTextColor(c.clr(if (st.installed) R.color.ok else R.color.on2))
+            r.unsupported.visibility = if (st.unsupported) View.VISIBLE else View.GONE
+            r.download.visibility = if (st.installed || st.unsupported) View.GONE else View.VISIBLE
+            r.open.visibility = if (st.installed && HuApps.launchIntent(c, r.app) != null) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** Один раз за установку: видео на ходу не блокируем, ответственность на водителе. */
+    private fun maybeShowAppsWarning() {
+        if (aa.appsWarningShown) return
+        aa.appsWarningShown = true
+        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.apps_warn_title)
+            .setMessage(R.string.apps_warn_text)
+            .setPositiveButton(R.string.apps_warn_ok, null)
+            .show()
     }
 
     // --- обновления ---

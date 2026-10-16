@@ -88,6 +88,11 @@ class AaPrefs(ctx: Context) {
         get() = sp.getBoolean("progressSeconds", false)
         set(v) = sp.edit().putBoolean("progressSeconds", v).apply()
 
+    /** Предупреждение про видео в движении в разделе «Приложения для магнитолы» уже показано (один раз). */
+    var appsWarningShown: Boolean
+        get() = sp.getBoolean("appsWarningShown", false)
+        set(v) = sp.edit().putBoolean("appsWarningShown", v).apply()
+
     /** Пресет эквалайзера (EqPreset.key); полосы и preamp хранятся отдельно, пресет — только подпись. */
     var eqPreset: EqPreset
         get() = EqPreset.parse(sp.getString("eqPreset", EqPreset.FLAT.key))
