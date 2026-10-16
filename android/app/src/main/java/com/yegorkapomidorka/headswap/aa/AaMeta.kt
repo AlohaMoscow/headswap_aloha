@@ -628,6 +628,14 @@ class MetaRelay(
 
     fun onNavDistance(d: AaNavDistance) {
         if (!acceptNav(d.legacy, "дистанция")) return
+        // два одинаковых поворота подряд (тот же nextTurn|road|exit): ключ не меняется, новый манёвр виден только
+        // по скачку дистанции вверх (h137: 10 -> 170 м). Иначе total остаётся от прошлого поворота.
+        val prev = remain
+        if (prev != null && d.meters - prev.meters >= NEW_TURN_JUMP_M) {
+            total = 0
+            turnDirty = true
+            log("META манёвр: тот же ключ, дистанция ${prev.meters} -> ${d.meters} м - новый поворот", true)
+        }
         remain = d
         // totalDistance - дистанция на момент смены манёвра (Baidu фиксирует при смене дороги)
         if (total == 0 || d.meters > total) total = d.meters
@@ -727,6 +735,8 @@ class MetaRelay(
         const val NAVI_KEEPALIVE_MS = 5000L
         /** Пауза дольше этой: следующий пакет снова SHOW, ГУ могла уже убрать подсказку. */
         const val NAVI_RESHOW_MS = 10_000L
+        /** Рост дистанции при том же ключе манёвра: это уже следующий такой же поворот (шаг AA - 10 м). */
+        const val NEW_TURN_JUMP_M = 40
 
         /** Запоздалые манёвр/дистанция после конца маршрута не стартуют его заново в этом окне. */
         const val TAIL_MS = 5000L
