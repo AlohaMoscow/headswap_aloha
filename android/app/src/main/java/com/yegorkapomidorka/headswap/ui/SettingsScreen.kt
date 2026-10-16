@@ -28,6 +28,7 @@ import com.yegorkapomidorka.headswap.MainActivity
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaDensity
 import com.yegorkapomidorka.headswap.aa.AaPrefs
+import com.yegorkapomidorka.headswap.aa.CAR_MAKES
 import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.VideoMode
@@ -308,6 +309,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private val themeRows = LinkedHashMap<String, RadioRow>()
     private val micRows = HashMap<MicMode, RadioRow>()
     private val modeRows = LinkedHashMap<VideoMode, RadioRow>()
+    private val makeRows = LinkedHashMap<String?, RadioRow>()
     private var transcodeSeg: Segmented? = null
     private var transcodeNote: TextView? = null
     private var fpsSeg: Segmented? = null
@@ -799,6 +801,24 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         body.addView(certCard())
         body.addView(c.sectionTitle(c.getString(R.string.set_autostart)))
         body.addView(autostartCard())
+        body.addView(c.sectionTitle(c.getString(R.string.set_car_make)))
+        note(c.getString(R.string.set_car_make_note))
+        for (make in listOf<String?>(null) + CAR_MAKES) {
+            val row = RadioRow(c, make ?: c.getString(R.string.set_car_make_default), "") { setCarMake(make) }
+            makeRows[make] = row
+            body.addView(row.view, lp(MATCH, WRAP))
+        }
+        refreshCarMake()
+    }
+
+    private fun setCarMake(make: String?) {
+        aa.carMake = make
+        refreshCarMake()
+    }
+
+    private fun refreshCarMake() {
+        val cur = aa.carMake
+        for ((make, row) in makeRows) row.setSelected(cur == make)
     }
 
     private fun certCard(): View {

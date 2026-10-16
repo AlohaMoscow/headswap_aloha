@@ -157,6 +157,64 @@ class AapMessagesTest {
         eq("sdr_800", M.serviceDiscoveryResponse(AapSdOptions(resolution = "800x480", fps = 60, density = 140)).payload)
     }
 
+    /** Верхнеуровневые поля protobuf: (номер, значение); varint как Long, len-delimited как ByteArray. */
+    private fun fields(b: ByteArray): List<Pair<Int, Any>> {
+        val out = ArrayList<Pair<Int, Any>>()
+        var i = 0
+        fun varint(): Long {
+            var v = 0L
+            var shift = 0
+            while (true) {
+                val x = b[i++].toInt() and 0xFF
+                v = v or ((x and 0x7F).toLong() shl shift)
+                if (x and 0x80 == 0) return v
+                shift += 7
+            }
+        }
+        while (i < b.size) {
+            val tag = varint().toInt()
+            when (tag and 7) {
+                0 -> out += (tag shr 3) to varint()
+                2 -> {
+                    val n = varint().toInt()
+                    out += (tag shr 3) to b.copyOfRange(i, i + n)
+                    i += n
+                }
+                else -> error("wire type ${tag and 7}")
+            }
+        }
+        return out
+    }
+
+    private fun strField(f: List<Pair<Int, Any>>, n: Int) = String(f.first { it.first == n }.second as ByteArray)
+
+    @Test
+    fun serviceDiscoveryResponseCarMake() {
+        val def = M.serviceDiscoveryResponse(AapSdOptions(carMake = null)).payload
+        assertArrayEquals(M.serviceDiscoveryResponse().payload, def)
+        eq("sdr_default", def)
+        val d = fields(def)
+        assertEquals("Google", strField(d, 2))
+
+        val f = fields(M.serviceDiscoveryResponse(AapSdOptions(carMake = "Honda")).payload)
+        val info = fields(f.first { it.first == 17 }.second as ByteArray)
+        assertEquals("Honda", strField(f, 2))
+        assertEquals("Honda", strField(info, 1))
+        // производитель ГУ и модель не меняются
+        assertEquals("Google", strField(f, 7))
+        assertEquals("Google", strField(info, 5))
+        assertEquals("Desktop Head Unit", strField(f, 3))
+        assertEquals("Desktop Head Unit", strField(info, 2))
+        // новый профиль машины: vehicleId с суффиксом марки
+        assertEquals("headlessunit-001-honda", strField(f, 5))
+        assertEquals("headlessunit-001-honda", strField(info, 4))
+        assertEquals("headlessunit-001", strField(d, 5))
+
+        // moto-суффикс сохраняется, марка добавляется после него
+        val moto = fields(M.serviceDiscoveryResponse(AapSdOptions(mic = false, carMake = "Mazda")).payload)
+        assertEquals("headlessunit-001-moto-mazda", strField(moto, 5))
+    }
+
     @Test
     fun builders() {
         eq("channel_open_response", M.channelOpenResponse(2).payload)

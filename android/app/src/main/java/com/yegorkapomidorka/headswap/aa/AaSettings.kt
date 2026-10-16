@@ -41,6 +41,11 @@ class AaPrefs(ctx: Context) {
         get() = FpsSetting.parse(sp.getString("fpsSetting", FpsSetting.DEFAULT.name))
         set(v) = sp.edit().putString("fpsSetting", v.name).apply()
 
+    /** Марка автомобиля для SDR вместо «Google» (CAR_MAKES); null = по умолчанию. Читается на подключение. */
+    var carMake: String?
+        get() = sp.getString("carMake", null)?.takeIf { it in CAR_MAKES }
+        set(v) = sp.edit().apply { if (v == null) remove("carMake") else putString("carMake", v) }.apply()
+
     /** Автозапуск сервера ГУ (USB подключён / сессия AA закончилась); работает, только если включена служба спецвозможностей. */
     var autoServer: Boolean
         get() = sp.getBoolean("autoServer", true)
@@ -83,6 +88,12 @@ class AaPrefs(ctx: Context) {
         get() = sp.getBoolean("progressSeconds", false)
         set(v) = sp.edit().putBoolean("progressSeconds", v).apply()
 }
+
+/** Марки для настройки «Марка автомобиля» (канонические английские написания). */
+val CAR_MAKES = listOf(
+    "Honda", "Mazda", "Toyota", "Nissan", "Hyundai", "Kia", "Volkswagen", "Skoda", "Ford",
+    "Chevrolet", "Mitsubishi", "Subaru", "Lexus", "Changan", "Haval", "Chery", "Geely",
+)
 
 /** Состояние AA-режима для экрана; пишет сервис, читает activity (один процесс). */
 object AaState {
