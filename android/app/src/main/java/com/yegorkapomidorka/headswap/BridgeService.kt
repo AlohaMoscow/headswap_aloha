@@ -456,7 +456,7 @@ class BridgeService : Service() {
         Thread({
             val result: Any = try {
                 val peerOk: (java.net.InetAddress) -> Boolean =
-                    if (beacon == null) { _ -> true } else { a -> beacon.current.any { it.contains(a) } }
+                    if (beacon == null) { _ -> true } else { a -> beacon.current.any { it.contains(a) } || btProbe.ownsPeer(a) }
                 val l = Tcp6Listener(java.net.InetAddress.getByName(bind), peerOk = peerOk).open()
                 pendingTcp6 = l
                 beacon?.start()

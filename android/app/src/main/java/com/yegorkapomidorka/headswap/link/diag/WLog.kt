@@ -17,6 +17,8 @@ object WLog {
     const val HS = "hs"
     const val VIDEO = "video"
     const val BT = "bt"
+    /** Вход телефона в Wi-Fi Direct-группу ГУ (ветка A). */
+    const val P2P = "p2p"
     /** Автостарт по Bluetooth машины (выбор, ACL, авторежим сервиса). */
     const val TRIGGER = "trigger"
 
