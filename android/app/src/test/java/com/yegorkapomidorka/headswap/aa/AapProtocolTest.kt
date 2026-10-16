@@ -216,6 +216,23 @@ class AapMessagesTest {
     }
 
     @Test
+    fun serviceDiscoveryResponseHeadUnitIdentityIgnoresCarMake() {
+        for (make in listOf(null, "Honda")) {
+            val f = fields(M.serviceDiscoveryResponse(AapSdOptions(carMake = make)).payload)
+            val info = fields(f.first { it.first == 17 }.second as ByteArray)
+            assertEquals("$make: head_unit_make", "Google", strField(f, 7))
+            assertEquals("$make: head_unit_model", "Desktop Head Unit", strField(f, 8))
+            assertEquals("$make: 17.head_unit_make", "Google", strField(info, 5))
+            assertEquals("$make: 17.head_unit_model", "Desktop Head Unit", strField(info, 6))
+        }
+        // без марки make = Google: AA считает ГУ девелоперским и показывает сторонние видеоприложения
+        val d = fields(M.serviceDiscoveryResponse(AapSdOptions(carMake = null)).payload)
+        val dInfo = fields(d.first { it.first == 17 }.second as ByteArray)
+        assertEquals("Google", strField(d, 2))
+        assertEquals("Google", strField(dInfo, 1))
+    }
+
+    @Test
     fun builders() {
         eq("channel_open_response", M.channelOpenResponse(2).payload)
         assertEquals(8, M.channelOpenResponse(2).type)

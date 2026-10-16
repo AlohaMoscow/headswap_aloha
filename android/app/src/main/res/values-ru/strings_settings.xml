@@ -60,8 +60,9 @@
     <string name="set_cert_hint">Смените, если Android Auto не подключается</string>
 
     <string name="set_car_make">Марка автомобиля</string>
-    <string name="set_car_make_default">По умолчанию</string>
-    <string name="set_car_make_note">Логотип на кнопке выхода в Android Auto (эксперимент). Применится при следующем подключении.</string>
+    <string name="set_car_make_default">Без марки (видео и YouTube через Fermata работают)</string>
+    <string name="set_car_make_default_short">Без марки</string>
+    <string name="set_car_make_note">Логотип марки на кнопке выхода из Android Auto. С выбранной маркой Android Auto скрывает сторонние видеоприложения (Fermata Auto). Применится при следующем подключении.</string>
 
     <string name="set_autostart">Автозапуск сервера ГУ</string>
     <string name="set_autostart_sub">При подключении кабеля и после сессии AA</string>

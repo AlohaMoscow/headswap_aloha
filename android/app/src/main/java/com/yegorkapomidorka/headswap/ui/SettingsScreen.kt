@@ -1036,7 +1036,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     }
 
     private fun refreshCarMake() {
-        makeValue?.text = aa.carMake ?: ctx.getString(R.string.set_car_make_default)
+        makeValue?.text = aa.carMake ?: ctx.getString(R.string.set_car_make_default_short)
     }
 
     private fun certCard(): View {
