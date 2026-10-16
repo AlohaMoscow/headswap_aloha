@@ -11,8 +11,8 @@
     <string name="theme_dark">Тёмная</string>
 
     <string name="set_sound">Звук</string>
-    <string name="set_usb_audio_title">Звук через USB</string>
-    <string name="set_usb_audio_sub">В динамики машины</string>
+    <string name="set_usb_audio_title">Звук через Headswap</string>
+    <string name="set_usb_audio_sub">В динамики машины по кабелю или Wi-Fi. Выключено — по Bluetooth</string>
 
     <string name="eq_title">Эквалайзер</string>
     <string name="eq_presets">Пресет</string>
@@ -28,9 +28,9 @@
     <string name="eq_db">%1$s дБ</string>
     <string name="eq_hz">%1$s Гц</string>
     <string name="eq_khz">%1$s кГц</string>
-    <string name="eq_note">Только музыка: навигационные подсказки и голос не обрабатываются. Применяется сразу.</string>
-    <string name="eq_usb_only">Работает только при звуке по USB, сейчас звук идёт по Bluetooth</string>
-    <string name="eq_sum_usb_only">Работает только при звуке по USB</string>
+    <string name="eq_note">Только музыка: навигационные подсказки и голос не обрабатываются. Работает по кабелю и по Wi-Fi, применяется сразу.</string>
+    <string name="eq_usb_only">Работает только при звуке через Headswap, сейчас звук идёт по Bluetooth</string>
+    <string name="eq_sum_usb_only">Работает только при звуке через Headswap</string>
     <string name="eq_sum">эквалайзер: %1$s</string>
 
     <string name="set_video">Видео</string>
