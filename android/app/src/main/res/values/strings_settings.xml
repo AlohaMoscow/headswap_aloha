@@ -11,8 +11,8 @@
     <string name="theme_dark">Dark</string>
 
     <string name="set_sound">Sound</string>
-    <string name="set_usb_audio_title">Sound over USB</string>
-    <string name="set_usb_audio_sub">To the car speakers</string>
+    <string name="set_usb_audio_title">Sound through Headswap</string>
+    <string name="set_usb_audio_sub">To the car speakers over cable or Wi-Fi. Off: over Bluetooth</string>
 
     <string name="eq_title">Equalizer</string>
     <string name="eq_presets">Preset</string>
@@ -28,9 +28,9 @@
     <string name="eq_db">%1$s dB</string>
     <string name="eq_hz">%1$s Hz</string>
     <string name="eq_khz">%1$s kHz</string>
-    <string name="eq_note">Music only: navigation prompts and voice are not processed. Applies instantly.</string>
-    <string name="eq_usb_only">Works only with sound over USB; sound now goes over Bluetooth</string>
-    <string name="eq_sum_usb_only">Works only with sound over USB</string>
+    <string name="eq_note">Music only: navigation prompts and voice are not processed. Works over cable and Wi-Fi, applies instantly.</string>
+    <string name="eq_usb_only">Works only with sound through Headswap; sound now goes over Bluetooth</string>
+    <string name="eq_sum_usb_only">Works only with sound through Headswap</string>
     <string name="eq_sum">equalizer: %1$s</string>
 
     <string name="set_video">Video</string>
