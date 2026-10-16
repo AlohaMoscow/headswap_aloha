@@ -1152,7 +1152,6 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             addView(c.vbox(4).apply {
                 addView(c.text(label, 17f, 500))
                 catalog?.let { addView(c.text(c.getString(it.descRes), 14f, 400, c.clr(R.color.on2))) }
-                addView(c.text(c.getString(R.string.apps_installed_note), 13f, 400, c.clr(R.color.on2)))
                 if (catalog != null && HuApps.status(c, catalog).unsupported) {
                     addView(c.text(c.getString(R.string.apps_unsupported), 13f, 400, c.clr(R.color.warn)))
                 }
@@ -1201,6 +1200,9 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         if (rows.isEmpty()) {
             host.addView(c.text(c.getString(R.string.apps_installed_empty), 14f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(20) })
         } else {
+            // одна подпись на всю секцию: в списке только приложения не из Play
+            host.addView(c.text(c.getString(R.string.apps_installed_note), 13f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(18) },
+                lp(MATCH, WRAP).apply { bottomMargin = c.dp(8) })
             val card = c.card()
             for ((i, r) in rows.withIndex()) {
                 if (i > 0) card.addView(c.divider())
