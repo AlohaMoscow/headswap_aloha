@@ -1,6 +1,7 @@
 package com.yegorkapomidorka.headswap.ui
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -309,7 +310,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private val themeRows = LinkedHashMap<String, RadioRow>()
     private val micRows = HashMap<MicMode, RadioRow>()
     private val modeRows = LinkedHashMap<VideoMode, RadioRow>()
-    private val makeRows = LinkedHashMap<String?, RadioRow>()
+    private var makeValue: TextView? = null
     private var transcodeSeg: Segmented? = null
     private var transcodeNote: TextView? = null
     private var fpsSeg: Segmented? = null
@@ -802,23 +803,40 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         body.addView(c.sectionTitle(c.getString(R.string.set_autostart)))
         body.addView(autostartCard())
         body.addView(c.sectionTitle(c.getString(R.string.set_car_make)))
-        note(c.getString(R.string.set_car_make_note))
-        for (make in listOf<String?>(null) + CAR_MAKES) {
-            val row = RadioRow(c, make ?: c.getString(R.string.set_car_make_default), "") { setCarMake(make) }
-            makeRows[make] = row
-            body.addView(row.view, lp(MATCH, WRAP))
+        val value = c.text("", 13f, 400, c.clr(R.color.on2))
+        makeValue = value
+        val row = c.hbox(14).apply {
+            pad(c, 16, 0, 16, 0)
+            background = c.rippleBg(null, 0)
+            isClickable = true
+            setOnClickListener { pickCarMake() }
+            addView(c.icon(R.drawable.ic_car, 22, c.clr(R.color.on2)))
+            addView(c.text(c.getString(R.string.set_car_make), 16f, 500), lp(0, WRAP, 1f))
+            addView(value)
+            addView(c.icon(R.drawable.ic_chevron, 20, c.clr(R.color.on2)))
+            layoutParams = c.lpDp(MATCH, 56)
         }
+        body.addView(c.card().apply { addView(row) }, lp(MATCH, WRAP))
+        note(c.getString(R.string.set_car_make_note))
         refreshCarMake()
     }
 
-    private fun setCarMake(make: String?) {
-        aa.carMake = make
-        refreshCarMake()
+    private fun pickCarMake() {
+        val makes = listOf<String?>(null) + CAR_MAKES
+        val labels = makes.map { it ?: ctx.getString(R.string.set_car_make_default) }.toTypedArray()
+        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.set_car_make)
+            .setSingleChoiceItems(labels, makes.indexOf(aa.carMake)) { d, i ->
+                aa.carMake = makes[i]
+                refreshCarMake()
+                d.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun refreshCarMake() {
-        val cur = aa.carMake
-        for ((make, row) in makeRows) row.setSelected(cur == make)
+        makeValue?.text = aa.carMake ?: ctx.getString(R.string.set_car_make_default)
     }
 
     private fun certCard(): View {
