@@ -18,6 +18,7 @@ import com.yegorkapomidorka.headswap.autosrv.AutoServer
 /** Всё, что надо включить перед поездкой: порядок, тексты, автоопределение «уже сделано». Общее для онбординга и чеклиста. */
 enum class StepId(val key: String) {
     AA_DEV("aa_dev"),
+    AA_UNKNOWN("aa_unknown"),
     AUTOSTART("autostart"),
     NOTIF("notif"),
     BACKGROUND("background"),
@@ -51,6 +52,12 @@ object Readiness {
             R.string.step_aa_dev_body,
             R.string.step_aa_dev_hint,
             R.string.step_aa_dev_primary, null, R.string.onb_already_done, R.string.step_aa_dev_short,
+        ),
+        StepInfo(
+            StepId.AA_UNKNOWN, R.string.step_aa_unknown_title,
+            R.string.step_aa_unknown_body,
+            null,
+            R.string.step_aa_unknown_primary, null, R.string.onb_already_done, R.string.step_aa_unknown_short,
         ),
         StepInfo(
             StepId.AUTOSTART, R.string.step_autostart_title,
