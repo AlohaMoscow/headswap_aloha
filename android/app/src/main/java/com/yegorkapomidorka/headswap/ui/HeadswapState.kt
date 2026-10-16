@@ -18,7 +18,7 @@ enum class StageState { DONE, ACTIVE, PAUSE, ERR, TODO, PEND }
 
 enum class Tone { PRI, OK, WARN, ERR }
 
-enum class HeroIcon { POWER, PLUG, CAR, REFRESH, ALERT }
+enum class HeroIcon { POWER, PLUG, CAR_USB, CAR_WIFI, REFRESH, ALERT }
 
 enum class PrimaryAction { START_SERVER, RESTART_SERVER }
 
@@ -61,6 +61,8 @@ class Inputs(
     val videoRes: String = "1280×720",
     /** На телефоне висит мастер первой настройки Android Auto (согласие/разрешения): пока не пройден, AA рвёт связь. */
     val aaConsent: Boolean = false,
+    /** Сессия идёт по Wi-Fi: CarLife и звук идут к ГУ по воздуху, кабеля нет. */
+    val wireless: Boolean = false,
 )
 
 object HomeLogic {
@@ -70,6 +72,7 @@ object HomeLogic {
     )
     private val NONE = UiText.raw("")
     private val CARLIFE = UiText.raw("CarLife 2.0")
+    private val CARLIFE_WIFI = UiText.raw("CarLife 2.0 · Wi-Fi")
     private val TEXT_START_CHAIN = UiText.res(R.string.home_sub_start_chain)
 
     fun compute(i: Inputs): HomeState {
@@ -114,16 +117,25 @@ object HomeLogic {
                 )
             }
             connected -> state(
-                Phase.CONNECTED, Tone.OK, HeroIcon.CAR, UiText.res(R.string.home_title_ok),
-                UiText.res(R.string.home_sub_ok),
+                Phase.CONNECTED, Tone.OK, if (i.wireless) HeroIcon.CAR_WIFI else HeroIcon.CAR_USB, UiText.res(R.string.home_title_ok),
+                UiText.res(if (i.wireless) R.string.home_sub_ok_wifi else R.string.home_sub_ok),
                 listOf(
-                    StageState.DONE to UiText.res(R.string.home_stage_working), StageState.DONE to CARLIFE,
+                    StageState.DONE to UiText.res(R.string.home_stage_working),
+                    StageState.DONE to if (i.wireless) CARLIFE_WIFI else CARLIFE,
                     StageState.DONE to UiText.res(R.string.home_stage_connected),
                     StageState.DONE to UiText.raw(i.videoRes),
-                    if (i.usbAudio) StageState.DONE to UiText.raw("USB") else StageState.PEND to UiText.res(R.string.home_stage_off),
+                    // настройка «Звук через USB» - это звук по каналу CarLife; без кабеля он идёт по Wi-Fi
+                    if (i.usbAudio) StageState.DONE to UiText.raw(if (i.wireless) "Wi-Fi" else "USB")
+                    else StageState.PEND to UiText.res(R.string.home_stage_off),
                 ),
                 outline = OutlineAction.STOP,
-                notifText = UiText.res(if (i.usbAudio) R.string.notif_video_usb else R.string.notif_video),
+                notifText = UiText.res(
+                    when {
+                        !i.usbAudio -> R.string.notif_video
+                        i.wireless -> R.string.notif_video_wifi
+                        else -> R.string.notif_video_usb
+                    },
+                ),
             )
             refused -> state(
                 Phase.OFF, Tone.WARN, HeroIcon.POWER, UiText.res(R.string.home_title_off),
@@ -282,6 +294,7 @@ object HeadswapStatus {
             setupError = AaState.setupError?.let { if (it == AaCreds.MISSING_TEXT) UiText.res(R.string.home_err_no_cert) else UiText.raw(it) },
             videoRes = (CarLifeState.videoMode ?: aaPrefs.videoMode.effective(aaPrefs.transcode)).outLabel,
             aaConsent = AutoServer.consentPending(),
+            wireless = CarLifeState.wirelessSession,
         )
     }
 

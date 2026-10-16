@@ -100,8 +100,8 @@
     <string name="fps_30_title">30 кадров/с</string>
     <string name="fps_30_sub">Плавнее, но тяжелее</string>
 
-    <!-- Беспровод (бета, ветка B) -->
-    <string name="wl_title">По воздуху (бета)</string>
+    <!-- Беспровод (ветка B) -->
+    <string name="wl_title">По воздуху</string>
     <string name="wl_note">Для машин с беспроводным CarLife. Включите точку доступа на телефоне, подключите к ней ГУ (в меню ГУ: Wi-Fi), откройте CarLife на ГУ и нажмите кнопку ниже. Кабель не нужен; если вставить кабель, побеждает USB.</string>
     <string name="wl_start">Ждать машину по Wi-Fi</string>
     <string name="wl_stop">Остановить</string>

@@ -17,7 +17,8 @@ class HomeLogicTest {
         usbAudio: Boolean = true,
         setupError: UiText? = null,
         consent: Boolean = false,
-    ) = Inputs(running, status, protocol, serverUp, autoReady, lost, graceLeft, 8, usbAudio, setupError, aaConsent = consent)
+        wireless: Boolean = false,
+    ) = Inputs(running, status, protocol, serverUp, autoReady, lost, graceLeft, 8, usbAudio, setupError, aaConsent = consent, wireless = wireless)
 
     @Test
     fun errorWhenCertificateMissing() {
@@ -52,6 +53,21 @@ class HomeLogicTest {
         assertEquals(UiText.raw("USB"), s.stages[4].second.second)
         assertEquals(UiText.res(R.string.notif_video_usb), s.notifText)
         val noAudio = HomeLogic.compute(inp(running = true, status = "мост: AA -> CarLife", usbAudio = false))
+        assertEquals(StageState.PEND, noAudio.stages[4].second.first)
+        assertEquals(UiText.res(R.string.notif_video), noAudio.notifText)
+        assertEquals(HeroIcon.CAR_USB, s.icon)
+    }
+
+    @Test
+    fun connectedOverWifiShowsWifi() {
+        val s = HomeLogic.compute(inp(running = true, status = "мост: AA -> CarLife (перекодирование)", wireless = true))
+        assertEquals(Phase.CONNECTED, s.phase)
+        assertEquals(HeroIcon.CAR_WIFI, s.icon)
+        assertEquals(UiText.res(R.string.home_sub_ok_wifi), s.sub)
+        assertEquals(UiText.raw("CarLife 2.0 · Wi-Fi"), s.stages[1].second.second)
+        assertEquals(UiText.raw("Wi-Fi"), s.stages[4].second.second)
+        assertEquals(UiText.res(R.string.notif_video_wifi), s.notifText)
+        val noAudio = HomeLogic.compute(inp(running = true, status = "мост: AA -> CarLife", usbAudio = false, wireless = true))
         assertEquals(StageState.PEND, noAudio.stages[4].second.first)
         assertEquals(UiText.res(R.string.notif_video), noAudio.notifText)
     }

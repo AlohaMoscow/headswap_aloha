@@ -16,16 +16,26 @@ import java.io.IOException
 import java.util.UUID
 
 /**
- * Диагностика ветки A (Bluetooth + Wi-Fi Direct): RFCOMM-серверы `carlife`, как у Baidu MD (BluetoothClient:28-29,76,119).
- * Если ГУ умеет беспроводной CarLife через Wi-Fi Direct, она сама подключается сюда. Проба отвечает на первые два шага
- * (WIRELESS_INFO_REQUEST, TARGET_INFO_REQUEST) и пишет в WL-лог, что прислала ГУ. В P2P-группу не входит, IP не отдаёт.
- * Секретов в лог не пишет (см. BtSummary). Живёт, пока сервис ждёт машину по Wi-Fi.
+ * Ветка A (Bluetooth + Wi-Fi Direct): RFCOMM-серверы `carlife`, как у Baidu MD (BluetoothClient:28-29,76,119).
+ * Если ГУ умеет беспроводной CarLife через Wi-Fi Direct, она сама подключается сюда. Обмен: WIRELESS_INFO_REQUEST,
+ * TARGET_INFO_REQUEST, по реквизитам из TARGET_INFO телефон входит в P2P-группу ГУ ([P2pJoin]), на IP_REQUEST
+ * отвечает MD_WIFI_IP с адресом в группе. Дальше ГУ подключает TCP-каналы к Tcp6Listener (пускает [ownsPeer]).
+ * Bluetooth-соединение держим, пока ждём машину и идёт сессия. Секретов в лог не пишет (см. BtSummary).
  */
 class CarlifeBtProbe(private val ctx: Context) {
     @Volatile private var running = false
     private val servers = ArrayList<BluetoothServerSocket>()
     private val lock = Any()
     @Volatile private var accepts = 0
+    @Volatile private var active: BluetoothSocket? = null
+    private val p2p = P2pJoin(ctx) { ip -> onP2pJoined(ip) }
+    /** Адрес телефона в группе ГУ (после входа) и запрос IP от ГУ: MD_WIFI_IP уходит, когда есть оба. */
+    @Volatile private var p2pIp: String? = null
+    @Volatile private var ipRequested = false
+    private val txLock = Any()
+
+    /** Входящий TCP из P2P-группы ГУ: пускаем в Tcp6Listener наравне с подсетями маяка. */
+    fun ownsPeer(a: java.net.InetAddress): Boolean = p2p.owns(a)
 
     fun hasPermission(): Boolean =
         Build.VERSION.SDK_INT < 31 || ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
@@ -36,6 +46,8 @@ class CarlifeBtProbe(private val ctx: Context) {
             if (running) return
             running = true
         }
+        p2pIp = null
+        ipRequested = false
         val adapter = ctx.getSystemService(BluetoothManager::class.java)?.adapter
         when {
             adapter == null -> return fail("нет адаптера")
@@ -63,6 +75,8 @@ class CarlifeBtProbe(private val ctx: Context) {
             servers.toList().also { servers.clear() }
         }
         for (s in list) try { s.close() } catch (_: IOException) {}
+        active?.let { try { it.close() } catch (_: IOException) {} }
+        p2p.stop(why)
         WLog.ev(WLog.BT, "stop", "why" to why, "accepts" to accepts)
     }
 
@@ -95,18 +109,15 @@ class CarlifeBtProbe(private val ctx: Context) {
         val parser = BtFrameParser()
         var why = "?"
         var targetAsked = false
+        active?.let { old -> try { old.close() } catch (_: IOException) {} }      // ГУ переподключилась: старый канал закрываем
+        active = s
+        ipRequested = false
         try {
-            val out = s.outputStream
             val inp = s.inputStream
-            fun send(type: Int) {
-                out.write(BtMsg.frame(type))
-                out.flush()
-                WLog.ev(WLog.BT, "tx", "type" to BtMsg.name(type))
-            }
             Thread.sleep(300)
-            send(BtMsg.MD_WIRELESS_INFO_REQUEST)
+            send(s, BtMsg.MD_WIRELESS_INFO_REQUEST)
             val buf = ByteArray(1024)
-            while (running && SystemClock.elapsedRealtime() - t0 < TALK_MS) {
+            while (running) {
                 val n = inp.read(buf)
                 if (n < 0) { why = "EOF"; break }
                 for (f in parser.feed(buf, n)) {
@@ -114,7 +125,7 @@ class CarlifeBtProbe(private val ctx: Context) {
                         BtMsg.HU_WIRELESS_INFO -> BtSummary.wirelessInfo(f.body)
                         BtMsg.HU_TARGET_INFO -> BtSummary.targetInfo(f.body)
                         BtMsg.HU_STATUS -> BtSummary.status(f.body)
-                        else -> emptyList()
+                        else -> listOf("shape" to BtSummary.shape(f.body))
                     }
                     WLog.ev(WLog.BT, "rx", "type" to BtMsg.name(f.type), "len" to f.body.size, *kv.toTypedArray())
                     when (f.type) {
@@ -122,20 +133,59 @@ class CarlifeBtProbe(private val ctx: Context) {
                             CarLifeState.btProbe = "ГУ ответила: ${kv.joinToString(" ") { "${it.first}=${it.second}" }}"
                             if (!targetAsked) {
                                 targetAsked = true
-                                send(BtMsg.MD_TARGET_INFO_REQUEST)
+                                send(s, BtMsg.MD_TARGET_INFO_REQUEST)
                             }
                         }
-                        BtMsg.HU_TARGET_INFO ->
-                            CarLifeState.btProbe = "ГУ прислала реквизиты Wi-Fi Direct: ${kv.joinToString(" ") { "${it.first}=${it.second}" }}"
+                        BtMsg.HU_TARGET_INFO -> {
+                            CarLifeState.btProbe = "ГУ прислала реквизиты Wi-Fi Direct, вхожу в группу"
+                            val t = P2pTarget.parse(f.body)
+                            if (t == null) WLog.ev(WLog.P2P, "off", "why" to "TARGET_INFO не разобран")
+                            else p2p.start(t)
+                        }
+                        BtMsg.HU_IP_REQUEST -> {
+                            ipRequested = true
+                            CarLifeState.btProbe = "ГУ просит IP телефона" + if (p2pIp == null) ", жду вход в группу" else ""
+                            sendIpIfReady()
+                        }
                     }
                 }
             }
-            if (why == "?") why = if (running) "проба окончена (${TALK_MS / 1000} с)" else "остановлено"
+            if (why == "?") why = "остановлено"
         } catch (e: Exception) {
             why = "ошибка: ${e.message}"
         } finally {
+            if (active === s) active = null
             try { s.close() } catch (_: IOException) {}
             WLog.ev(WLog.BT, "close", "why" to why, "aliveMs" to SystemClock.elapsedRealtime() - t0, "skipped" to parser.skipped)
+        }
+    }
+
+    private fun send(s: BluetoothSocket, type: Int, body: ByteArray? = null) {
+        synchronized(txLock) {
+            s.outputStream.write(BtMsg.frame(type, body))
+            s.outputStream.flush()
+        }
+        WLog.ev(WLog.BT, "tx", "type" to BtMsg.name(type), "len" to (body?.size ?: 0))
+    }
+
+    private fun onP2pJoined(ip: java.net.Inet4Address) {
+        p2pIp = ip.hostAddress
+        CarLifeState.btProbe = "телефон в группе ГУ (${ip.hostAddress})" + if (ipRequested) "" else ", ГУ ещё не просила IP"
+        sendIpIfReady()
+    }
+
+    /** MD_WIFI_IP после IP_REQUEST и входа в группу; на повторный запрос того же адреса отвечаем снова. */
+    private fun sendIpIfReady() {
+        val ip = p2pIp ?: return
+        val s = active ?: return
+        if (!ipRequested) return
+        try {
+            send(s, BtMsg.MD_WIFI_IP, BtMsg.wifiIp(ip))
+            ipRequested = false
+            CarLifeState.btProbe = "отдал ГУ IP $ip, жду TCP от ГУ"
+            AppLog.i("BT carlife: отдал ГУ адрес телефона $ip")
+        } catch (e: IOException) {
+            WLog.ev(WLog.BT, "tx-fail", "type" to "WIFI_IP", "err" to e.message)
         }
     }
 
@@ -145,6 +195,5 @@ class CarlifeBtProbe(private val ctx: Context) {
             "spp" to UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"),
             "carlife" to UUID.fromString("a45bc7e5-bb50-4949-9de1-f78299cf6d78"),
         )
-        private const val TALK_MS = 60_000L
     }
 }

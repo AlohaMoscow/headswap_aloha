@@ -55,4 +55,30 @@ class BtFramesTest {
         assertEquals(-1, m["scanRecordLen"])
         assertTrue(BtMsg.name(0x12345678).startsWith("0x"))
     }
+
+    @Test
+    fun p2pTargetFromTargetInfo() {
+        val body = PbWriter().string(1, "Mazda").string(4, "DIRECT-ab-Car,secretpw, 5745").toByteArray()
+        val t = P2pTarget.parse(body)!!
+        assertEquals("Mazda", t.deviceName)
+        assertEquals("DIRECT-ab-Car", t.ssid)
+        assertEquals("secretpw", t.passphrase)
+        assertEquals(5745, t.freqMhz)
+        assertTrue(t.canJoinBySsid)
+    }
+
+    @Test
+    fun p2pTargetWithoutNetInfoFallsBackToPeerName() {
+        val t = P2pTarget.parse(PbWriter().string(1, "Mazda").toByteArray())!!
+        assertEquals(null, t.ssid)
+        assertFalse(t.canJoinBySsid)
+        val short = P2pTarget.parse(PbWriter().string(4, "DIRECT-ab-Car,short").toByteArray())!!
+        assertFalse(short.canJoinBySsid)
+    }
+
+    @Test
+    fun wifiIpBodyIsStringField1() {
+        val f = com.yegorkapomidorka.headswap.PbReader.parse(BtMsg.wifiIp("192.168.49.20"))!!
+        assertEquals("192.168.49.20", com.yegorkapomidorka.headswap.PbReader.str(f, 1))
+    }
 }

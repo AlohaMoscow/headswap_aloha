@@ -1,6 +1,7 @@
 package com.yegorkapomidorka.headswap.link.bt
 
 import com.yegorkapomidorka.headswap.PbReader
+import com.yegorkapomidorka.headswap.PbWriter
 import com.yegorkapomidorka.headswap.Wire
 
 /**
@@ -43,6 +44,32 @@ object BtMsg {
     }
 
     fun frame(type: Int, body: ByteArray? = null): ByteArray = Wire.cmdInner(type, body)
+
+    /**
+     * Тело MD_WIFI_IP: адрес телефона в P2P-группе ГУ строкой в поле 1. Формат не подтверждён исходником MD
+     * (у Baidu 8.6.7 мы его не читали, LifeAuto собирает тело в нативной части): по первому отчёту с машины сверить.
+     */
+    fun wifiIp(ip: String): ByteArray = PbWriter().string(1, ip).toByteArray()
+}
+
+/** Реквизиты P2P-группы ГУ из TARGET_INFO: имя устройства Wi-Fi Direct и p2pNetInfo «ssid,пароль[,частота]». */
+class P2pTarget(val deviceName: String?, val ssid: String?, val passphrase: String?, val freqMhz: Int?) {
+    /** Можно ли войти в группу напрямую (WifiP2pConfig.Builder): ssid DIRECT-xy и пароль 8..63 символа. */
+    val canJoinBySsid: Boolean
+        get() = ssid != null && ssid.startsWith("DIRECT-") && ssid.length >= 9 && passphrase != null && passphrase.length in 8..63
+
+    companion object {
+        fun parse(body: ByteArray): P2pTarget? {
+            val f = PbReader.parse(body) ?: return null
+            val net = PbReader.str(f, 4)?.split(',')
+            return P2pTarget(
+                deviceName = PbReader.str(f, 1)?.takeIf { it.isNotEmpty() },
+                ssid = net?.getOrNull(0)?.trim()?.takeIf { it.isNotEmpty() },
+                passphrase = net?.getOrNull(1)?.takeIf { it.isNotEmpty() },
+                freqMhz = net?.getOrNull(2)?.trim()?.toIntOrNull()?.takeIf { it in 2400..5900 },
+            )
+        }
+    }
 }
 
 class BtFrame(val type: Int, val body: ByteArray)
@@ -105,6 +132,13 @@ object BtSummary {
         val parts = net.split(',')
         val freq = parts.getOrNull(2)?.trim()?.toIntOrNull()
         return listOf("p2pNetInfo" to "есть", "netParts" to parts.size, "netFreq" to freq)
+    }
+
+    /** Состав тела без значений строк: номер поля, тип, число или длина (формат IP_REQUEST и ответов ГУ не подтверждён). */
+    fun shape(body: ByteArray): String {
+        val f = PbReader.parse(body) ?: return "parse-fail/${body.size}"
+        if (f.isEmpty()) return "empty"
+        return f.joinToString(",") { if (it.data == null) "${it.number}=${it.num}" else "${it.number}:len${it.data.size}" }
     }
 
     fun status(body: ByteArray): List<Pair<String, Any?>> {

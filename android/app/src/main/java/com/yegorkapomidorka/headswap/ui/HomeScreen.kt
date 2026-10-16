@@ -73,7 +73,8 @@ class HomeScreen(host: MainActivity) : Screen(host) {
     /** Строка беспровода в карточке статуса: только когда режим включён и USB-сессии нет. */
     private fun wirelessLine(): String? {
         val w = CarLifeState.wireless
-        // и во время беспроводной сессии, и после обрыва (сервис тогда running, а строка говорит «жду машину снова»)
+        // во время беспроводной сессии строка повторяла бы подзаголовок; после обрыва нужна («жду машину снова»)
+        if (CarLifeState.wirelessSession) return null
         return if (w != null) ctx.getString(R.string.home_wireless, w) else null
     }
 
@@ -162,7 +163,8 @@ class HomeScreen(host: MainActivity) : Screen(host) {
         val iconRes = when (st.icon) {
             HeroIcon.POWER -> R.drawable.ic_power
             HeroIcon.PLUG -> R.drawable.ic_plug
-            HeroIcon.CAR -> R.drawable.ic_car
+            HeroIcon.CAR_USB -> R.drawable.ic_car_usb
+            HeroIcon.CAR_WIFI -> R.drawable.ic_car_wifi
             HeroIcon.REFRESH -> R.drawable.ic_refresh
             HeroIcon.ALERT -> R.drawable.ic_alert
         }

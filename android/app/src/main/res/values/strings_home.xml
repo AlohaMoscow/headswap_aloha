@@ -15,6 +15,7 @@
     <string name="home_sub_start_chain">Start it before every trip: the server turns off after a session.</string>
     <string name="home_sub_reconnecting">USB disconnected. The Android Auto session waits up to %1$d s.</string>
     <string name="home_sub_ok">Android Auto is on the car screen. You can put the phone away.</string>
+    <string name="home_sub_ok_wifi">Android Auto is on the car screen over Wi-Fi, no cable. You can put the phone away.</string>
     <string name="home_sub_refused">USB cable connected, but the head unit server does not answer. %1$s</string>
     <string name="home_sub_aa_dropped">Android Auto disconnected. Restarting the head unit server.</string>
     <string name="home_sub_cable_ok">USB cable connected. Waiting for Android Auto.</string>
@@ -28,7 +29,7 @@
     <string name="home_stage_headunit">Head unit</string>
     <string name="home_stage_aa" translatable="false">Android Auto</string>
     <string name="home_stage_video">Video</string>
-    <string name="home_stage_audio">USB audio</string>
+    <string name="home_stage_audio">Audio</string>
 
     <!-- Home screen: stage details -->
     <string name="home_stage_no_cert">no certificate</string>
@@ -61,6 +62,7 @@
     <!-- Notification -->
     <string name="notif_reconnecting">USB disconnected · %1$d s left</string>
     <string name="notif_video_usb">Video · audio over USB</string>
+    <string name="notif_video_wifi">Video · audio over Wi-Fi</string>
     <string name="notif_video">Video</string>
     <string name="notif_server_off">Head unit server not started</string>
     <string name="notif_cable_waiting">USB cable connected · waiting for Android Auto</string>

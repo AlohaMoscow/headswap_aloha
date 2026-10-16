@@ -61,10 +61,10 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     VIDEO("video", R.string.set_video, R.drawable.ic_video),
     SOUND("sound", R.string.set_sec_sound, R.drawable.ic_mic),
     HEADUNIT("headunit", R.string.set_sec_headunit, R.drawable.ic_car),
-    UPDATES("updates", R.string.upd_title, R.drawable.ic_download),
 
-    /** Беспровод (бета): только в сборке с BuildConfig.WIRELESS_BETA. */
-    WIRELESS("wireless", R.string.wl_title, R.drawable.ic_wifi);
+    /** Беспровод: только в сборке с BuildConfig.WIRELESS_BETA. */
+    WIRELESS("wireless", R.string.wl_title, R.drawable.ic_wifi),
+    UPDATES("updates", R.string.upd_title, R.drawable.ic_download);
 
     companion object {
         /** Разделы этой сборки: без беты беспровода его нет ни в меню, ни по ключу. */
@@ -540,13 +540,16 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
 
     /**
      * На Android 17+ без ACCESS_LOCAL_NETWORK LAN режется молча: сначала спрашиваем, старт - в onPermissionResult.
-     * BLUETOOTH_CONNECT (Android 12+) - для пробы ветки A, без него беспровод всё равно стартует.
+     * BLUETOOTH_CONNECT (Android 12+) и «Устройства поблизости» (Wi-Fi Direct) - для ветки A, без них беспровод всё равно стартует.
      */
     private fun onWirelessStart() {
         wlNoPermission?.visibility = View.GONE
         val ask = ArrayList<String>()
         if (Build.VERSION.SDK_INT >= 37 && NetProbe.localNetworkGranted(ctx) != "granted") ask += Manifest.permission.ACCESS_LOCAL_NETWORK
         if (!carBtGranted()) ask += Manifest.permission.BLUETOOTH_CONNECT
+        // ветка A: вход в Wi-Fi Direct-группу ГУ; без него беспровод стартует, но только веткой B
+        val p2p = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES else Manifest.permission.ACCESS_FINE_LOCATION
+        if (ctx.checkSelfPermission(p2p) != PackageManager.PERMISSION_GRANTED) ask += p2p
         if (ask.isNotEmpty()) {
             wlAwaitingPermission = true
             host.requestPermissions(ask.toTypedArray(), REQ_LOCAL_NETWORK)

@@ -15,6 +15,7 @@
     <string name="home_sub_start_chain">Запускайте перед каждой поездкой: после сессии сервер выключается.</string>
     <string name="home_sub_reconnecting">USB отключился. Сессия Android Auto ждёт до %1$d с.</string>
     <string name="home_sub_ok">Android Auto на экране машины. Телефон можно убрать.</string>
+    <string name="home_sub_ok_wifi">Android Auto на экране машины по Wi-Fi, без кабеля. Телефон можно убрать.</string>
     <string name="home_sub_refused">Кабель подключён, но сервер ГУ не отвечает. %1$s</string>
     <string name="home_sub_aa_dropped">Android Auto отключился, перезапускаю сервер ГУ.</string>
     <string name="home_sub_cable_ok">Кабель подключён. Жду Android Auto.</string>
@@ -27,7 +28,7 @@
     <string name="home_stage_server">Сервер ГУ</string>
     <string name="home_stage_headunit">Магнитола</string>
     <string name="home_stage_video">Видео</string>
-    <string name="home_stage_audio">Звук по USB</string>
+    <string name="home_stage_audio">Звук</string>
 
     <!-- Главный экран: состояние этапов -->
     <string name="home_stage_no_cert">нет сертификата</string>
@@ -60,6 +61,7 @@
     <!-- Уведомление -->
     <string name="notif_reconnecting">USB отключился · ещё %1$d с</string>
     <string name="notif_video_usb">Видео · звук по USB</string>
+    <string name="notif_video_wifi">Видео · звук по Wi-Fi</string>
     <string name="notif_video">Видео</string>
     <string name="notif_server_off">Сервер ГУ не запущен</string>
     <string name="notif_cable_waiting">Кабель подключён · жду Android Auto</string>
