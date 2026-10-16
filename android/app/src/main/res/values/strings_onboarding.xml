@@ -8,7 +8,7 @@
     <string name="step_aa_dev_short">Android Auto developer mode</string>
 
     <string name="step_aa_unknown_title">Unknown sources in Android Auto</string>
-    <string name="step_aa_unknown_body">To get video, YouTube and a browser on the head unit (Fermata Auto, AABrowser), turn on in Android Auto: Settings → ⋮ → Developer settings → Unknown sources. Without it, Android Auto will not show apps installed outside Google Play.</string>
+    <string name="step_aa_unknown_body">To get video, YouTube and a browser on the head unit (Fermata Auto, ParkedTube, AABrowser), turn on in Android Auto: Settings → ⋮ → Developer settings → Unknown sources. Without it, Android Auto will not show apps installed outside Google Play.</string>
     <string name="step_aa_unknown_primary">Open Android Auto settings</string>
     <string name="step_aa_unknown_short">Unknown sources</string>
 

@@ -7,7 +7,7 @@
     <string name="step_aa_dev_short">Режим разработчика AA</string>
 
     <string name="step_aa_unknown_title">Неизвестные источники в Android Auto</string>
-    <string name="step_aa_unknown_body">Чтобы на магнитоле появились видео, YouTube и браузер (Fermata Auto, AABrowser), включите в Android Auto: Настройки → ⋮ → Настройки разработчика → Неизвестные источники. Без этого Android Auto не покажет приложения, установленные не из Google Play.</string>
+    <string name="step_aa_unknown_body">Чтобы на магнитоле появились видео, YouTube и браузер (Fermata Auto, ParkedTube, AABrowser), включите в Android Auto: Настройки → ⋮ → Настройки разработчика → Неизвестные источники. Без этого Android Auto не покажет приложения, установленные не из Google Play.</string>
     <string name="step_aa_unknown_primary">Открыть настройки Android Auto</string>
     <string name="step_aa_unknown_short">Неизвестные источники</string>
 
