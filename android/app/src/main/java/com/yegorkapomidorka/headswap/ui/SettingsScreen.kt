@@ -72,6 +72,8 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     APPEARANCE("appearance", R.string.set_sec_appearance, R.drawable.ic_palette),
     VIDEO("video", R.string.set_video, R.drawable.ic_video),
     SOUND("sound", R.string.set_sec_sound, R.drawable.ic_mic),
+
+    /** Эквалайзер: вход из «Звук и микрофон», на главном экране своей строки нет. */
     EQ("eq", R.string.eq_title, R.drawable.ic_equalizer),
     HEADUNIT("headunit", R.string.set_sec_headunit, R.drawable.ic_car),
 
@@ -84,6 +86,9 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
         fun shown(): List<SettingsSection> = values().filter { it != WIRELESS || BuildConfig.WIRELESS_BETA }
 
         fun byKey(key: String?): SettingsSection? = shown().firstOrNull { it.key == key }
+
+        /** Строки главного экрана настроек: подразделы (EQ) открываются из своих разделов. */
+        fun menu(): List<SettingsSection> = shown().filter { it != EQ }
     }
 }
 
@@ -114,6 +119,8 @@ private val EQ_PRESETS = listOf(
     EqPreset.ELECTRONIC to R.string.eq_preset_electronic,
     EqPreset.CUSTOM to R.string.eq_preset_custom,
 )
+
+private fun Context.eqPresetName(p: EqPreset): String = getString(EQ_PRESETS.first { it.first == p }.second)
 
 private fun Context.micMissing(aa: AaPrefs): Boolean =
     aa.micMode != MicMode.CAR && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
@@ -147,7 +154,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         val body = c.vbox(12).apply { pad(c, 16, 4, 16, 16) }
 
         val sections = c.card()
-        for ((i, s) in SettingsSection.shown().withIndex()) {
+        for ((i, s) in SettingsSection.menu().withIndex()) {
             if (i > 0) sections.addView(c.divider())
             sections.addView(sectionRow(s))
         }
@@ -232,14 +239,8 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             set(SettingsSection.SOUND, c.getString(R.string.mic_no_permission), R.color.warn)
         } else {
             val mic = c.getString(R.string.set_sum_mic, c.getString(MICS.first { it.first == aa.micMode }.second))
-            set(SettingsSection.SOUND, listOfNotNull(if (aa.usbAudio) c.getString(R.string.set_usb_audio_title) else null, mic).joinToString(" · "))
-        }
-
-        val eqName = c.getString(EQ_PRESETS.first { it.first == aa.eqPreset }.second)
-        if (!aa.usbAudio && !aa.eq.isFlat) {
-            set(SettingsSection.EQ, "$eqName · ${c.getString(R.string.eq_sum_usb_only)}", R.color.warn)
-        } else {
-            set(SettingsSection.EQ, eqName)
+            val eq = if (aa.usbAudio && !aa.eq.isFlat) c.getString(R.string.eq_sum, c.eqPresetName(aa.eqPreset)) else null
+            set(SettingsSection.SOUND, listOfNotNull(if (aa.usbAudio) c.getString(R.string.set_usb_audio_title) else null, eq, mic).joinToString(" · "))
         }
 
         if (aa.autoServer && !AutoServer.isConnected) {
@@ -355,6 +356,8 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var eqPreBar: SeekBar? = null
     private var eqPreValue: TextView? = null
     private var eqUsbNote: TextView? = null
+    private var eqEntrySub: TextView? = null
+    private var eqEntryRow: View? = null
     private var svcStatus: TextView? = null
     private var svcButton: TextView? = null
     private var updStatus: TextView? = null
@@ -394,6 +397,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         refreshService()
         refreshMic()
         refreshEq()
+        refreshEqEntry()
         refreshUpdate()
         refreshWireless()
     }
@@ -801,7 +805,11 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private fun buildSound() {
         val c = ctx
         body.addView(c.sectionTitle(c.getString(R.string.set_sound)))
-        body.addView(ToggleRow(c, c.getString(R.string.set_usb_audio_title), c.getString(R.string.set_usb_audio_sub), aa.usbAudio) { aa.usbAudio = it }.view)
+        body.addView(ToggleRow(c, c.getString(R.string.set_usb_audio_title), c.getString(R.string.set_usb_audio_sub), aa.usbAudio) {
+            aa.usbAudio = it
+            refreshEqEntry()
+        }.view)
+        body.addView(eqEntry(), lp(MATCH, WRAP).margins(c, 0, 6, 0, 0))
 
         body.addView(c.sectionTitle(c.getString(R.string.set_mic)))
         for ((m, titleRes, subRes) in MICS) {
@@ -811,6 +819,33 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         }
         micNote = note("", R.color.warn)
         refreshMic()
+    }
+
+    /** Строка «Эквалайзер · пресет ›» под «Звук по USB»: открывает экран EQ; без звука по USB затемнена. */
+    private fun eqEntry(): View {
+        val c = ctx
+        val sub = c.text("", 14f, 400, c.clr(R.color.on2))
+        eqEntrySub = sub
+        return c.hbox(12).apply {
+            minimumHeight = c.dp(72)
+            pad(c, 16, 12, 12, 12)
+            background = c.rippleBg(c.shape(c.clr(R.color.surf), 20), 20)
+            isClickable = true
+            setOnClickListener { host.showSettingsSection(SettingsSection.EQ) }
+            addView(c.vbox(2).apply {
+                addView(c.text(c.getString(R.string.eq_title), 17f, 500))
+                addView(sub)
+            }, lp(0, WRAP, 1f))
+            addView(c.icon(R.drawable.ic_chevron, 20, c.clr(R.color.on2)))
+            eqEntryRow = this
+        }.also { refreshEqEntry() }
+    }
+
+    private fun refreshEqEntry() {
+        val sub = eqEntrySub ?: return
+        val usb = aa.usbAudio
+        sub.text = if (usb) ctx.eqPresetName(aa.eqPreset) else ctx.getString(R.string.eq_sum_usb_only)
+        eqEntryRow?.alpha = if (usb) 1f else 0.45f
     }
 
     private fun setMic(m: MicMode) {

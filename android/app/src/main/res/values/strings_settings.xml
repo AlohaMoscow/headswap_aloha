@@ -30,7 +30,8 @@
     <string name="eq_khz">%1$s kHz</string>
     <string name="eq_note">Music only: navigation prompts and voice are not processed. Applies instantly.</string>
     <string name="eq_usb_only">Works only with sound over USB; sound now goes over Bluetooth</string>
-    <string name="eq_sum_usb_only">only with sound over USB</string>
+    <string name="eq_sum_usb_only">Works only with sound over USB</string>
+    <string name="eq_sum">equalizer: %1$s</string>
 
     <string name="set_video">Video</string>
     <string name="set_transcode_title">Re-encoding</string>

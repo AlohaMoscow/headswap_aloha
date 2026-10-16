@@ -30,7 +30,8 @@
     <string name="eq_khz">%1$s кГц</string>
     <string name="eq_note">Только музыка: навигационные подсказки и голос не обрабатываются. Применяется сразу.</string>
     <string name="eq_usb_only">Работает только при звуке по USB, сейчас звук идёт по Bluetooth</string>
-    <string name="eq_sum_usb_only">только при звуке по USB</string>
+    <string name="eq_sum_usb_only">Работает только при звуке по USB</string>
+    <string name="eq_sum">эквалайзер: %1$s</string>
 
     <string name="set_video">Видео</string>
     <string name="set_transcode_title">Перекодирование</string>
