@@ -22,7 +22,13 @@ import java.util.UUID
  * отвечает MD_WIFI_IP с адресом в группе. Дальше ГУ подключает TCP-каналы к Tcp6Listener (пускает [ownsPeer]).
  * Bluetooth-соединение держим, пока ждём машину и идёт сессия. Секретов в лог не пишет (см. BtSummary).
  */
-class CarlifeBtProbe(private val ctx: Context) {
+class CarlifeBtProbe(
+    private val ctx: Context,
+    /** ГУ подключилась к RFCOMM (нить bt-accept-*). */
+    private val onAccept: () -> Unit = {},
+    /** ГУ прислала реквизиты Wi-Fi Direct, mac - адрес её Bluetooth (нить bt-accept-*). */
+    private val onTargetInfo: (mac: String?) -> Unit = {},
+) {
     @Volatile private var running = false
     private val servers = ArrayList<BluetoothServerSocket>()
     private val lock = Any()
@@ -48,6 +54,7 @@ class CarlifeBtProbe(private val ctx: Context) {
         }
         p2pIp = null
         ipRequested = false
+        accepts = 0      // за этот запуск: в строке `stop` accepts= считаются подключения ГУ с последнего start
         val adapter = ctx.getSystemService(BluetoothManager::class.java)?.adapter
         when {
             adapter == null -> return fail("нет адаптера")
@@ -94,6 +101,7 @@ class CarlifeBtProbe(private val ctx: Context) {
                 return
             }
             accepts++
+            onAccept()
             talk(tag, s)
         }
     }
@@ -140,7 +148,10 @@ class CarlifeBtProbe(private val ctx: Context) {
                             CarLifeState.btProbe = "ГУ прислала реквизиты Wi-Fi Direct, вхожу в группу"
                             val t = P2pTarget.parse(f.body)
                             if (t == null) WLog.ev(WLog.P2P, "off", "why" to "TARGET_INFO не разобран")
-                            else p2p.start(t)
+                            else {
+                                onTargetInfo(dev?.address)
+                                p2p.start(t)
+                            }
                         }
                         BtMsg.HU_IP_REQUEST -> {
                             ipRequested = true

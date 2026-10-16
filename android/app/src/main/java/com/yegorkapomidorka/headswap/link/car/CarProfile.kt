@@ -22,8 +22,20 @@ class CarProfile(ctx: Context) {
 
     val isSet: Boolean get() = btMac != null
 
+    /**
+     * Как эта машина подключается по воздуху. Привязан к [btMac]: другая машина или сброс - снова UNKNOWN.
+     * Без выбранной машины не пишется.
+     */
+    var connMode: CarConnMode
+        get() = if (!isSet) CarConnMode.UNKNOWN else CarConnMode.entries.firstOrNull { it.name == sp.getString("connMode", null) } ?: CarConnMode.UNKNOWN
+        set(v) {
+            if (isSet) sp.edit().putString("connMode", v.name).apply()
+        }
+
     fun save(mac: String, name: String?, associationId: Int) {
-        sp.edit().putString("btMac", mac).putString("btName", name).putInt("cdmAssociationId", associationId).apply()
+        val ed = sp.edit()
+        if (!CarMac.same(btMac, mac)) ed.remove("connMode")
+        ed.putString("btMac", mac).putString("btName", name).putInt("cdmAssociationId", associationId).apply()
     }
 
     fun clear() {

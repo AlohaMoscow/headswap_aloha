@@ -140,6 +140,9 @@ class Tcp6Listener(
         return this
     }
 
+    /** Адрес первого принятого пира (после 6/6 - ГУ); до первого подключения null. */
+    val peerAddress: InetAddress? get() = synchronized(lock) { peer }
+
     /** Фактический порт канала (в тестах порты 0). */
     fun boundPort(chan: Int): Int = synchronized(lock) { servers[chan]?.localPort ?: -1 }
 

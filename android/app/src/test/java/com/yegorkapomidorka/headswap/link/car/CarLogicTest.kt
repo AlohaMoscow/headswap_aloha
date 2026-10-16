@@ -83,7 +83,8 @@ class CarLogicTest {
         requesting: Boolean = false,
         waitedMs: Long = CAR_NET_DELAY_MS,
         sixOfSix: Boolean = false,
-    ) = CarNetPolicy.shouldRequest(carWifiSet, waiting, session, usb, requesting, waitedMs, sixOfSix)
+        wifiDirect: Boolean = false,
+    ) = CarNetPolicy.shouldRequest(carWifiSet, waiting, session, usb, requesting, waitedMs, sixOfSix, wifiDirect)
 
     @Test
     fun carNetRequestedAfterDelayWhileWaiting() {
@@ -121,6 +122,12 @@ class CarLogicTest {
     }
 
     @Test
+    fun carNetNotRequestedForWifiDirectCar() {
+        assertFalse(request(wifiDirect = true))
+        assertFalse(request(wifiDirect = true, waitedMs = CAR_NET_DELAY_MS * 10))
+    }
+
+    @Test
     fun carNetReleasedWhenWaitingStopsOrServiceDies() {
         assertTrue(CarNetPolicy.shouldRelease(CarNetEvent.AUTO_OFF))
         assertTrue(CarNetPolicy.shouldRelease(CarNetEvent.STOP))
@@ -132,5 +139,54 @@ class CarLogicTest {
     fun carNetHeldAcrossSessions() {
         assertFalse(CarNetPolicy.shouldRelease(CarNetEvent.SESSION_START))
         assertFalse(CarNetPolicy.shouldRelease(CarNetEvent.SESSION_END))
+    }
+
+    /** Все условия выполнены; тесты по одному ломают по условию. */
+    private fun btHint(
+        waiting: Boolean = true,
+        session: Boolean = false,
+        waitedMs: Long = BT_HINT_MS,
+        accepts: Int = 0,
+        carBt: Boolean = true,
+        mode: CarConnMode = CarConnMode.UNKNOWN,
+        shown: Boolean = false,
+    ) = BtReconnectHint.shouldShow(waiting, session, waitedMs, accepts, carBt, mode, shown)
+
+    @Test
+    fun btHintShownWhenCarConnectedButSilent() {
+        assertTrue(btHint())
+        assertTrue(btHint(waitedMs = BT_HINT_MS + 1))
+        assertTrue(btHint(mode = CarConnMode.BT_CARLIFE))
+    }
+
+    @Test
+    fun btHintNotShownBeforeDelay() {
+        assertFalse(btHint(waitedMs = BT_HINT_MS - 1))
+    }
+
+    @Test
+    fun btHintNotShownWhenNotWaitingOrSessionRunning() {
+        assertFalse(btHint(waiting = false))
+        assertFalse(btHint(session = true))
+    }
+
+    @Test
+    fun btHintNotShownAfterCarAccepted() {
+        assertFalse(btHint(accepts = 1))
+    }
+
+    @Test
+    fun btHintNotShownWithoutCarBluetooth() {
+        assertFalse(btHint(carBt = false))
+    }
+
+    @Test
+    fun btHintNotShownForHotspotCar() {
+        assertFalse(btHint(mode = CarConnMode.HOTSPOT))
+    }
+
+    @Test
+    fun btHintShownOncePerWait() {
+        assertFalse(btHint(shown = true))
     }
 }
