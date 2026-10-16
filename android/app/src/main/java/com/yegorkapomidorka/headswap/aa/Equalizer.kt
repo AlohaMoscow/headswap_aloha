@@ -69,6 +69,11 @@ class Equalizer(sampleRate: Int = 48000, channels: Int = 2) {
     private var settings = EqSettings()
     private var preGain = 1.0
 
+    /** Фактически применённое предусиление: за буфер линейно идёт к preGain, чтобы смена пресета не щёлкала. */
+    private var curGain = 1.0
+    private var rampStep = 0.0
+    private var rampLeft = 0
+
     /** Активные полосы (усиление ≠ 0 и ниже Найквиста): индексы и нормированные коэффициенты. */
     private var active = IntArray(0)
     private val b0 = DoubleArray(BANDS)
@@ -104,6 +109,8 @@ class Equalizer(sampleRate: Int = 48000, channels: Int = 2) {
 
     private fun recompute() {
         preGain = 10.0.pow(settings.preamp / 20.0)
+        rampLeft = maxOf(1, rate / 50)
+        rampStep = (preGain - curGain) / rampLeft
         val idx = ArrayList<Int>()
         for (i in 0 until BANDS) {
             val g = settings.bands[i]
@@ -135,6 +142,7 @@ class Equalizer(sampleRate: Int = 48000, channels: Int = 2) {
         val frames = length / (2 * chans)
         var p = offset
         for (f in 0 until frames) {
+            rampFrame()
             for (c in 0 until chans) {
                 val s = ((pcm[p].toInt() and 0xFF) or (pcm[p + 1].toInt() shl 8)).toShort()
                 val out = sample(s, c)
@@ -151,6 +159,7 @@ class Equalizer(sampleRate: Int = 48000, channels: Int = 2) {
         val frames = length / chans
         var p = offset
         for (f in 0 until frames) {
+            rampFrame()
             for (c in 0 until chans) {
                 pcm[p] = sample(pcm[p], c).toShort()
                 p++
@@ -158,10 +167,19 @@ class Equalizer(sampleRate: Int = 48000, channels: Int = 2) {
         }
     }
 
+    /** Шаг curGain к preGain на кадр, фиксированная длина ~20 мс (не зависит от нарезки буферов). */
+    private fun rampFrame() {
+        if (rampLeft <= 0) return
+        curGain += rampStep
+        if (--rampLeft == 0) curGain = preGain
+    }
+
     /** true = обработка не нужна. На выходе из bypass состояние чистое: старый хвост не всплывёт щелчком. */
     private fun enterBypass(): Boolean {
         if (settings.isFlat) {
             bypassed = true
+            curGain = 1.0
+            rampLeft = 0
             return true
         }
         if (bypassed) {
@@ -173,7 +191,7 @@ class Equalizer(sampleRate: Int = 48000, channels: Int = 2) {
     }
 
     private fun sample(s: Short, c: Int): Int {
-        var x = s / 32768.0 * preGain
+        var x = s / 32768.0 * curGain
         val base = c * BANDS
         for (i in active) {
             val k = base + i

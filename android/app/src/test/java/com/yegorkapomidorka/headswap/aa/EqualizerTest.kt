@@ -128,6 +128,20 @@ class EqualizerTest {
     }
 
     @Test
+    fun preampChangeIsRamped() {
+        // −12 дБ preamp на лету: без плавного перехода на стыке был бы скачок ~3/4 амплитуды
+        val input = sine(63.0, 0.8, 9600)
+        val out = input.copyOf()
+        val eq = Equalizer(rate, 2).apply { update(band(6, 1)) }
+        eq.process(out, 0, 4800 * 4)
+        eq.update(EqSettings(List(7) { if (it == 6) 1 else 0 }, -12))
+        eq.process(out, 4800 * 4, 4800 * 4)
+        var maxJump = 0
+        for (i in 4790 until 4900) maxJump = maxOf(maxJump, kotlin.math.abs(sampleAt(out, i, 0) - sampleAt(out, i - 1, 0)))
+        assertTrue("скачок $maxJump", maxJump < 400)
+    }
+
+    @Test
     fun channelsIndependent() {
         // L — синус, R — тишина: R остаётся нулём
         val frames = 4800
