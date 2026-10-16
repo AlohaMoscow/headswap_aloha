@@ -376,7 +376,7 @@ object AapMessages {
         r.str(2, make).str(3, "Desktop Head Unit").str(4, "2025").str(5, vehicleId)
             .v(6, 0)                                                // DRIVER_POSITION_LEFT
             .str(7, "Google").str(8, "Desktop Head Unit").str(9, "1").str(10, "0.1.0")
-            .bool(11, false).bool(12, false).v(13, 0).str(14, "Open Headunit")
+            .bool(11, false).bool(12, false).v(13, 0).str(14, carMake ?: "Open Headunit")   // подпись плитки выхода в лаунчере AA
         r.msg(17, AapPb()
             .str(1, make).str(2, "Desktop Head Unit").str(3, "2025").str(4, vehicleId)
             .str(5, "Google").str(6, "Desktop Head Unit").str(7, "1").str(8, "0.1.0").v(9, vehicleType))
