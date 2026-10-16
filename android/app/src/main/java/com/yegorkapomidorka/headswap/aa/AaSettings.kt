@@ -87,6 +87,28 @@ class AaPrefs(ctx: Context) {
     var progressSeconds: Boolean
         get() = sp.getBoolean("progressSeconds", false)
         set(v) = sp.edit().putBoolean("progressSeconds", v).apply()
+
+    /** Пресет эквалайзера (EqPreset.key); полосы и preamp хранятся отдельно, пресет — только подпись. */
+    var eqPreset: EqPreset
+        get() = EqPreset.parse(sp.getString("eqPreset", EqPreset.FLAT.key))
+        set(v) = sp.edit().putString("eqPreset", v.key).apply()
+
+    /** Полосы (CSV, дБ) и preamp; запись сразу применяется к мосту через EqLive. */
+    var eq: EqSettings
+        get() = EqSettings(EqSettings.parseBands(sp.getString("eqBands", null)), sp.getInt("eqPreamp", 0)).normalized()
+        set(v) {
+            val n = v.normalized()
+            sp.edit().putString("eqBands", n.bandsCsv()).putInt("eqPreamp", n.preamp).apply()
+            EqLive.settings = n
+        }
+
+    /** Последние значения «Своего»: возврат к нему после пробы пресетов. */
+    var eqCustom: EqSettings
+        get() = EqSettings(EqSettings.parseBands(sp.getString("eqCustomBands", null)), sp.getInt("eqCustomPreamp", 0)).normalized()
+        set(v) {
+            val n = v.normalized()
+            sp.edit().putString("eqCustomBands", n.bandsCsv()).putInt("eqCustomPreamp", n.preamp).apply()
+        }
 }
 
 /** Марки для настройки «Марка автомобиля» (канонические английские написания). */

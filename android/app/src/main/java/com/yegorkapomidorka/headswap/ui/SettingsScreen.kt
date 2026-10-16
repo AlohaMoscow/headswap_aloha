@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -18,6 +19,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import com.yegorkapomidorka.headswap.AppLocale
 import com.yegorkapomidorka.headswap.AppLog
@@ -30,6 +32,13 @@ import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.aa.AaDensity
 import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.CAR_MAKES
+import com.yegorkapomidorka.headswap.aa.EQ_BAND_MAX
+import com.yegorkapomidorka.headswap.aa.EQ_BAND_MIN
+import com.yegorkapomidorka.headswap.aa.EQ_FREQS
+import com.yegorkapomidorka.headswap.aa.EQ_PREAMP_MAX
+import com.yegorkapomidorka.headswap.aa.EQ_PREAMP_MIN
+import com.yegorkapomidorka.headswap.aa.EqPreset
+import com.yegorkapomidorka.headswap.aa.EqSettings
 import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.VideoMode
@@ -41,6 +50,7 @@ import com.yegorkapomidorka.headswap.link.car.CarWifi
 import com.yegorkapomidorka.headswap.link.diag.NetProbe
 import com.yegorkapomidorka.headswap.update.UpdatePrefs
 import com.yegorkapomidorka.headswap.update.Updater
+import java.text.NumberFormat
 
 /** Шапка «назад + заголовок» и прокручиваемое тело. */
 fun scaffold(ctx: Context, title: String, onBack: () -> Unit, body: View): LinearLayout = ctx.vbox().apply {
@@ -62,6 +72,9 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     APPEARANCE("appearance", R.string.set_sec_appearance, R.drawable.ic_palette),
     VIDEO("video", R.string.set_video, R.drawable.ic_video),
     SOUND("sound", R.string.set_sec_sound, R.drawable.ic_mic),
+
+    /** Эквалайзер: вход из «Звук и микрофон», на главном экране своей строки нет. */
+    EQ("eq", R.string.eq_title, R.drawable.ic_equalizer),
     HEADUNIT("headunit", R.string.set_sec_headunit, R.drawable.ic_car),
 
     /** Беспровод: только в сборке с BuildConfig.WIRELESS_BETA. */
@@ -73,6 +86,9 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
         fun shown(): List<SettingsSection> = values().filter { it != WIRELESS || BuildConfig.WIRELESS_BETA }
 
         fun byKey(key: String?): SettingsSection? = shown().firstOrNull { it.key == key }
+
+        /** Строки главного экрана настроек: подразделы (EQ) открываются из своих разделов. */
+        fun menu(): List<SettingsSection> = shown().filter { it != EQ }
     }
 }
 
@@ -94,6 +110,17 @@ private val MICS = listOf(
     Triple(MicMode.PHONE, R.string.mic_phone_title, R.string.mic_phone_sub),
     Triple(MicMode.AUTO, R.string.mic_auto_title, R.string.mic_auto_sub),
 )
+
+private val EQ_PRESETS = listOf(
+    EqPreset.FLAT to R.string.eq_preset_flat,
+    EqPreset.BASS to R.string.eq_preset_bass,
+    EqPreset.VOCAL to R.string.eq_preset_vocal,
+    EqPreset.ROCK to R.string.eq_preset_rock,
+    EqPreset.ELECTRONIC to R.string.eq_preset_electronic,
+    EqPreset.CUSTOM to R.string.eq_preset_custom,
+)
+
+private fun Context.eqPresetName(p: EqPreset): String = getString(EQ_PRESETS.first { it.first == p }.second)
 
 private fun Context.micMissing(aa: AaPrefs): Boolean =
     aa.micMode != MicMode.CAR && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
@@ -127,7 +154,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         val body = c.vbox(12).apply { pad(c, 16, 4, 16, 16) }
 
         val sections = c.card()
-        for ((i, s) in SettingsSection.shown().withIndex()) {
+        for ((i, s) in SettingsSection.menu().withIndex()) {
             if (i > 0) sections.addView(c.divider())
             sections.addView(sectionRow(s))
         }
@@ -212,7 +239,8 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             set(SettingsSection.SOUND, c.getString(R.string.mic_no_permission), R.color.warn)
         } else {
             val mic = c.getString(R.string.set_sum_mic, c.getString(MICS.first { it.first == aa.micMode }.second))
-            set(SettingsSection.SOUND, listOfNotNull(if (aa.usbAudio) c.getString(R.string.set_usb_audio_title) else null, mic).joinToString(" · "))
+            val eq = if (aa.usbAudio && !aa.eq.isFlat) c.getString(R.string.eq_sum, c.eqPresetName(aa.eqPreset)) else null
+            set(SettingsSection.SOUND, listOfNotNull(if (aa.usbAudio) c.getString(R.string.set_usb_audio_title) else null, eq, mic).joinToString(" · "))
         }
 
         if (aa.autoServer && !AutoServer.isConnected) {
@@ -322,6 +350,14 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var fpsNote: TextView? = null
     private var certSeg: Segmented? = null
     private var micNote: TextView? = null
+    private val eqPresetBtns = ArrayList<Pair<TextView, EqPreset>>()
+    private val eqBars = ArrayList<SeekBar>()
+    private val eqValues = ArrayList<TextView>()
+    private var eqPreBar: SeekBar? = null
+    private var eqPreValue: TextView? = null
+    private var eqUsbNote: TextView? = null
+    private var eqEntrySub: TextView? = null
+    private var eqEntryRow: View? = null
     private var svcStatus: TextView? = null
     private var svcButton: TextView? = null
     private var updStatus: TextView? = null
@@ -349,6 +385,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             SettingsSection.APPEARANCE -> buildAppearance()
             SettingsSection.VIDEO -> buildVideo()
             SettingsSection.SOUND -> buildSound()
+            SettingsSection.EQ -> buildEq()
             SettingsSection.HEADUNIT -> buildHeadunit()
             SettingsSection.UPDATES -> body.addView(updateCard(), lp(MATCH, WRAP).margins(ctx, 0, 8, 0, 0))
             SettingsSection.WIRELESS -> body.addView(wirelessCard(), lp(MATCH, WRAP).margins(ctx, 0, 8, 0, 0))
@@ -359,6 +396,8 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     override fun onShow() {
         refreshService()
         refreshMic()
+        refreshEq()
+        refreshEqEntry()
         refreshUpdate()
         refreshWireless()
     }
@@ -766,7 +805,11 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private fun buildSound() {
         val c = ctx
         body.addView(c.sectionTitle(c.getString(R.string.set_sound)))
-        body.addView(ToggleRow(c, c.getString(R.string.set_usb_audio_title), c.getString(R.string.set_usb_audio_sub), aa.usbAudio) { aa.usbAudio = it }.view)
+        body.addView(ToggleRow(c, c.getString(R.string.set_usb_audio_title), c.getString(R.string.set_usb_audio_sub), aa.usbAudio) {
+            aa.usbAudio = it
+            refreshEqEntry()
+        }.view)
+        body.addView(eqEntry(), lp(MATCH, WRAP).margins(c, 0, 6, 0, 0))
 
         body.addView(c.sectionTitle(c.getString(R.string.set_mic)))
         for ((m, titleRes, subRes) in MICS) {
@@ -776,6 +819,33 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         }
         micNote = note("", R.color.warn)
         refreshMic()
+    }
+
+    /** Строка «Эквалайзер · пресет ›» под «Звук по USB»: открывает экран EQ; без звука по USB затемнена. */
+    private fun eqEntry(): View {
+        val c = ctx
+        val sub = c.text("", 14f, 400, c.clr(R.color.on2))
+        eqEntrySub = sub
+        return c.hbox(12).apply {
+            minimumHeight = c.dp(72)
+            pad(c, 16, 12, 12, 12)
+            background = c.rippleBg(c.shape(c.clr(R.color.surf), 20), 20)
+            isClickable = true
+            setOnClickListener { host.showSettingsSection(SettingsSection.EQ) }
+            addView(c.vbox(2).apply {
+                addView(c.text(c.getString(R.string.eq_title), 17f, 500))
+                addView(sub)
+            }, lp(0, WRAP, 1f))
+            addView(c.icon(R.drawable.ic_chevron, 20, c.clr(R.color.on2)))
+            eqEntryRow = this
+        }.also { refreshEqEntry() }
+    }
+
+    private fun refreshEqEntry() {
+        val sub = eqEntrySub ?: return
+        val usb = aa.usbAudio
+        sub.text = if (usb) ctx.eqPresetName(aa.eqPreset) else ctx.getString(R.string.eq_sum_usb_only)
+        eqEntryRow?.alpha = if (usb) 1f else 0.45f
     }
 
     private fun setMic(m: MicMode) {
@@ -792,6 +862,135 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         val missing = ctx.micMissing(aa)
         note.text = if (missing) ctx.getString(R.string.mic_no_permission) else ""
         note.visibility = if (missing) View.VISIBLE else View.GONE
+    }
+
+    // --- эквалайзер ---
+
+    private fun buildEq() {
+        val c = ctx
+        eqUsbNote = note(c.getString(R.string.eq_usb_only), R.color.warn)
+        body.addView(c.sectionTitle(c.getString(R.string.eq_presets)))
+        // каждая кнопка отдельная пилюля, по две в ряд
+        val grid = c.vbox(8)
+        for (row in EQ_PRESETS.chunked(2)) {
+            val line = c.hbox(8)
+            for ((p, titleRes) in row) {
+                val b = c.text(c.getString(titleRes), 15f, 600).apply {
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    pad(c, 8, 0, 8, 0)
+                    isClickable = true
+                    setOnClickListener { pickEqPreset(p) }
+                }
+                eqPresetBtns.add(b to p)
+                line.addView(b, lp(0, c.dp(48), 1f))
+            }
+            grid.addView(line, lp(MATCH, WRAP))
+        }
+        body.addView(grid, lp(MATCH, WRAP))
+
+        body.addView(c.sectionTitle(c.getString(R.string.eq_bands)))
+        val bands = c.card().apply { pad(c, 0, 6, 0, 6) }
+        for ((i, f) in EQ_FREQS.withIndex()) {
+            val (row, bar, value) = eqSliderRow(freqLabel(f), EQ_BAND_MIN, EQ_BAND_MAX) { setEqBand(i, it) }
+            eqBars.add(bar)
+            eqValues.add(value)
+            bands.addView(row)
+        }
+        body.addView(bands, lp(MATCH, WRAP))
+
+        body.addView(c.sectionTitle(c.getString(R.string.eq_preamp)))
+        val pre = c.card().apply { pad(c, 0, 6, 0, 6) }
+        val (preRow, preBar, preValue) = eqSliderRow("", EQ_PREAMP_MIN, EQ_PREAMP_MAX) { setEqPreamp(it) }
+        eqPreBar = preBar
+        eqPreValue = preValue
+        pre.addView(preRow)
+        body.addView(pre, lp(MATCH, WRAP))
+
+        body.addView(c.tonalButton(c.getString(R.string.eq_reset)).apply { setOnClickListener { pickEqPreset(EqPreset.FLAT) } },
+            c.lpDp(MATCH, 52).margins(c, 0, 12, 0, 0))
+        note(c.getString(R.string.eq_note))
+        refreshEq()
+    }
+
+    /** Строка «подпись | слайдер | значение в дБ»; onChange только от пальца. */
+    private fun eqSliderRow(label: String, min: Int, max: Int, onChange: (Int) -> Unit): Triple<View, SeekBar, TextView> {
+        val c = ctx
+        val value = c.text("", 14f, 500, c.clr(R.color.on2)).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
+        val bar = SeekBar(c).apply {
+            this.max = max - min
+            progressTintList = ColorStateList.valueOf(c.clr(R.color.acc))
+            thumbTintList = ColorStateList.valueOf(c.clr(R.color.acc))
+            progressBackgroundTintList = ColorStateList.valueOf(c.clr(R.color.line))
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
+                    if (fromUser) onChange(progress + min)
+                }
+
+                override fun onStartTrackingTouch(sb: SeekBar) {}
+
+                override fun onStopTrackingTouch(sb: SeekBar) {}
+            })
+        }
+        val row = c.hbox(4).apply {
+            pad(c, 16, 0, 16, 0)
+            if (label.isNotEmpty()) addView(c.text(label, 14f, 500).apply { maxLines = 1 }, c.lpDp(c.dp(64), 44))
+            addView(bar, c.lpDp(0, 44, 1f))
+            addView(value, c.lpDp(c.dp(64), 44))
+        }
+        return Triple(row, bar, value)
+    }
+
+    private fun freqLabel(f: Int): String {
+        if (f < 1000) return ctx.getString(R.string.eq_hz, f.toString())
+        val nf = NumberFormat.getInstance(ctx.resources.configuration.locales[0]).apply { maximumFractionDigits = 1 }
+        return ctx.getString(R.string.eq_khz, nf.format(f / 1000.0))
+    }
+
+    private fun dbLabel(v: Int): String = ctx.getString(R.string.eq_db, if (v > 0) "+$v" else if (v < 0) "−${-v}" else "0")
+
+    /** Любое движение слайдера = «Свой»; его значения запоминаются отдельно. */
+    private fun applyCustomEq(s: EqSettings) {
+        aa.eq = s
+        aa.eqCustom = s
+        aa.eqPreset = EqPreset.CUSTOM
+        refreshEq()
+    }
+
+    private fun setEqBand(i: Int, v: Int) {
+        val cur = aa.eq
+        applyCustomEq(cur.copy(bands = cur.bands.toMutableList().also { it[i] = v }))
+    }
+
+    private fun setEqPreamp(v: Int) = applyCustomEq(aa.eq.copy(preamp = v))
+
+    private fun pickEqPreset(p: EqPreset) {
+        aa.eq = p.settings ?: aa.eqCustom
+        aa.eqPreset = p
+        refreshEq()
+    }
+
+    private fun refreshEq() {
+        val usbNote = eqUsbNote ?: return
+        val s = aa.eq
+        for ((i, bar) in eqBars.withIndex()) {
+            val v = s.bands[i]
+            if (bar.progress != v - EQ_BAND_MIN) bar.progress = v - EQ_BAND_MIN
+            eqValues[i].text = dbLabel(v)
+        }
+        eqPreBar?.let { if (it.progress != s.preamp - EQ_PREAMP_MIN) it.progress = s.preamp - EQ_PREAMP_MIN }
+        eqPreValue?.text = dbLabel(s.preamp)
+        val preset = aa.eqPreset
+        val c = ctx
+        for ((b, p) in eqPresetBtns) {
+            val on = p == preset
+            b.background = c.rippleBg(if (on) c.shape(c.clr(R.color.pric), 24) else c.shape(0, 24, c.clr(R.color.line), 1.5f), 24)
+            b.setTextColor(c.clr(if (on) R.color.onpric else R.color.on))
+            val title = c.eqPresetName(p)
+            b.text = if (on) "✓ $title" else title
+        }
+        usbNote.visibility = if (aa.usbAudio) View.GONE else View.VISIBLE
     }
 
     // --- головное устройство ---

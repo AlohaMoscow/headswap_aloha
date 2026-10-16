@@ -27,6 +27,7 @@ import com.yegorkapomidorka.headswap.aa.AaPrefs
 import com.yegorkapomidorka.headswap.aa.AaState
 import com.yegorkapomidorka.headswap.aa.AapOptions
 import com.yegorkapomidorka.headswap.aa.BridgeHost
+import com.yegorkapomidorka.headswap.aa.EqLive
 import com.yegorkapomidorka.headswap.aa.MetaRelay
 import com.yegorkapomidorka.headswap.aa.MicMode
 import com.yegorkapomidorka.headswap.aa.PhoneMicCapture
@@ -703,6 +704,7 @@ class BridgeService : Service() {
             core.micModeProvider = { aaPrefs.micMode }
             core.phoneMic = PhoneMicCapture(applicationContext)
             core.usbAudioEnabled = aaPrefs.usbAudio
+            EqLive.settings = aaPrefs.eq
             core.transcodeEnabled = aaPrefs.transcode
             core.videoMode = mode
             core.densityOverride = densityOverride

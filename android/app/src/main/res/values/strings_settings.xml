@@ -14,6 +14,25 @@
     <string name="set_usb_audio_title">Sound over USB</string>
     <string name="set_usb_audio_sub">To the car speakers</string>
 
+    <string name="eq_title">Equalizer</string>
+    <string name="eq_presets">Preset</string>
+    <string name="eq_preset_flat">Off</string>
+    <string name="eq_preset_bass">Bass</string>
+    <string name="eq_preset_vocal">Vocal</string>
+    <string name="eq_preset_rock">Rock</string>
+    <string name="eq_preset_electronic">Electronic</string>
+    <string name="eq_preset_custom">Custom</string>
+    <string name="eq_bands">Bands</string>
+    <string name="eq_preamp">Preamp</string>
+    <string name="eq_reset">Reset</string>
+    <string name="eq_db">%1$s dB</string>
+    <string name="eq_hz">%1$s Hz</string>
+    <string name="eq_khz">%1$s kHz</string>
+    <string name="eq_note">Music only: navigation prompts and voice are not processed. Applies instantly.</string>
+    <string name="eq_usb_only">Works only with sound over USB; sound now goes over Bluetooth</string>
+    <string name="eq_sum_usb_only">Works only with sound over USB</string>
+    <string name="eq_sum">equalizer: %1$s</string>
+
     <string name="set_video">Video</string>
     <string name="set_transcode_title">Re-encoding</string>
     <string name="set_transcode_sub">More reliable · +60 ms</string>
