@@ -40,6 +40,10 @@
     <string name="set_cert">Head unit certificate</string>
     <string name="set_cert_hint">Change it if Android Auto does not connect</string>
 
+    <string name="set_car_make">Car make</string>
+    <string name="set_car_make_default">Default</string>
+    <string name="set_car_make_note">Logo on the exit button in Android Auto (experiment). Applies on the next connection.</string>
+
     <string name="set_autostart">Auto-start head unit server</string>
     <string name="set_autostart_sub">When the USB cable is connected and after an Android Auto session</string>
     <string name="set_autostart_enable">Turn on</string>

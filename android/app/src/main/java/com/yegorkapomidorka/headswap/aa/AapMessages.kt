@@ -66,6 +66,8 @@ data class AapSdOptions(
     val fullAudio: Boolean = false,
     val extraServices: Boolean = true,
     val vehicleId: String = "headlessunit-001",
+    /** Марка автомобиля вместо «Google» (поле 2 и 17.1; производитель ГУ и модель не трогаем); null = по умолчанию. Эксперимент: логотип на кнопке выхода AA. */
+    val carMake: String? = null,
 )
 
 object AapMessages {
@@ -320,7 +322,11 @@ object AapMessages {
 
     fun serviceDiscoveryResponse(o: AapSdOptions = AapSdOptions()): AapOut {
         val vehicleType = o.vehicleType ?: if (o.mic) VEHICLE_TYPE_CAR else VEHICLE_TYPE_MOTORCYCLE
-        val vehicleId = if (vehicleType == VEHICLE_TYPE_MOTORCYCLE) o.vehicleId + "-moto" else o.vehicleId
+        val carMake = o.carMake?.takeIf { it.isNotBlank() }
+        var vehicleId = if (vehicleType == VEHICLE_TYPE_MOTORCYCLE) o.vehicleId + "-moto" else o.vehicleId
+        // другой vehicleId - AA заводит новый профиль машины, а не берёт закешированный с «Google»
+        if (carMake != null) vehicleId += "-" + carMake.lowercase().filter { it.isLetterOrDigit() }
+        val make = carMake ?: "Google"
         val (width, height) = o.resolution.split("x").map { it.toInt() }
         val resCode = when (o.resolution) {
             "800x480" -> 1
@@ -367,12 +373,12 @@ object AapMessages {
             r.msg(1, AapPb().v(1, CH_NAVIGATION).msg(8, AapPb().v(1, 1000).v(2, 2)))    // ImageCodesOnly
         }
 
-        r.str(2, "Google").str(3, "Desktop Head Unit").str(4, "2025").str(5, vehicleId)
+        r.str(2, make).str(3, "Desktop Head Unit").str(4, "2025").str(5, vehicleId)
             .v(6, 0)                                                // DRIVER_POSITION_LEFT
             .str(7, "Google").str(8, "Desktop Head Unit").str(9, "1").str(10, "0.1.0")
-            .bool(11, false).bool(12, false).v(13, 0).str(14, "Open Headunit")
+            .bool(11, false).bool(12, false).v(13, 0).str(14, carMake ?: "Open Headunit")   // подпись плитки выхода в лаунчере AA
         r.msg(17, AapPb()
-            .str(1, "Google").str(2, "Desktop Head Unit").str(3, "2025").str(4, vehicleId)
+            .str(1, make).str(2, "Desktop Head Unit").str(3, "2025").str(4, vehicleId)
             .str(5, "Google").str(6, "Desktop Head Unit").str(7, "1").str(8, "0.1.0").v(9, vehicleType))
         return AapOut(CH_CONTROL, SERVICE_DISCOVERY_RESPONSE, r.toByteArray())
     }

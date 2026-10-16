@@ -78,8 +78,9 @@ enum class VideoMode(
     fun densityFor(densityOverride: Int): Int = if (densityOverride == AaDensity.AUTO) density else densityOverride
 
     /** Опции SDR для AA этого режима; densityOverride - ручной DPI интерфейса AA (AaDensity.AUTO = density режима). */
-    fun sdOptions(fullAudio: Boolean, densityOverride: Int = AaDensity.AUTO) = AapSdOptions(
+    fun sdOptions(fullAudio: Boolean, densityOverride: Int = AaDensity.AUTO, carMake: String? = null) = AapSdOptions(
         resolution = aaResolution, density = densityFor(densityOverride), marginW = marginW, marginH = marginH, fullAudio = fullAudio,
+        carMake = carMake,
     )
 
     /**
