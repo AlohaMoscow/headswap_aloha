@@ -253,6 +253,7 @@ object LogShare {
             appendLine("  Bluetooth carlife: ${CarLifeState.btProbe ?: "не запускался"}")
             val car = CarProfile(ctx)      // без MAC и имени
             appendLine("  машина: ${if (car.isSet) "выбрана (CDM id ${car.cdmAssociationId})" else "не выбрана"}")
+            if (car.isSet) appendLine("  подключение машины: ${car.connMode}")
             appendLine("  триггер Bluetooth: ${if (CarProfile.triggerEnabled(ctx)) "включён" else "выключен"}")
             appendLine("  авто: ${if (CarLifeState.carAuto) "да" else "нет"}")
             appendLine("  Wi-Fi машины: ${if (CarWifi(ctx).isSet) "задан" else "не задан"}")      // без SSID и пароля
