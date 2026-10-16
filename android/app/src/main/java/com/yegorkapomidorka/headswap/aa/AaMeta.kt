@@ -667,19 +667,25 @@ class MetaRelay(
         val d = remain ?: return                    // без дистанции не шлём: на ГУ было бы «0 м»
         if (!ready() || !navSubscribed) return
         val now = clockMs()
-        if (!force && !turnDirty && now - lastTurnAt < TURN_MIN_MS) return
+        val idle = now - lastTurnAt
+        if (!force && !turnDirty && idle < TURN_MIN_MS) return
+        // h137 (Honda Civic, пустой HU_INFO): после ~40 с без пакетов приборка гасит подсказку и на UPDATE не оживает
+        val reshow = shown && idle >= NAVI_RESHOW_MS
         val info = NaviTurnInfo(
-            if (shown) ACTION_UPDATE else ACTION_SHOW, t.nextTurn, t.road, maxOf(total, d.meters), d.meters, d.timeSeconds ?: 0
+            if (shown && !reshow) ACTION_UPDATE else ACTION_SHOW, t.nextTurn, t.road, maxOf(total, d.meters), d.meters, d.timeSeconds ?: 0
         )
         val sig = "${info.action}|${info.nextTurn}|${info.roadName}|${info.totalDistance}|${info.remainDistance}|${info.timeSeconds}"
-        if (sig == lastSent) return
+        // на стоянке AA шлёт одно и то же: повторяем раз в NAVI_KEEPALIVE_MS, чтобы ГУ не решила, что маршрута нет
+        val keepalive = sig == lastSent
+        if (keepalive && idle < NAVI_KEEPALIVE_MS) return
         if (link().sendNaviTurn(info)) {
-            val loud = !shown || turnDirty
+            val loud = !shown || turnDirty || reshow
+            val tag = if (reshow) "$why, повторный показ после ${idle / 1000} с" else if (keepalive) "$why, keepalive" else why
             shown = true
             turnDirty = false
             lastTurnAt = now
             lastSent = sig
-            log("META -> NAVI_NEXT_TURN_INFO ($why) $info", loud)
+            log("META -> NAVI_NEXT_TURN_INFO ($tag) $info", loud)
         }
     }
 
@@ -717,6 +723,10 @@ class MetaRelay(
 
         const val PROGRESS_MIN_MS = 1000L
         const val TURN_MIN_MS = 1000L
+        /** Повтор неизменного манёвра, пока маршрут активен (на стоянке AA шлёт те же данные, дедуп их глушил). */
+        const val NAVI_KEEPALIVE_MS = 5000L
+        /** Пауза дольше этой: следующий пакет снова SHOW, ГУ могла уже убрать подсказку. */
+        const val NAVI_RESHOW_MS = 10_000L
 
         /** Запоздалые манёвр/дистанция после конца маршрута не стартуют его заново в этом окне. */
         const val TAIL_MS = 5000L

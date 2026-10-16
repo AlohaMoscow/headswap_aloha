@@ -349,6 +349,35 @@ class AaMetaTest {
     }
 
     @Test
+    fun stationaryKeepaliveAndReshow() {
+        val r = Rig()
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        r.core.onNavTurn(AaMeta.parseNavState(navState(8, "Main St"))!!)
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(30, 6))!!)
+        assertEquals(1, r.link.turns.size)
+        // стоим: AA повторяет те же данные раз в секунду; SHOW -> UPDATE уходит сразу, дальше тишина до 5 с
+        val same = { r.now += 1000; r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(30, 6))!!) }
+        same()
+        assertEquals(2, r.link.turns.size)
+        assertEquals(2, r.link.turns[1].action)
+        repeat(4) { same() }
+        assertEquals("дедуп до 5 с", 2, r.link.turns.size)
+        same()
+        assertEquals("keepalive через 5 с", 3, r.link.turns.size)
+        assertEquals(2, r.link.turns[2].action)
+        // AA замолчал на 15 с: следующий пакет снова SHOW
+        r.now += 15_000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(20, 4))!!)
+        assertEquals(4, r.link.turns.size)
+        assertEquals(1, r.link.turns[3].action)
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(10, 2))!!)
+        assertEquals(2, r.link.turns[4].action)
+    }
+
+    @Test
     fun legacyEventsWork() {
         val r = Rig()
         r.core.onCarlifeSubscribe(listOf(0), true)
