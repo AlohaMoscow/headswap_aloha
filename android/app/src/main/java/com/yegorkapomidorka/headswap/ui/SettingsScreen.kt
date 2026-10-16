@@ -61,10 +61,10 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     VIDEO("video", R.string.set_video, R.drawable.ic_video),
     SOUND("sound", R.string.set_sec_sound, R.drawable.ic_mic),
     HEADUNIT("headunit", R.string.set_sec_headunit, R.drawable.ic_car),
-    UPDATES("updates", R.string.upd_title, R.drawable.ic_download),
 
-    /** Беспровод (бета): только в сборке с BuildConfig.WIRELESS_BETA. */
-    WIRELESS("wireless", R.string.wl_title, R.drawable.ic_wifi);
+    /** Беспровод: только в сборке с BuildConfig.WIRELESS_BETA. */
+    WIRELESS("wireless", R.string.wl_title, R.drawable.ic_wifi),
+    UPDATES("updates", R.string.upd_title, R.drawable.ic_download);
 
     companion object {
         /** Разделы этой сборки: без беты беспровода его нет ни в меню, ни по ключу. */
