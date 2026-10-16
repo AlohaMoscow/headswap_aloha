@@ -77,7 +77,7 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     EQ("eq", R.string.eq_title, R.drawable.ic_equalizer),
     HEADUNIT("headunit", R.string.set_sec_headunit, R.drawable.ic_car),
 
-    /** Каталог чужих AA-приложений (Fermata Auto, AABrowser) и предупреждение про видео в движении. */
+    /** Каталог чужих AA-приложений (Fermata Auto, ParkedTube, AABrowser) и предупреждение про видео в движении. */
     APPS("apps", R.string.set_sec_apps, R.drawable.ic_open),
 
     /** Беспровод: только в сборке с BuildConfig.WIRELESS_BETA. */

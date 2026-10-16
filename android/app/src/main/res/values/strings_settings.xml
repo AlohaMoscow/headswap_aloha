@@ -102,6 +102,7 @@
     <string name="apps_download">Download</string>
     <string name="apps_open">Open</string>
     <string name="apps_fermata_desc">Phone video, YouTube, screen mirroring</string>
+    <string name="apps_parkedtube_desc">Full-screen YouTube on the head unit, Russian keyboard</string>
     <string name="apps_aabrowser_desc">Full-screen browser on the head unit</string>
     <string name="apps_aabrowser_req">Requires Android 15+</string>
     <string name="apps_unsupported">Will not work on this phone: Android 15 or newer is required.</string>
