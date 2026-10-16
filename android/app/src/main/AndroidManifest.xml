@@ -45,10 +45,19 @@
     <!-- автозапуск сервера ГУ читает подписи меню из ресурсов самого Android Auto (на языке AA); без queries на API 30+ пакет не виден -->
     <queries>
         <package android:name="com.google.android.projection.gearhead" />
-        <!-- раздел «Приложения для магнитолы»: статус установки и запуск (Fermata Auto, ParkedTube, AABrowser) -->
+        <!-- раздел «Приложения для магнитолы»: статус установки и запуск каталога (Fermata Auto, ParkedTube, AABrowser) -->
         <package android:name="me.aap.fermata.auto.dear.google.why" />
         <package android:name="dev.codex.aaparkedyoutube" />
         <package android:name="com.kododake.aabrowser" />
+        <!-- поиск любых приложений для Android Auto: плееры (сервис) и полноэкранные (activity) -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="com.google.android.gms.car.category.CATEGORY_PROJECTION" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.CAR_LAUNCHER" />
+        </intent>
     </queries>
 
     <application
