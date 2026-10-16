@@ -521,6 +521,7 @@ class BridgeService : Service() {
     private fun startSession(transport: CarTransport) {
         main.removeCallbacks(carNetTick)      // сессия идёт: новых запросов сети машины нет (сам запрос держим, CarNetEvent.SESSION_START)
         CarLifeState.accessory = transport.label
+        CarLifeState.wirelessSession = transport.caps.kind == TransportCaps.TCP6.kind
         if (transport.caps.kind != TransportCaps.TCP6.kind) WLog.begin(transport.caps.kind)
 
         val aaPrefs = AaPrefs(this)
@@ -700,6 +701,7 @@ class BridgeService : Service() {
         AppLog.i("сервис: сессия завершена ($reason)")
         if (session !== s) return
         session = null
+        CarLifeState.wirelessSession = false
         if (wifiBMode && autoStarted && !autoMode && !stopRequested) {
             // машина ушла по Bluetooth, пока шла беспроводная сессия (ГУ держала Wi-Fi): ожидание заново не начинаем
             wifiBMode = false

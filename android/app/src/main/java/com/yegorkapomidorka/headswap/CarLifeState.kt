@@ -19,6 +19,9 @@ object CarLifeState {
     @Volatile var densityOverride: Int = AaDensity.AUTO
     @Volatile var running: Boolean = false
 
+    /** Текущая сессия идёт по Wi-Fi (TCP), а не по кабелю; false - сессии нет или она по USB. */
+    @Volatile var wirelessSession: Boolean = false
+
     /** Беспровод (бета, ветка B): что сейчас происходит, для экрана; null - режим не включён. */
     @Volatile var wireless: String? = null
 
