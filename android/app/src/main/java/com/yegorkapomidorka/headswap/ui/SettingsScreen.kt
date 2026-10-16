@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +18,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -250,8 +252,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             set(SettingsSection.HEADUNIT, c.getString(R.string.set_sum_headunit, aa.certSet.uppercase(), auto))
         }
 
-        val appsInstalled = HuApps.installedCount({ HuApps.isInstalled(c, it) }, Build.VERSION.SDK_INT)
-        set(SettingsSection.APPS, c.getString(R.string.set_sum_apps, appsInstalled, HuApps.CATALOG.size))
+        set(SettingsSection.APPS, c.getString(R.string.set_sum_apps, HuApps.detect(c).installed.size))
 
         val (upd, color) = c.updateStatus()
         set(SettingsSection.UPDATES, upd, color)
@@ -365,7 +366,8 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var eqUsbNote: TextView? = null
     private var eqEntrySub: TextView? = null
     private var eqEntryRow: View? = null
-    private val appRows = ArrayList<AppRow>()
+    /** Списки «Установлено на телефоне» и «Рекомендуем»: пересобираются при каждом возврате на экран. */
+    private var appsHost: LinearLayout? = null
     private var svcStatus: TextView? = null
     private var svcButton: TextView? = null
     private var updStatus: TextView? = null
@@ -1110,9 +1112,6 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
 
     // --- приложения для магнитолы ---
 
-    /** Вьюхи строки каталога, которые меняются при возврате на экран. */
-    private class AppRow(val app: HuApp, val status: TextView, val unsupported: TextView, val download: View, val open: View)
-
     private fun buildApps() {
         val c = ctx
         body.addView(
@@ -1125,60 +1124,100 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             lp(MATCH, WRAP).margins(c, 0, 8, 0, 0),
         )
 
-        body.addView(c.sectionTitle(c.getString(R.string.apps_list_title)))
-        val card = c.card()
-        for ((i, app) in HuApps.CATALOG.withIndex()) {
-            if (i > 0) card.addView(c.divider())
-            card.addView(appRow(app), lp(MATCH, WRAP))
-        }
-        body.addView(card, lp(MATCH, WRAP))
+        appsHost = c.vbox(6).also { body.addView(it, lp(MATCH, WRAP)) }
 
         body.addView(c.sectionTitle(c.getString(R.string.apps_hint_title)))
         note(c.getString(R.string.apps_hint_text))
         refreshApps()
     }
 
-    private fun appRow(app: HuApp): View {
+    private fun appButton(label: String, onClick: () -> Unit): TextView {
         val c = ctx
-        fun button(label: String, onClick: () -> Unit) = c.text(label, 15f, 600, c.clr(R.color.acc)).apply {
+        return c.text(label, 15f, 600, c.clr(R.color.acc)).apply {
             gravity = Gravity.CENTER
             pad(c, 14, 0, 14, 0)
             background = c.rippleBg(null, 20)
             isClickable = true
             setOnClickListener { onClick() }
         }
-        val status = c.text("", 14f, 500, c.clr(R.color.on2))
-        val unsupported = c.text(c.getString(R.string.apps_unsupported), 13f, 400, c.clr(R.color.warn)).apply { visibility = View.GONE }
-        val download = button(c.getString(R.string.apps_download)) { HuApps.download(c, app) }
-        val open = button(c.getString(R.string.apps_open)) { HuApps.open(c, app) }
-        appRows.add(AppRow(app, status, unsupported, download, open))
-        return c.vbox(6).apply {
-            pad(c, 16, 12, 12, 8)
-            addView(c.hbox(8).apply {
-                addView(c.text(app.name, 17f, 500), lp(0, WRAP, 1f))
-                addView(status)
-            })
-            addView(c.text(c.getString(app.descRes), 14f, 400, c.clr(R.color.on2)))
-            app.reqRes?.let { addView(c.text(c.getString(it), 13f, 400, c.clr(R.color.on2))) }
-            addView(unsupported)
-            addView(c.hbox(4).apply {
-                gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                addView(download, c.lpDp(WRAP, 44))
-                addView(open, c.lpDp(WRAP, 44))
-            }, lp(MATCH, WRAP))
+    }
+
+    /** Найденное на телефоне: иконка и имя самого приложения, описание из каталога (если есть), подпись про «Неизвестные источники». */
+    private fun installedAppRow(pkg: String, label: CharSequence, icon: Drawable?, catalog: HuApp?): View {
+        val c = ctx
+        val canOpen = HuApps.launchIntent(c, pkg) != null
+        return c.hbox(12).apply {
+            pad(c, 16, 12, 12, 12)
+            icon?.let { addView(ImageView(c).apply { setImageDrawable(it) }, c.lpDp(c.dp(24), 24)) }
+            addView(c.vbox(4).apply {
+                addView(c.text(label, 17f, 500))
+                catalog?.let { addView(c.text(c.getString(it.descRes), 14f, 400, c.clr(R.color.on2))) }
+                addView(c.text(c.getString(R.string.apps_installed_note), 13f, 400, c.clr(R.color.on2)))
+                if (catalog != null && HuApps.status(c, catalog).unsupported) {
+                    addView(c.text(c.getString(R.string.apps_unsupported), 13f, 400, c.clr(R.color.warn)))
+                }
+            }, lp(0, WRAP, 1f))
+            if (canOpen) addView(appButton(c.getString(R.string.apps_open)) { HuApps.open(c, pkg) }, c.lpDp(WRAP, 44))
         }
     }
 
-    /** Статус по PackageManager: зовётся при каждом возврате на экран (после браузера и установщика). */
-    private fun refreshApps() {
+    /** Запись каталога, которой на телефоне нет: описание, требование, «Скачать». */
+    private fun recommendedAppRow(app: HuApp): View {
         val c = ctx
-        for (r in appRows) {
-            val st = HuApps.status(c, r.app)
-            r.status.text = c.getString(if (st.installed) R.string.apps_installed else R.string.apps_not_installed)
-            r.status.setTextColor(c.clr(if (st.installed) R.color.ok else R.color.on2))
-            r.unsupported.visibility = if (st.unsupported) View.VISIBLE else View.GONE
-            r.download.visibility = if (st.installed || st.unsupported) View.GONE else View.VISIBLE
-            r.open.visibility = if (st.installed && HuApps.launchIntent(c, r.app) != null) View.VISIBLE else View.GONE
+        val unsupported = HuApps.status(c, app).unsupported
+        return c.vbox(6).apply {
+            pad(c, 16, 12, 12, 8)
+            addView(c.text(app.name, 17f, 500))
+            addView(c.text(c.getString(app.descRes), 14f, 400, c.clr(R.color.on2)))
+            app.reqRes?.let { addView(c.text(c.getString(it), 13f, 400, c.clr(R.color.on2))) }
+            if (unsupported) {
+                addView(c.text(c.getString(R.string.apps_unsupported), 13f, 400, c.clr(R.color.warn)))
+            } else {
+                addView(c.hbox(4).apply {
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    addView(appButton(c.getString(R.string.apps_download)) { HuApps.download(c, app) }, c.lpDp(WRAP, 44))
+                }, lp(MATCH, WRAP))
+            }
+        }
+    }
+
+    /** Поиск по PackageManager: зовётся при каждом возврате на экран (после браузера и установщика). */
+    private fun refreshApps() {
+        val host = appsHost ?: return
+        val c = ctx
+        val pm = c.packageManager
+        val sel = HuApps.detect(c)
+        host.removeAllViews()
+
+        host.addView(c.sectionTitle(c.getString(R.string.apps_installed_title)))
+        val rows = sel.installed.mapNotNull { pkg ->
+            try {
+                val info = pm.getApplicationInfo(pkg, 0)
+                Triple(pkg, info.loadLabel(pm), info)
+            } catch (_: PackageManager.NameNotFoundException) {
+                null
+            }
+        }.sortedBy { it.second.toString().lowercase() }
+        if (rows.isEmpty()) {
+            host.addView(c.text(c.getString(R.string.apps_installed_empty), 14f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(20) })
+        } else {
+            val card = c.card()
+            for ((i, r) in rows.withIndex()) {
+                if (i > 0) card.addView(c.divider())
+                val icon = try { r.third.loadIcon(pm) } catch (_: Exception) { null }
+                card.addView(installedAppRow(r.first, r.second, icon, HuApps.CATALOG.firstOrNull { it.pkg == r.first }), lp(MATCH, WRAP))
+            }
+            host.addView(card, lp(MATCH, WRAP))
+        }
+
+        if (sel.recommended.isNotEmpty()) {
+            host.addView(c.sectionTitle(c.getString(R.string.apps_recommended_title)))
+            val card = c.card()
+            for ((i, app) in sel.recommended.withIndex()) {
+                if (i > 0) card.addView(c.divider())
+                card.addView(recommendedAppRow(app), lp(MATCH, WRAP))
+            }
+            host.addView(card, lp(MATCH, WRAP))
         }
     }
 

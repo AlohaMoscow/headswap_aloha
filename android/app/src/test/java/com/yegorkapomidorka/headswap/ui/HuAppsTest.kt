@@ -49,12 +49,86 @@ class HuAppsTest {
         assertNull(fermata.reqRes)
     }
 
+    private val self = "com.yegorkapomidorka.headswap"
+
+    private fun select(candidates: List<AppCandidate>, installed: Set<String> = emptySet()) =
+        HuApps.select(candidates, self, HuApps.CATALOG) { it in installed }
+
     @Test
-    fun installedCountIgnoresSdk() {
-        assertEquals(0, HuApps.installedCount({ false }, 36))
-        assertEquals(1, HuApps.installedCount({ it == browser.pkg }, 36))
-        assertEquals(1, HuApps.installedCount({ it == parkedTube.pkg }, 36))
-        assertEquals(HuApps.CATALOG.size, HuApps.installedCount({ true }, 30))
+    fun selectExcludesSelfSystemAndPlay() {
+        val r = select(
+            listOf(
+                AppCandidate(self, false, null),
+                AppCandidate("com.google.android.apps.maps", true, null),
+                AppCandidate("com.google.android.googlequicksearchbox", true, "com.android.vending"),
+                AppCandidate("com.some.player", false, "com.android.vending"),
+                AppCandidate("com.some.sideloaded", false, null),
+            ),
+        )
+        assertEquals(listOf("com.some.sideloaded"), r.installed)
+    }
+
+    @Test
+    fun selectKeepsNullPackageInstallerAndXiaomi() {
+        val r = select(
+            listOf(
+                AppCandidate("com.a.adb", false, null),
+                AppCandidate("com.b.pkginstaller", false, "com.google.android.packageinstaller"),
+                AppCandidate("com.c.xiaomi", false, "com.xiaomi.discover"),
+            ),
+        )
+        assertEquals(listOf("com.a.adb", "com.b.pkginstaller", "com.c.xiaomi"), r.installed)
+    }
+
+    @Test
+    fun catalogAppMissedByQueriesStillInstalled() {
+        val r = select(emptyList(), installed = setOf(fermata.pkg))
+        assertEquals(listOf(fermata.pkg), r.installed)
+        assertEquals(listOf(parkedTube, browser), r.recommended)
+    }
+
+    @Test
+    fun catalogAppFromPlayStillInstalledIfPresent() {
+        val r = select(listOf(AppCandidate(fermata.pkg, false, "com.android.vending")), installed = setOf(fermata.pkg))
+        assertEquals(listOf(fermata.pkg), r.installed)
+    }
+
+    @Test
+    fun recommendedIsWholeCatalogWhenNothingInstalled() {
+        val r = select(emptyList())
+        assertTrue(r.installed.isEmpty())
+        assertEquals(HuApps.CATALOG, r.recommended)
+    }
+
+    @Test
+    fun recommendedEmptyWhenAllCatalogInstalled() {
+        val r = select(emptyList(), installed = HuApps.CATALOG.map { it.pkg }.toSet())
+        assertTrue(r.recommended.isEmpty())
+        assertEquals(HuApps.CATALOG.map { it.pkg }, r.installed)
+    }
+
+    @Test
+    fun recommendedSkipsCatalogAppFoundByQueries() {
+        val r = select(listOf(AppCandidate(browser.pkg, false, null)))
+        assertTrue(browser !in r.recommended)
+        assertEquals(listOf(browser.pkg), r.installed)
+    }
+
+    @Test
+    fun selectDeduplicatesByPackage() {
+        val r = select(
+            listOf(
+                AppCandidate("com.a.player", false, null),
+                AppCandidate("com.a.player", false, null),
+                AppCandidate(fermata.pkg, false, null),
+            ),
+            installed = setOf(fermata.pkg),
+        )
+        assertEquals(listOf("com.a.player", fermata.pkg), r.installed)
+    }
+
+    @Test
+    fun catalogSizeIsThree() {
         assertEquals(3, HuApps.CATALOG.size)
     }
 }
