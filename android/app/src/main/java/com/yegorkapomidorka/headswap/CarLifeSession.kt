@@ -151,6 +151,7 @@ class CarLifeSession(
         CarLifeState.status = "соединено, жду HU_PROTOCOL_VERSION"
         transport.start(::dispatch, ::logTx, ::close)
         sched.scheduleWithFixedDelay({ tick() }, 1, 1, TimeUnit.SECONDS)
+        sched.scheduleWithFixedDelay({ pauseHeartbeat() }, PAUSE_HEARTBEAT_MS, PAUSE_HEARTBEAT_MS, TimeUnit.MILLISECONDS)
         sched.scheduleWithFixedDelay({ adaptBitrate() }, 1000, BITRATE_POLL_MS, TimeUnit.MILLISECONDS)
     }
 
@@ -347,6 +348,10 @@ class CarLifeSession(
             Msg.VIDEO_ENCODER_START -> onVideoStart()
             Msg.VIDEO_ENCODER_PAUSE -> {
                 paused = true
+                if (bridge.huVw20082120) { // первый heartbeat сразу; Desay - как раньше, через 2 с
+                    lastVideoTx = 0L
+                    pauseHeartbeat()
+                }
                 bridge.onCarlifePause()
                 AppLog.i("видео: PAUSE, кадры не шлю")
             }
@@ -825,7 +830,7 @@ class CarLifeSession(
                 }
                 return
             }
-            if (m.data.isEmpty()) { // keepalive: VIDEO_DATA len=0 (Recorder.sendEmptyPacketForeground)
+            if (m.data.isEmpty()) { // keepalive на PAUSE: пустой VIDEO_DATA (Desay) или VIDEO_HEARTBEAT (VW 20082120)
                 vBeats++
                 if (vBeats <= 3) AppLog.msg("TX", chan, inner.size, m.type, m.declaredLen, null, inner)
                 return
@@ -896,17 +901,27 @@ class CarLifeSession(
     private var lastStatsAt = 0L
     private var lastStatsFrames = 0L
 
+    // Пустых keepalive при идущем видео НЕТ: кадры обеспечивает энкодер (repeat-previous-frame-after 100 мс).
+    // На PAUSE (ГУ в своём меню/на своём источнике) канал иначе молчит:
+    // - Desay G6S (Mazda CX-5) через ~22 с тишины рвёт USB (EIO, лог Ивана 2026-10-12): пустой VIDEO_DATA 0x20001,
+    //   как Baidu sendEmptyPacketBackground, раз в 2 с по USB и раз в ~1 с на воздухе (ГУ на Wi-Fi рвут видео-сокет быстрее);
+    // - VW channel 20082120 рвёт канал через 3,6-4 с после PAUSE даже при 0x20001 раз в 1-2 с (h93, логи 2026-10-15 USB
+    //   и 2026-10-16 Wi-Fi), реконнект с FOREGROUND выдёргивал юзера из меню ГУ в CarLife: VIDEO_HEARTBEAT 0x20002 сразу
+    //   и раз в 100 мс, как Baidu Recorder.sendEmptyPacketBackground (~50 мс).
+    private fun pauseHeartbeat() {
+        if (closed.get() || !paused || !PAUSE_KEEPALIVE_ENABLED) return
+        val (type, period) =
+            if (bridge.huVw20082120) Msg.VIDEO_HEARTBEAT to PAUSE_HEARTBEAT_MS else Msg.VIDEO_DATA to pauseKeepaliveMs
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastVideoTx < period) return
+        if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой ${Msg.name(type)} раз в $period мс, чтобы ГУ не рвало USB")
+        lastVideoTx = now
+        send(Ch.VIDEO, Wire.dataInner(type, unixSeconds(), ByteArray(0)))
+    }
+
     private fun tick() {
         if (closed.get()) return
         val now = SystemClock.elapsedRealtime()
-        // Пустых keepalive 0x20001 len=0 при идущем видео НЕТ: кадры обеспечивает энкодер (repeat-previous-frame-after
-        // 100 мс). На PAUSE (ГУ на своём источнике) канал иначе молчит: Desay G6S (Mazda CX-5) через ~22 с тишины
-        // рвёт USB (EIO, лог Ивана 2026-10-12), поэтому шлём пустой VIDEO_DATA, как Baidu sendEmptyPacketBackground.
-        if (paused && PAUSE_KEEPALIVE_ENABLED && now - lastVideoTx >= pauseKeepaliveMs) {
-            if (vBeats == 0L) AppLog.i("видео: PAUSE, шлю пустой VIDEO_DATA раз в ${pauseKeepaliveMs} мс, чтобы канал не молчал")
-            lastVideoTx = now
-            send(Ch.VIDEO, Wire.dataInner(Msg.VIDEO_DATA, unixSeconds(), ByteArray(0)))
-        }
         if (transport.rxBytes == 0L && now - t0 > SILENCE_MS && (now - t0) % 10_000 < 1000) {
             AppLog.i("ГУ не прислало ни одного байта за ${(now - t0) / 1000} с (ждём HU_PROTOCOL_VERSION)")
             CarLifeState.status = "ГУ молчит, байт от него нет"
@@ -975,12 +990,13 @@ class CarLifeSession(
         private const val BITRATE_POLL_MS = 100L
         private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
-        private const val PAUSE_KEEPALIVE_MS = 2_000L
+        private const val PAUSE_KEEPALIVE_MS = 2_000L  // Desay G6S: пустой VIDEO_DATA
+        private const val PAUSE_HEARTBEAT_MS = 100L    // VW 20082120: пустой VIDEO_HEARTBEAT
 
-        /** На воздухе раз в ~1 с (тик таймера 1 с, порог чуть меньше): ГУ на Wi-Fi рвут видео-сокет быстрее (план 5.2 п.4). */
+        /** На воздухе раз в ~1 с: ГУ на Wi-Fi рвут видео-сокет быстрее (план 5.2 п.4). */
         private const val PAUSE_KEEPALIVE_AIR_MS = 900L
 
-        /** Пустой VIDEO_DATA раз в 2 с, пока ГУ держит PAUSE. */
+        /** Keepalive на PAUSE: пустой VIDEO_DATA, у VW 20082120 VIDEO_HEARTBEAT. */
         @Volatile @JvmStatic var PAUSE_KEEPALIVE_ENABLED = true
         private const val FEATURE_CONTENT_ENCRYPTION = "CONTENT_ENCRYPTION"
 
