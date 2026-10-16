@@ -169,7 +169,7 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
         val c = ctx
         if (done && s.id != StepId.FIRST) { next(); return }
         when (s.id) {
-            StepId.AA_DEV -> Actions.openAaSettings(c)
+            StepId.AA_DEV, StepId.AA_UNKNOWN -> Actions.openAaSettings(c)
             StepId.AUTOSTART -> Actions.openAccessibilitySettings(c)
             StepId.NOTIF -> requestNotifications()
             StepId.BACKGROUND -> if (!Readiness.batteryOk(c)) Readiness.requestIgnoreBattery(c) else Readiness.openXiaomiAutostart(c)
@@ -196,7 +196,7 @@ class OnboardingScreen(host: MainActivity, private val showAll: Boolean, startAt
         if (done && s.id != StepId.FIRST) { stepBack(); return }
         when (s.id) {
             StepId.FIRST -> stepBack()
-            StepId.AA_DEV, StepId.BACKGROUND, StepId.BLUETOOTH, StepId.LOCATION -> { ui.setManualDone(s.id.key, true); next() }
+            StepId.AA_DEV, StepId.AA_UNKNOWN, StepId.BACKGROUND, StepId.BLUETOOTH, StepId.LOCATION -> { ui.setManualDone(s.id.key, true); next() }
             else -> next()
         }
     }

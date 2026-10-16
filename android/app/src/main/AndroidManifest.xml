@@ -45,6 +45,9 @@
     <!-- автозапуск сервера ГУ читает подписи меню из ресурсов самого Android Auto (на языке AA); без queries на API 30+ пакет не виден -->
     <queries>
         <package android:name="com.google.android.projection.gearhead" />
+        <!-- раздел «Приложения для магнитолы»: статус установки и запуск (Fermata Auto, AABrowser) -->
+        <package android:name="me.aap.fermata.auto.dear.google.why" />
+        <package android:name="com.kododake.aabrowser" />
     </queries>
 
     <application
