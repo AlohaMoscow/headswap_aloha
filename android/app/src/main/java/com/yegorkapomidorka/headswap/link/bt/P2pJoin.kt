@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pManager
@@ -33,10 +34,14 @@ import java.net.NetworkInterface
  * позже, чем при холодном старте, и одного поиска не хватает (h214, Mazda G6S). ERROR/BUSY от discoverPeers тоже
  * повторяем: сначала через stopPeerDiscovery, после двух неудач подряд - на свежем канале. BUSY при поднятой точке
  * доступа - это она мешает Wi-Fi Direct (Samsung): сообщаем [onBusy] один раз за попытку.
+ * Новый TARGET_INFO, пока не вошли, начинает попытку заново с новыми реквизитами (h126). Wi-Fi выключен (P2P тогда
+ * тоже): зовём [onWifi] (false) и ждём WIFI_P2P_STATE_ENABLED, потом входим. Поколение [gen] отсекает колбэки и
+ * отложенные шаги прошлой попытки.
  */
 class P2pJoin(
     private val ctx: Context,
     private val onBusy: () -> Unit = {},
+    private val onWifi: (on: Boolean) -> Unit = {},
     private val onJoined: (local: Inet4Address) -> Unit,
     private val onLost: () -> Unit = {},
 ) {
@@ -45,6 +50,10 @@ class P2pJoin(
     private var channel: WifiP2pManager.Channel? = null
     private var target: P2pTarget? = null
     private var receiver: BroadcastReceiver? = null
+    /** Поколение попытки: колбэки и отложенные шаги прошлой (после стопа или рестарта) с ним не совпадут и ничего не сделают. */
+    private var gen = 0
+    /** Wi-Fi был выключен на старте: входим, когда P2P включится. */
+    private var waitingWifi = false
     /** Мы подключились (или подключаемся): при stop снимаем группу. */
     private var connecting = false
     private var peerMode = false
@@ -78,21 +87,63 @@ class P2pJoin(
             WLog.ev(WLog.P2P, "lost", "how" to "нет p2p-интерфейса при новом TARGET_INFO")
             lostMain()
         }
-        if (target != null) {
-            WLog.ev(WLog.P2P, "skip", "why" to if (joinedIp != null) "уже в группе" else "уже вхожу")
-            return
+        when (P2pPolicy.onTarget(active = target != null, joined = joinedIp != null)) {
+            P2pOnTarget.SKIP -> {
+                WLog.ev(WLog.P2P, "skip", "why" to "уже в группе")
+                return
+            }
+            P2pOnTarget.RESTART -> {
+                WLog.ev(WLog.P2P, "restart", "why" to "новый TARGET_INFO", "peerMode" to peerMode, "waitingWifi" to waitingWifi)
+                stopMain("рестарт")
+            }
+            P2pOnTarget.START -> {}
         }
         val m = mgr ?: return fail("нет WifiP2pManager")
         if (!hasPermission()) return fail("нет разрешения «Устройства поблизости»")
+        gen++
         target = t
         val ch = m.initialize(ctx, Looper.getMainLooper()) { WLog.ev(WLog.P2P, "channel-lost") }
         channel = ch
         registerReceiver()
         WLog.ev(WLog.P2P, "start", "bySsid" to t.canJoinBySsid, "peerName" to (t.deviceName != null), "freq" to t.freqMhz)
         AppLog.i("Wi-Fi Direct: вхожу в группу ГУ (${if (t.canJoinBySsid) "по ssid" else "по имени пира"})")
+        if (!wifiEnabled()) {
+            // без Wi-Fi P2P выключен: discover/connect ответят BUSY. Таймаут и повторы не взводим, ждём включения Wi-Fi
+            waitingWifi = true
+            WLog.ev(WLog.P2P, "wifi-off")
+            AppLog.i("Wi-Fi Direct: Wi-Fi на телефоне выключен, жду включения")
+            onWifi(false)
+            return
+        }
+        onWifi(true)      // Wi-Fi включили до нового TARGET_INFO: снять просьбу, если висела
+        begin(m, ch, t)
+    }
+
+    private fun wifiEnabled(): Boolean = try {
+        ctx.getSystemService(WifiManager::class.java)?.isWifiEnabled != false
+    } catch (_: SecurityException) {
+        true
+    }
+
+    private fun begin(m: WifiP2pManager, ch: WifiP2pManager.Channel, t: P2pTarget) {
+        main.removeCallbacks(timeout)
+        main.removeCallbacks(retry)
         if (t.canJoinBySsid) joinBySsid(m, ch, t) else discoverPeers(m, ch)
         main.postDelayed(timeout, JOIN_TIMEOUT_MS)
         main.postDelayed(retry, DISCOVER_RETRY_MS)
+    }
+
+    /** Wi-Fi включили, пока ждали: P2P поднялся, входим в группу. */
+    private fun onP2pState(enabled: Boolean) {
+        val m = mgr ?: return
+        val ch = channel ?: return
+        val t = target ?: return
+        if (!enabled || !waitingWifi) return
+        waitingWifi = false
+        WLog.ev(WLog.P2P, "wifi-on")
+        AppLog.i("Wi-Fi Direct: Wi-Fi включён, вхожу в группу ГУ")
+        onWifi(true)
+        begin(m, ch, t)
     }
 
     private val retry = object : Runnable {
@@ -120,7 +171,8 @@ class P2pJoin(
                     discoverFails > 0 -> m.stopPeerDiscovery(ch, object : WifiP2pManager.ActionListener {
                         override fun onSuccess() = again()
                         override fun onFailure(reason: Int) = again()
-                        private fun again() { if (channel === ch && target != null && joinedIp == null && !connecting) discoverPeers(m, ch) }
+                        private val g = gen
+                        private fun again() { if (g == gen && channel === ch && target != null && joinedIp == null && !connecting) discoverPeers(m, ch) }
                     })
                     else -> discoverPeers(m, ch)
                 }
@@ -146,10 +198,14 @@ class P2pJoin(
             WLog.ev(WLog.P2P, "ssid-config-fail", "err" to e.javaClass.simpleName)
             return discoverPeers(m, ch)
         }
+        val g = gen
         connecting = true
         m.connect(ch, cfg, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = WLog.ev(WLog.P2P, "connect", "mode" to "ssid", "res" to "invited")
+            override fun onSuccess() {
+                if (g == gen) WLog.ev(WLog.P2P, "connect", "mode" to "ssid", "res" to "invited")
+            }
             override fun onFailure(reason: Int) {
+                if (g != gen) return
                 WLog.ev(WLog.P2P, "connect", "mode" to "ssid", "res" to "fail", "reason" to reasonName(reason))
                 connecting = false
                 if (target != null) discoverPeers(m, ch)
@@ -162,12 +218,15 @@ class P2pJoin(
         if (target?.deviceName == null) return fail("нет имени пира ГУ")
         peerMode = true
         val n = ++discoverRuns
+        val g = gen
         m.discoverPeers(ch, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
+                if (g != gen) return
                 discoverFails = 0
                 WLog.ev(WLog.P2P, "discover", "res" to "ok", "n" to n)
             }
             override fun onFailure(reason: Int) {
+                if (g != gen) return
                 discoverFails++
                 val hotspot = hotspotUp()
                 WLog.ev(WLog.P2P, "discover", "res" to "fail", "reason" to reasonName(reason), "n" to n, "hotspot" to hotspot)
@@ -189,7 +248,9 @@ class P2pJoin(
         val ch = channel ?: return
         val name = target?.deviceName ?: return
         if (!peerMode || connecting || joinedIp != null) return
+        val g = gen
         m.requestPeers(ch) { list ->
+            if (g != gen) return@requestPeers
             val dev: WifiP2pDevice = list.deviceList.firstOrNull { it.deviceName == name } ?: return@requestPeers
             if (connecting || target == null) return@requestPeers
             connecting = true
@@ -201,8 +262,11 @@ class P2pJoin(
                 groupOwnerIntent = 0
             }
             m.connect(ch, cfg, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() = WLog.ev(WLog.P2P, "connect", "mode" to "peer", "res" to "invited")
+                override fun onSuccess() {
+                    if (g == gen) WLog.ev(WLog.P2P, "connect", "mode" to "peer", "res" to "invited")
+                }
                 override fun onFailure(reason: Int) {
+                    if (g != gen) return
                     WLog.ev(WLog.P2P, "connect", "mode" to "peer", "res" to "fail", "reason" to reasonName(reason))
                     connecting = false
                 }
@@ -213,8 +277,9 @@ class P2pJoin(
     private fun onConnectionChanged() {
         val m = mgr ?: return
         val ch = channel ?: return
+        val g = gen
         m.requestConnectionInfo(ch) { info ->
-            if (target == null) return@requestConnectionInfo
+            if (g != gen || target == null) return@requestConnectionInfo
             if (info == null || !info.groupFormed) {
                 formed = false
                 if (joinedIp != null) {
@@ -227,16 +292,16 @@ class P2pJoin(
             if (info.isGroupOwner) {
                 WLog.ev(WLog.P2P, "formed", "owner" to "phone", "note" to "ждали ГУ владельцем")
             }
-            awaitIp(0)
+            awaitIp(g, 0)
         }
     }
 
     /** IPv4 на p2p-интерфейсе появляется после DHCP, иногда через секунду-две после groupFormed. */
-    private fun awaitIp(attempt: Int) {
-        if (target == null || joinedIp != null) return
+    private fun awaitIp(g: Int, attempt: Int) {
+        if (g != gen || target == null || joinedIp != null) return
         val lan = p2pIface()
         if (lan == null) {
-            if (attempt < IP_ATTEMPTS) main.postDelayed({ awaitIp(attempt + 1) }, IP_RETRY_MS)
+            if (attempt < IP_ATTEMPTS) main.postDelayed({ awaitIp(g, attempt + 1) }, IP_RETRY_MS)
             else WLog.ev(WLog.P2P, "no-ip", "waitedMs" to IP_ATTEMPTS * IP_RETRY_MS)
             return
         }
@@ -271,12 +336,16 @@ class P2pJoin(
                 when (i.action) {
                     WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> onPeers()
                     WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> onConnectionChanged()
+                    WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> onP2pState(
+                        i.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) == WifiP2pManager.WIFI_P2P_STATE_ENABLED
+                    )
                 }
             }
         }
         val f = IntentFilter().apply {
             addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
             addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
         }
         ctx.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED)
         receiver = r
@@ -289,6 +358,7 @@ class P2pJoin(
     }
 
     private fun stopMain(why: String) {
+        gen++
         main.removeCallbacks(timeout)
         main.removeCallbacks(retry)
         receiver?.let { try { ctx.unregisterReceiver(it) } catch (_: IllegalArgumentException) {} }
@@ -305,6 +375,7 @@ class P2pJoin(
         target = null
         connecting = false
         peerMode = false
+        waitingWifi = false
         discoverRuns = 0
         busyReported = false
         discoverFails = 0

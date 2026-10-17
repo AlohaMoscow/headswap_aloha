@@ -371,7 +371,8 @@ class CarLifeSession(
                 }
             }
             Msg.MODULE_CONTROL -> {
-                // ГУ спрашивает состояние модуля (MUSIC=3 шлёт ~7 раз после хендшейка): отвечаем по факту, играет ли MEDIA
+                // ГУ спрашивает состояние модуля (moduleID=3 MUSIC; Desay G6S шлёт пачку status=1 после хендшейка и
+                // при возврате на CarLife-музыку): отвечаем по факту, играет ли MEDIA, или по решению моста
                 val f = PbReader.parse(m.body)
                 val module = f?.let { PbReader.int(it, 1) }
                 val status = f?.let { PbReader.int(it, 2) }
