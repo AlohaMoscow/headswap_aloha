@@ -36,8 +36,10 @@
         <item name="android:textColor">@color/on_mid</item>
     </style>
 
+    <!-- Диалог всегда тёмный: акцент и цвет текста свои, иначе из светлой темы приложения протекают тёмные @color/acc и @color/on (заголовок и кнопки сливаются с фоном) -->
     <style name="Theme.Headswap.Dialog" parent="android:Theme.DeviceDefault.Dialog.Alert">
-        <item name="android:colorAccent">@color/acc</item>
+        <item name="android:colorAccent">@color/acc_dlg</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
         <item name="android:fontFamily">@font/golos</item>
     </style>
 </resources>

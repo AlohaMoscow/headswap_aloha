@@ -12,6 +12,7 @@
     <string name="upd_status_installing">Opening the installer…</string>
     <string name="upd_btn_check">Check</string>
     <string name="upd_btn_update">Update</string>
+    <string name="upd_btn_update_now">Update now</string>
     <string name="upd_banner_sub">Tap to update, settings stay</string>
     <string name="upd_later">Later</string>
 

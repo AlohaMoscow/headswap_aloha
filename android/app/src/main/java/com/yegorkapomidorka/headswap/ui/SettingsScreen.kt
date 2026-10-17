@@ -43,6 +43,7 @@ import com.yegorkapomidorka.headswap.aa.EqPreset
 import com.yegorkapomidorka.headswap.aa.EqSettings
 import com.yegorkapomidorka.headswap.aa.FpsSetting
 import com.yegorkapomidorka.headswap.aa.MicMode
+import com.yegorkapomidorka.headswap.aa.MusicRate
 import com.yegorkapomidorka.headswap.aa.VideoMode
 import com.yegorkapomidorka.headswap.autosrv.AutoServer
 import com.yegorkapomidorka.headswap.link.car.CarNetwork
@@ -345,6 +346,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private val langRows = LinkedHashMap<String, RadioRow>()
     private val themeRows = LinkedHashMap<String, RadioRow>()
     private val micRows = HashMap<MicMode, RadioRow>()
+    private val rateRows = LinkedHashMap<MusicRate, RadioRow>()
     private val modeRows = LinkedHashMap<VideoMode, RadioRow>()
     private var makeValue: TextView? = null
     private var transcodeSeg: Segmented? = null
@@ -824,6 +826,15 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         }.view)
         body.addView(eqEntry(), lp(MATCH, WRAP).margins(c, 0, 6, 0, 0))
 
+        body.addView(c.sectionTitle(c.getString(R.string.set_music_rate)))
+        for (r in MusicRate.values()) {
+            val row = RadioRow(c, c.getString(r.titleRes), "") { setMusicRate(r) }
+            rateRows[r] = row
+            body.addView(row.view, lp(MATCH, WRAP))
+        }
+        note(c.getString(R.string.set_music_rate_note))
+        refreshMusicRate()
+
         body.addView(c.sectionTitle(c.getString(R.string.set_mic)))
         for ((m, titleRes, subRes) in MICS) {
             val row = RadioRow(c, c.getString(titleRes), c.getString(subRes)) { setMic(m) }
@@ -859,6 +870,15 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         val usb = aa.usbAudio
         sub.text = if (usb) ctx.eqPresetName(aa.eqPreset) else ctx.getString(R.string.eq_sum_usb_only)
         eqEntryRow?.alpha = if (usb) 1f else 0.45f
+    }
+
+    private fun setMusicRate(r: MusicRate) {
+        aa.musicRate = r
+        refreshMusicRate()
+    }
+
+    private fun refreshMusicRate() {
+        for ((r, row) in rateRows) row.setSelected(aa.musicRate == r)
     }
 
     private fun setMic(m: MicMode) {
@@ -1036,7 +1056,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private fun pickCarMake() {
         val makes = listOf<String?>(null) + CAR_MAKES
         val labels = makes.map { it ?: ctx.getString(R.string.set_car_make_default) }.toTypedArray()
-        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        AlertDialog.Builder(ctx, R.style.Theme_Headswap_Dialog)
             .setTitle(R.string.set_car_make)
             .setSingleChoiceItems(labels, makes.indexOf(aa.carMake)) { d, i ->
                 aa.carMake = makes[i]
@@ -1227,7 +1247,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private fun maybeShowAppsWarning() {
         if (aa.appsWarningShown) return
         aa.appsWarningShown = true
-        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        AlertDialog.Builder(ctx, R.style.Theme_Headswap_Dialog)
             .setTitle(R.string.apps_warn_title)
             .setMessage(R.string.apps_warn_text)
             .setPositiveButton(R.string.apps_warn_ok, null)
@@ -1256,7 +1276,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             pad(c, 14, 0, 14, 0)
             background = c.rippleBg(null, 20)
             isClickable = true
-            setOnClickListener { if (Updater.available(c) != null) Updater.start(host) else Updater.check(c, manual = true) }
+            setOnClickListener { if (Updater.available(c) != null) Updater.start(host, confirm = false) else Updater.check(c, manual = true) }
         }
         updStatus = status
         updButton = button
@@ -1274,7 +1294,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         val (text, color) = c.updateStatus()
         if (status.text.toString() != text) status.text = text
         status.setTextColor(c.clr(color))
-        val label = c.getString(if (Updater.available(c) != null) R.string.upd_btn_update else R.string.upd_btn_check)
+        val label = c.getString(if (Updater.available(c) != null) R.string.upd_btn_update_now else R.string.upd_btn_check)
         if (button.text.toString() != label) button.text = label
         button.visibility = if (Updater.step != Updater.Step.IDLE) View.GONE else View.VISIBLE
     }

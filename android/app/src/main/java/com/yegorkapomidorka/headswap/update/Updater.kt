@@ -159,17 +159,24 @@ object Updater {
         }, "update-check").start()
     }
 
-    /** Кнопка «Обновить»: разрешение на установку, диалог с описанием релиза, затем скачивание и установка. */
-    fun start(act: Activity) {
+    /**
+     * Кнопка «Обновить»: разрешение на установку, диалог с описанием релиза, затем скачивание и установка.
+     * confirm = false (кнопка в настройках) - без диалога: при крупном системном шрифте его кнопки бывают не видны.
+     */
+    fun start(act: Activity, confirm: Boolean = true) {
         val rel = available(act) ?: return
         if (step == Step.DOWNLOADING || step == Step.INSTALLING) return
         if (!act.packageManager.canRequestPackageInstalls()) {
-            AlertDialog.Builder(act, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            AlertDialog.Builder(act, R.style.Theme_Headswap_Dialog)
                 .setTitle(act.getString(R.string.upd_unknown_title))
                 .setMessage(act.getString(R.string.upd_unknown_message))
                 .setPositiveButton(act.getString(R.string.act_open)) { _, _ -> openUnknownSources(act) }
                 .setNegativeButton(act.getString(R.string.act_cancel), null)
                 .show()
+            return
+        }
+        if (!confirm) {
+            download(act.applicationContext, rel)
             return
         }
         val footer = buildString {
@@ -179,7 +186,7 @@ object Updater {
             )
             if (CarLifeState.running) append("\n\n").append(act.getString(R.string.upd_dialog_bridge))
         }
-        val b = AlertDialog.Builder(act, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        val b = AlertDialog.Builder(act, R.style.Theme_Headswap_Dialog)
         b.setTitle(act.getString(R.string.upd_dialog_title, rel.version))
             .setView(dialogBody(b.context, rel.notes, footer))
             .setPositiveButton(act.getString(R.string.upd_btn_update)) { _, _ -> download(act.applicationContext, rel) }

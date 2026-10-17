@@ -26,6 +26,8 @@ import java.net.NetworkInterface
  * Сначала напрямую по ssid и паролю (WifiP2pConfig.Builder), если не вышло - находим ГУ среди пиров по имени
  * и подключаемся PBC с groupOwnerIntent=0 (владелец группы - ГУ). Когда у интерфейса p2p* есть IPv4,
  * зовём [onJoined]: адрес телефона уходит ГУ в MD_WIFI_IP, ГУ подключает TCP-каналы.
+ * Группа распалась (ГУ сняла её, например ушла в своё меню и закрыла CarLife) - сбрасываем вход целиком и зовём
+ * [onLost]: следующий TARGET_INFO от ГУ (она переподключает Bluetooth) входит заново, а не теряется на «уже вхожу».
  * Вызовы из любых потоков, состояние - на главной нити.
  * Поиск пиров повторяем раз в [DISCOVER_RETRY_MS], пока не вошли: после короткой стоянки ГУ поднимает группу
  * позже, чем при холодном старте, и одного поиска не хватает (h214, Mazda G6S). ERROR/BUSY от discoverPeers тоже
@@ -36,6 +38,7 @@ class P2pJoin(
     private val ctx: Context,
     private val onBusy: () -> Unit = {},
     private val onJoined: (local: Inet4Address) -> Unit,
+    private val onLost: () -> Unit = {},
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val mgr: WifiP2pManager? = ctx.getSystemService(WifiP2pManager::class.java)
@@ -70,8 +73,13 @@ class P2pJoin(
 
     @SuppressLint("MissingPermission")
     private fun startMain(t: P2pTarget) {
+        if (target != null && joinedIp != null && p2pIface() == null) {
+            // вошли, но интерфейса уже нет, а CONNECTION_CHANGED о распаде не пришёл
+            WLog.ev(WLog.P2P, "lost", "how" to "нет p2p-интерфейса при новом TARGET_INFO")
+            lostMain()
+        }
         if (target != null) {
-            WLog.ev(WLog.P2P, "skip", "why" to "уже вхожу")
+            WLog.ev(WLog.P2P, "skip", "why" to if (joinedIp != null) "уже в группе" else "уже вхожу")
             return
         }
         val m = mgr ?: return fail("нет WifiP2pManager")
@@ -211,9 +219,7 @@ class P2pJoin(
                 formed = false
                 if (joinedIp != null) {
                     WLog.ev(WLog.P2P, "lost")
-                    AppLog.i("Wi-Fi Direct: группа ГУ распалась")
-                    joinedIp = null
-                    iface = null
+                    lostMain()
                 }
                 return@requestConnectionInfo
             }
@@ -274,6 +280,12 @@ class P2pJoin(
         }
         ctx.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED)
         receiver = r
+    }
+
+    private fun lostMain() {
+        AppLog.i("Wi-Fi Direct: группа ГУ распалась, жду от ГУ новый TARGET_INFO")
+        stopMain("группа распалась")
+        onLost()
     }
 
     private fun stopMain(why: String) {

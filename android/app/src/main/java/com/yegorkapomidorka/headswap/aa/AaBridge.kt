@@ -150,6 +150,11 @@ class AaBridgeCore(
         private set
     @Volatile var huVw20082120 = false         // VW (STATISTIC_INFO channel 20082120, h93): без heartbeat рвёт USB через ~3,7 с PAUSE
         private set
+    @Volatile var huHyundaiCn7 = false         // ГУ Hyundai CN7 (product wp_cn7cpe_cn, h218): в режиме «Авто» музыка 32 кГц с ресэмплом 48→32
+        private set
+    @Volatile var musicRateProvider: () -> MusicRate = { MusicRate.DEFAULT }
+    private var resampler: MusicResampler? = null    // null при 48000: PCM идёт как есть
+    private var mediaRateLogged = MEDIA_RATE
     private val audioInited = HashMap<Int, Boolean>()
     private val audioLogged = HashMap<Int, Long>()
 
@@ -306,6 +311,9 @@ class AaBridgeCore(
         gotIdr = false
         huDesayG6S = false                     // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         huVw20082120 = false                   // HU_INFO / STATISTIC_INFO придут заново в этой сессии
+        huHyundaiCn7 = false                   // HU_INFO придёт заново в этой сессии
+        mediaRateLogged = MEDIA_RATE
+        resampler?.reset()
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
         meta.onAttach()
         link.showPlaceholder(placeholderText)
@@ -444,9 +452,13 @@ class AaBridgeCore(
         }
     }
 
-    /** HU_INFO ГУ разобран: Desay G6S опознаём по производителю и модели (другие ГУ Desay SV под запрет не попадают). */
-    fun onHuInfo(manufacturer: String?, model: String?) {
+    /**
+     * HU_INFO ГУ разобран: Desay G6S опознаём по производителю и модели (другие ГУ Desay SV под запрет не попадают),
+     * Hyundai CN7 - по product.
+     */
+    fun onHuInfo(manufacturer: String?, model: String?, product: String? = null) {
         if (manufacturer == DESAY_MANUFACTURER && model == DESAY_G6S_MODEL) huDesayG6S = true
+        if (product == HYUNDAI_CN7_PRODUCT) huHyundaiCn7 = true
     }
 
     /** STATISTIC_INFO ГУ разобран: запасной признак Desay G6S и признак VW 20082120 - канал сборки прошивки. */
@@ -686,7 +698,8 @@ class AaBridgeCore(
             return
         }
         if (audioInited[ch] != true) {
-            val rate = if (ch == CarlifeAudio.CH_MEDIA) 48000 else 16000
+            val setting = if (ch == CarlifeAudio.CH_MEDIA) musicRateProvider() else MusicRate.AUTO
+            val rate = if (ch != CarlifeAudio.CH_MEDIA) 16000 else setting.hz ?: if (huHyundaiCn7) MEDIA_RATE_CN7 else MEDIA_RATE
             val channels = if (ch == CarlifeAudio.CH_MEDIA) 2 else 1
             if (ch == CarlifeAudio.CH_TTS && NAVI_STATUS_ENABLED) {
                 ttsNaviHeld = true
@@ -709,9 +722,17 @@ class AaBridgeCore(
             } else {
                 mediaPaused = false
                 mediaGateDrops = 0
+                // частота фиксируется на MEDIA INIT; каждый новый INIT - поток с чистого листа
+                resampler = if (rate == MEDIA_RATE) null else resampler?.takeIf { it.outRate == rate }?.also { it.reset() } ?: MusicResampler(rate)
+                if (rate != MEDIA_RATE && rate != mediaRateLogged) {
+                    val why = if (setting.hz != null) "настройка" else "авто: Hyundai CN7"
+                    log("BRIDGE музыка $rate Гц, ресэмпл $MEDIA_RATE→$rate ($why)", true)
+                }
+                mediaRateLogged = rate
                 musicStatus(1)
             }
         }
+        var out = pcm
         if (ch == CarlifeAudio.CH_MEDIA) {
             val eq = eqProvider()
             if (eq != eqLogged) {
@@ -720,11 +741,16 @@ class AaBridgeCore(
             }
             equalizer.update(eq)
             equalizer.process(pcm)
+            val rs = resampler
+            if (rs != null) {
+                out = rs.process(pcm)
+                if (out.isEmpty()) return
+            }
         }
         var off = 0
-        while (off < pcm.size) {
-            val n = minOf(CarlifeAudio.MAX_CHUNK, pcm.size - off)
-            val chunk = if (off == 0 && n == pcm.size) pcm else pcm.copyOfRange(off, off + n)
+        while (off < out.size) {
+            val n = minOf(CarlifeAudio.MAX_CHUNK, out.size - off)
+            val chunk = if (off == 0 && n == out.size) out else out.copyOfRange(off, off + n)
             if (!link.sendAudio(ch, CarlifeAudio.dataType(ch), chunk)) {
                 audioDropped++
             } else {
@@ -1344,6 +1370,9 @@ class AaBridgeCore(
         const val DESAY_G6S_MODEL = "G6S"
         const val DESAY_G6S_CHANNEL = "20622116"          // STATISTIC_INFO.channel у Mazda CX-5; Vezel - 20832125, другая Mazda - 21520001
         const val VW_20082120_CHANNEL = "20082120"        // VW, protocol 1.0, versionName="RADIO" (h93); Tharu CNS3 - 20082122
+        const val HYUNDAI_CN7_PRODUCT = "wp_cn7cpe_cn"    // HU_INFO.product Hyundai Elantra CN7 (h218): manufacturer QTI, model "sm6150_au for arm64"
+        const val MEDIA_RATE = 48000
+        const val MEDIA_RATE_CN7 = 32000
         const val KEYFRAME_WAIT_MS = 1500L
         const val KEYFRAME_RETRY_MS = 4000L
         private const val NEVER = Long.MIN_VALUE / 4

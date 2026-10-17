@@ -13,6 +13,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Test
+import kotlin.math.abs
 import com.yegorkapomidorka.headswap.aa.AapMessages as M
 
 /** Ссылка, записывающая метаданные и MODULE_STATUS. */
@@ -349,6 +350,61 @@ class AaMetaTest {
     }
 
     @Test
+    fun stationaryKeepaliveAndReshow() {
+        val r = Rig()
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        r.core.onNavTurn(AaMeta.parseNavState(navState(8, "Main St"))!!)
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(30, 6))!!)
+        assertEquals(1, r.link.turns.size)
+        // стоим: AA повторяет те же данные раз в секунду; SHOW -> UPDATE уходит сразу, дальше тишина до 5 с
+        val same = { r.now += 1000; r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(30, 6))!!) }
+        same()
+        assertEquals(2, r.link.turns.size)
+        assertEquals(2, r.link.turns[1].action)
+        repeat(4) { same() }
+        assertEquals("дедуп до 5 с", 2, r.link.turns.size)
+        same()
+        assertEquals("keepalive через 5 с", 3, r.link.turns.size)
+        assertEquals(2, r.link.turns[2].action)
+        // AA замолчал на 15 с: следующий пакет снова SHOW
+        r.now += 15_000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(20, 4))!!)
+        assertEquals(4, r.link.turns.size)
+        assertEquals(1, r.link.turns[3].action)
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(10, 2))!!)
+        assertEquals(2, r.link.turns[4].action)
+    }
+
+    @Test
+    fun sameKeyTurnDetectedByDistanceJump() {
+        val r = Rig()
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        r.core.onNavTurn(AaMeta.parseNavState(navState(7, "Krasnodarskaya"))!!)
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(100, 20))!!)
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(10, 1))!!)
+        assertEquals(100, r.link.turns.last().totalDistance)
+        // следующий поворот тот же (ключ не сменился), дистанция 10 -> 50: новый манёвр, без троттлинга
+        r.now += 100
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(50, 12))!!)
+        with(r.link.turns.last()) {
+            assertEquals(50, remainDistance)
+            assertEquals("total с нового поворота", 50, totalDistance)
+        }
+        // дрожание на 10-20 м новым поворотом не считается
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(40, 10))!!)
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(60, 12))!!)
+        assertEquals(60, r.link.turns.last().totalDistance)
+    }
+
+    @Test
     fun legacyEventsWork() {
         val r = Rig()
         r.core.onCarlifeSubscribe(listOf(0), true)
@@ -544,6 +600,111 @@ class AaMetaTest {
         r.core.onCarlifeStart()
         r.core.onNavStatus(1)
         assertEquals(listOf(1), link2.navi())
+    }
+
+    @Test
+    fun hyundaiCn7FlagByProduct() {
+        val r = Rig()
+        r.core.onHuInfo("QTI", "sm6150_au for arm64")
+        assertFalse("без product флага нет", r.core.huHyundaiCn7)
+        r.core.onHuInfo("QTI", "sm6150_au for arm64", "other_product")
+        assertFalse("чужой product - нет", r.core.huHyundaiCn7)
+        r.core.onHuInfo("QTI", "sm6150_au for arm64", "wp_cn7cpe_cn")
+        assertTrue(r.core.huHyundaiCn7)
+    }
+
+    @Test
+    fun hyundaiCn7FlagResetsOnNewSession() {
+        val r = Rig()
+        r.core.onHuInfo("QTI", "sm6150_au for arm64", "wp_cn7cpe_cn")
+        r.core.onCarlifeClosed()
+        r.core.attach(MetaLink())
+        assertFalse("новая сессия - флаг заново по HU_INFO", r.core.huHyundaiCn7)
+    }
+
+    /** Ссылка, запоминающая INIT и данные MEDIA. */
+    private class CapLink(private val d: MetaLink = MetaLink()) : CarlifeLink by d {
+        val inits = ArrayList<ByteArray>()
+        val data = java.io.ByteArrayOutputStream()
+        val dataBytes get() = data.size()
+        override fun sendAudio(channel: Int, type: Int, payload: ByteArray): Boolean {
+            if (type == CarlifeAudio.MEDIA_INIT) inits.add(payload)
+            if (type == CarlifeAudio.MEDIA_DATA) data.write(payload)
+            return d.sendAudio(channel, type, payload)
+        }
+    }
+
+    private fun pattern() = ByteArray(8192) { (it * 7 + it / 5).toByte() }
+
+    private fun mediaOut(cn7: Boolean, rate: MusicRate = MusicRate.AUTO, logs: MutableList<String>? = null): CapLink {
+        val link = CapLink()
+        val core = AaBridgeCore({ l, _ -> logs?.add(l) }, clockMs = { 1_000_000L })
+        core.musicRateProvider = { rate }
+        core.attach(link)
+        if (cn7) core.onHuInfo("QTI", "sm6150_au for arm64", "wp_cn7cpe_cn")
+        core.onCarlifeStart()
+        repeat(3) { core.onAudioData(M.CH_AUDIO_MEDIA, pattern(), 0) }
+        return link
+    }
+
+    @Test
+    fun hyundaiCn7MediaIs32kHz() {
+        val cn7 = mediaOut(true)
+        assertEquals(1, cn7.inits.size)
+        assertArrayEquals(CarlifeAudio.initBody(32000, 2, 16), cn7.inits[0])
+        assertTrue("3 x 2048 кадра -> 4096 кадров", cn7.dataBytes == 4096 * 4)
+    }
+
+    @Test
+    fun autoRateOnUsualHuIs48kHzUntouched() {
+        val usual = mediaOut(false)
+        assertArrayEquals(CarlifeAudio.initBody(48000, 2, 16), usual.inits[0])
+        assertEquals(3 * 8192, usual.dataBytes)
+        assertArrayEquals(pattern() + pattern() + pattern(), usual.data.toByteArray())
+    }
+
+    @Test
+    fun explicit44kHzOnUsualHu() {
+        val logs = ArrayList<String>()
+        val link = mediaOut(false, MusicRate.HZ44, logs)
+        assertEquals(1, link.inits.size)
+        assertArrayEquals(CarlifeAudio.initBody(44100, 2, 16), link.inits[0])
+        val frames = link.dataBytes / 4
+        assertTrue("6144 кадра x 147/160 = 5644,8, получили $frames", abs(frames - 5645) <= 1)
+        val rateLogs = logs.filter { it.startsWith("BRIDGE музыка") }
+        assertEquals(listOf("BRIDGE музыка 44100 Гц, ресэмпл 48000→44100 (настройка)"), rateLogs)
+    }
+
+    @Test
+    fun explicit48kHzOnCn7OverridesAuto() {
+        val logs = ArrayList<String>()
+        val link = mediaOut(true, MusicRate.HZ48, logs)
+        assertArrayEquals(CarlifeAudio.initBody(48000, 2, 16), link.inits[0])
+        assertArrayEquals(pattern() + pattern() + pattern(), link.data.toByteArray())
+        assertTrue(logs.none { it.startsWith("BRIDGE музыка") })
+    }
+
+    @Test
+    fun explicitRateOnCn7BeatsAuto() {
+        val link = mediaOut(true, MusicRate.HZ24)
+        assertArrayEquals(CarlifeAudio.initBody(24000, 2, 16), link.inits[0])
+        assertEquals(3 * 2048 / 2 * 4, link.dataBytes)
+    }
+
+    @Test
+    fun autoRateLogNamesCn7() {
+        val logs = ArrayList<String>()
+        mediaOut(true, MusicRate.AUTO, logs)
+        assertEquals(listOf("BRIDGE музыка 32000 Гц, ресэмпл 48000→32000 (авто: Hyundai CN7)"), logs.filter { it.startsWith("BRIDGE музыка") })
+    }
+
+    @Test
+    fun musicRateParse() {
+        assertEquals(MusicRate.AUTO, MusicRate.DEFAULT)
+        assertEquals(MusicRate.AUTO, MusicRate.parse(null))
+        assertEquals(MusicRate.AUTO, MusicRate.parse("мусор"))
+        for (r in MusicRate.values()) assertEquals(r, MusicRate.parse(r.name))
+        assertEquals(listOf(null, 48000, 44100, 32000, 24000, 22050), MusicRate.values().map { it.hz })
     }
 
     @Test
