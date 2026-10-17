@@ -349,6 +349,61 @@ class AaMetaTest {
     }
 
     @Test
+    fun stationaryKeepaliveAndReshow() {
+        val r = Rig()
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        r.core.onNavTurn(AaMeta.parseNavState(navState(8, "Main St"))!!)
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(30, 6))!!)
+        assertEquals(1, r.link.turns.size)
+        // стоим: AA повторяет те же данные раз в секунду; SHOW -> UPDATE уходит сразу, дальше тишина до 5 с
+        val same = { r.now += 1000; r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(30, 6))!!) }
+        same()
+        assertEquals(2, r.link.turns.size)
+        assertEquals(2, r.link.turns[1].action)
+        repeat(4) { same() }
+        assertEquals("дедуп до 5 с", 2, r.link.turns.size)
+        same()
+        assertEquals("keepalive через 5 с", 3, r.link.turns.size)
+        assertEquals(2, r.link.turns[2].action)
+        // AA замолчал на 15 с: следующий пакет снова SHOW
+        r.now += 15_000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(20, 4))!!)
+        assertEquals(4, r.link.turns.size)
+        assertEquals(1, r.link.turns[3].action)
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(10, 2))!!)
+        assertEquals(2, r.link.turns[4].action)
+    }
+
+    @Test
+    fun sameKeyTurnDetectedByDistanceJump() {
+        val r = Rig()
+        r.core.onCarlifeSubscribe(listOf(0), true)
+        r.start()
+        r.core.onNavStatus(1)
+        r.core.onNavTurn(AaMeta.parseNavState(navState(7, "Krasnodarskaya"))!!)
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(100, 20))!!)
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(10, 1))!!)
+        assertEquals(100, r.link.turns.last().totalDistance)
+        // следующий поворот тот же (ключ не сменился), дистанция 10 -> 50: новый манёвр, без троттлинга
+        r.now += 100
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(50, 12))!!)
+        with(r.link.turns.last()) {
+            assertEquals(50, remainDistance)
+            assertEquals("total с нового поворота", 50, totalDistance)
+        }
+        // дрожание на 10-20 м новым поворотом не считается
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(40, 10))!!)
+        r.now += 1000
+        r.core.onNavDistance(AaMeta.parseNavPosition(navPosition(60, 12))!!)
+        assertEquals(60, r.link.turns.last().totalDistance)
+    }
+
+    @Test
     fun legacyEventsWork() {
         val r = Rig()
         r.core.onCarlifeSubscribe(listOf(0), true)
