@@ -13,12 +13,17 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import com.yegorkapomidorka.headswap.AppLocale
 import com.yegorkapomidorka.headswap.AppLog
 import com.yegorkapomidorka.headswap.CarLifeState
 import com.yegorkapomidorka.headswap.R
 import com.yegorkapomidorka.headswap.ui.UiText
+import com.yegorkapomidorka.headswap.ui.dp
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -167,20 +172,48 @@ object Updater {
                 .show()
             return
         }
-        val msg = buildString {
-            if (rel.notes.isNotEmpty()) append(rel.notes).append("\n\n")
+        val footer = buildString {
             append(
                 if (rel.size > 0) act.getString(R.string.upd_dialog_size, act.getString(R.string.share_size_mib, "%.1f".format(Locale.US, rel.size / 1048576.0)))
                 else act.getString(R.string.upd_dialog_no_size),
             )
             if (CarLifeState.running) append("\n\n").append(act.getString(R.string.upd_dialog_bridge))
         }
-        AlertDialog.Builder(act, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle(act.getString(R.string.upd_dialog_title, rel.version))
-            .setMessage(msg)
+        val b = AlertDialog.Builder(act, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        b.setTitle(act.getString(R.string.upd_dialog_title, rel.version))
+            .setView(dialogBody(b.context, rel.notes, footer))
             .setPositiveButton(act.getString(R.string.upd_btn_update)) { _, _ -> download(act.applicationContext, rel) }
             .setNegativeButton(act.getString(R.string.act_cancel), null)
             .show()
+    }
+
+    /**
+     * Тело диалога обновления: описание релиза в окошке со своим скроллом, под ним размер и прочее.
+     * Через setMessage длинное описание на части прошивок растягивает диалог и выталкивает кнопки за экран.
+     */
+    private fun dialogBody(ctx: Context, notes: String, footer: String): View {
+        val pad = ctx.dp(24)
+        fun label(s: String) = TextView(ctx).apply {
+            setTextAppearance(android.R.style.TextAppearance_DeviceDefault_Medium)
+            text = s
+        }
+        return LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, ctx.dp(16), pad, ctx.dp(8))
+            if (notes.isNotEmpty()) {
+                val maxH = (ctx.resources.displayMetrics.heightPixels * 0.4f).toInt()
+                addView(object : ScrollView(ctx) {
+                    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                        super.onMeasure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(maxH, View.MeasureSpec.AT_MOST))
+                    }
+                }.apply {
+                    isVerticalScrollBarEnabled = true
+                    isScrollbarFadingEnabled = false
+                    addView(label(notes))
+                })
+            }
+            addView(label(footer).apply { if (notes.isNotEmpty()) setPadding(0, ctx.dp(16), 0, 0) })
+        }
     }
 
     private fun openUnknownSources(ctx: Context) {
