@@ -770,6 +770,105 @@ class AaMetaTest {
         assertEquals(listOf(127), peer.keys.toList())
     }
 
+    /** Desay G6S, AA играет, ГУ ушло на радио (MUSIC=0 после PAUSE). */
+    private fun g6sPausedByUs(): Pair<Rig, FakePeer> {
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.core.onHuInfo("Desay SV Automotive", "G6S")
+        r.start()
+        r.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        r.core.onCarlifePause()
+        assertFalse(r.core.onCarlifeMusicControl(0))
+        assertEquals(listOf(127), peer.keys.toList())
+        return r to peer
+    }
+
+    @Test
+    fun g6sMusicOnAfterOurPauseResumesAaOnceForWholeBurst() {
+        // h214: START, затем пачка MUSIC=1 - play один раз, MUSIC=1 на всю пачку
+        val (r, peer) = g6sPausedByUs()
+        r.now += 950
+        r.start()
+        assertEquals("START сам музыку не запускает", listOf(127), peer.keys.toList())
+        r.now += 300
+        assertTrue(r.core.onCarlifeMusicControl(1))
+        assertEquals(listOf(127, 126), peer.keys.toList())
+        for (i in 0 until 10) {
+            r.now += 50
+            assertTrue("пачка: MUSIC=1, пока AA раскачивается", r.core.onCarlifeMusicControl(1))
+        }
+        assertEquals("126 один раз", listOf(127, 126), peer.keys.toList())
+        assertTrue(r.logs.any { it.contains("вернулось на CarLife-музыку") })
+        // MEDIA снова пересылается
+        val pcm = ByteArray(640)
+        r.core.onAudioData(M.CH_AUDIO_MEDIA, pcm, 0)
+        assertEquals(1, r.link.audio.count { it == CarlifeAudio.MEDIA_DATA })
+        // после окна ответ снова по факту
+        r.now += AaBridgeCore.HU_RESUME_ANSWER_MS
+        r.core.onCarlifeMusicControl(1)
+        assertEquals(listOf(127, 126), peer.keys.toList())
+
+        // MUSIC=1 раньше START (лог 2026-10-13): тоже play
+        val (q, qPeer) = g6sPausedByUs()
+        q.now += 5000
+        assertTrue(q.core.onCarlifeMusicControl(1))
+        q.start()
+        assertEquals(listOf(127, 126), qPeer.keys.toList())
+    }
+
+    @Test
+    fun g6sMusicOnWithoutOurPauseDoesNotPlay() {
+        // свежая сессия: пачка MUSIC=1 через ~2 с после HU_INFO, паузы нашей нет (h33: радио не глушить)
+        val r = Rig()
+        val peer = FakePeer()
+        r.core.peer = peer
+        r.core.onHuInfo("Desay SV Automotive", "G6S")
+        r.start()
+        repeat(10) { assertFalse(r.core.onCarlifeMusicControl(1)) }
+        assertTrue(peer.keys.isEmpty())
+
+        // юзер сам поставил AA на паузу до ухода ГУ: MUSIC=1 не запускает трек
+        val q = Rig()
+        val qPeer = FakePeer()
+        q.core.peer = qPeer
+        q.core.onHuInfo("Desay SV Automotive", "G6S")
+        q.start()
+        q.core.onMediaStatus(AaMeta.parseMediaStatus(status(3, 1))!!)
+        q.core.onCarlifeMusicControl(0)
+        q.start()
+        assertFalse(q.core.onCarlifeMusicControl(1))
+        assertTrue(qPeer.keys.isEmpty())
+
+        // возврат без MUSIC=1 (NAVI): только START - play нет
+        val (n, nPeer) = g6sPausedByUs()
+        n.now += 7000
+        n.start()
+        n.core.onCarlifePause()
+        n.start()
+        assertEquals(listOf(127), nPeer.keys.toList())
+
+        // не Desay G6S: MUSIC=1 после нашей паузы play не шлёт
+        val o = Rig()
+        val oPeer = FakePeer()
+        o.core.peer = oPeer
+        o.start()
+        o.core.onMediaStatus(AaMeta.parseMediaStatus(status(2, 1))!!)
+        o.core.onCarlifeMusicControl(0)
+        o.core.onCarlifeMusicControl(1)
+        assertEquals(listOf(127), oPeer.keys.toList())
+
+        // флаг выключен - старое поведение
+        AaBridgeCore.HU_MUSIC_RESUME_ENABLED = false
+        try {
+            val (f, fPeer) = g6sPausedByUs()
+            assertFalse(f.core.onCarlifeMusicControl(1))
+            assertEquals(listOf(127), fPeer.keys.toList())
+        } finally {
+            AaBridgeCore.HU_MUSIC_RESUME_ENABLED = true
+        }
+    }
+
     @Test
     fun huMusicOffDropsAaBufferTailUntilAaPlaysAgain() {
         val pcm = ByteArray(640)
