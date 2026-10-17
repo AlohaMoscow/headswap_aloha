@@ -210,6 +210,8 @@ class AaBridgeCore(
     private var carlifePaused = false          // VIDEO_ENCODER_PAUSE после последнего START
     private var exitPending = false            // «Выйти» в AA: GO_TO_DESKTOP ушёл, ждём PAUSE от ГУ, чтобы отдать AA NATIVE
     private var huPausedAa = false             // плеер AA поставили на паузу, когда ГУ ушло на свой источник; MEDIA не пересылаем до play
+    private var resumeOnHuMusic = false        // паузу поставили мы (127 при игравшем AA): на MUSIC=1 от ГУ можно вернуть play
+    private var lastHuResumeMs = NEVER         // когда по MUSIC=1 от ГУ слали AA KEYCODE 126
     @Volatile private var lastUserInputMs = NEVER   // последний тач DOWN / клавиша / шайба / голос с ГУ
     private var lastHfpConnectMs = NEVER       // ГУ прислало BT_HFP_CONNECTION=connected (дальше AA сам запускает автоплей по BT)
     private var lastPauseKeyMs = NEVER         // когда последний раз слали AA KEYCODE 127
@@ -308,6 +310,8 @@ class AaBridgeCore(
         carlifePaused = false
         exitPending = false
         huPausedAa = false
+        resumeOnHuMusic = false
+        lastHuResumeMs = NEVER
         gotIdr = false
         huDesayG6S = false                     // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         huVw20082120 = false                   // HU_INFO / STATISTIC_INFO придут заново в этой сессии
@@ -343,7 +347,8 @@ class AaBridgeCore(
             peer?.requestKeyFrame()
         }
         if (!warm) meta.onCarlifeStart()
-        // play на возврат не шлём: звук CarLife сразу отбирает у ГУ радио, а слушать радио под навигацию - сценарий
+        // play на START не шлём: звук CarLife сразу отбирает у ГУ радио, а слушать радио под навигацию - сценарий (h33).
+        // Вернуть музыку - только по явному MUSIC=1 от ГУ (onCarlifeMusicControl).
         if (huPausedAa) log("BRIDGE CarLife START: AA на паузе после ухода ГУ на свой источник, музыку не запускаю", true)
     }
 
@@ -353,6 +358,10 @@ class AaBridgeCore(
      * следующего play, отвечаем MUSIC=0 - иначе ГУ видит CarLife-музыку активной и спорит с радио.
      * Хвост держим и когда AA уже на паузе (Honda: MUSIC=0 после паузы ассистентом, хвост буфера давал MEDIA INIT
      * через 40 мс), и MUSIC=0 отвечаем, даже если MEDIA PAUSE отложен до конца TTS (лог Егора 2026-10-13).
+     *
+     * status=1 - Desay G6S вернулся на CarLife-музыку (пачка 10-20 MUSIC=1 рядом с START). После нашей паузы это выбор
+     * пользователя на ГУ: AA KEYCODE 126 и MUSIC=1 на всю пачку (лог h214 2026-10-17). Простой возврат на карту
+     * (NAVI) приходит без MUSIC=1 - там радио не трогаем. Свежая сессия тоже шлёт MUSIC=1, но паузы нашей там нет.
      */
     @Synchronized
     fun onCarlifeMusicControl(status: Int?): Boolean {
@@ -361,12 +370,28 @@ class AaBridgeCore(
             if (meta.playing && !huPausedAa && p != null) {
                 log("BRIDGE ГУ ушло на свой источник (MUSIC=0${if (carlifePaused) " после PAUSE" else ""}): AA KEYCODE $KEYCODE_MEDIA_PAUSE, MEDIA на паузу", true)
                 sendPauseKey(p)
+                resumeOnHuMusic = true
             } else if (!huPausedAa) {
                 log("BRIDGE ГУ ушло на свой источник (MUSIC=0), AA не играет: хвост MEDIA не пересылаю до play", true)
+                resumeOnHuMusic = false
             }
             huPausedAa = true
             requestMediaPause("ГУ MODULE_CONTROL MUSIC=0")
             return false
+        }
+        if (HU_MUSIC_RESUME_ENABLED && status == 1 && huDesayG6S) {
+            val now = clockMs()
+            val p = peer
+            if (huPausedAa && resumeOnHuMusic && p != null) {
+                huPausedAa = false
+                resumeOnHuMusic = false
+                lastHuResumeMs = now
+                lastUserInputMs = now              // выбор источника на ГУ - ввод пользователя, BT-гард его не перебивает
+                log("BRIDGE ГУ вернулось на CarLife-музыку (MUSIC=1) после нашей паузы: AA KEYCODE $KEYCODE_MEDIA_PLAY", true)
+                p.sendKey(KEYCODE_MEDIA_PLAY)
+                return true
+            }
+            if (now - lastHuResumeMs < HU_RESUME_ANSWER_MS) return true   // пачка MUSIC=1, пока AA раскачивается
         }
         return musicActive
     }
@@ -401,6 +426,7 @@ class AaBridgeCore(
             return
         }
         huPausedAa = false
+        resumeOnHuMusic = false
         log("BRIDGE $why: MEDIA снова пересылаю", true)
     }
 
@@ -1307,8 +1333,14 @@ class AaBridgeCore(
          */
         @Volatile @JvmStatic var ROUTE_NAVI_STATUS_ENABLED = true
 
-        /** ГУ ушло на свой источник (PAUSE + MODULE_CONTROL MUSIC=0): AA на паузу, на следующем START - play. */
+        /** ГУ ушло на свой источник (MODULE_CONTROL MUSIC=0): AA на паузу; на START play не шлём. */
         @Volatile @JvmStatic var HU_MUSIC_FOLLOW_ENABLED = true
+
+        /** Desay G6S: MUSIC=1 после нашей паузы по MUSIC=0 - AA play (KEYCODE 126) и ответ MUSIC=1. */
+        @Volatile @JvmStatic var HU_MUSIC_RESUME_ENABLED = true
+
+        /** Сколько отвечать MUSIC=1 на пачку MUSIC=1 после нашего play, пока MEDIA INIT ещё не пришёл. */
+        const val HU_RESUME_ANSWER_MS = 3_000L
 
         /**
          * Mazda CX-5: AA сам запускает музыку через 5-9 с после BT_HFP_CONNECTION. Пока ГУ на своём источнике, такой play
