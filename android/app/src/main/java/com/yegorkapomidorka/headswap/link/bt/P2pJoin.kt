@@ -28,8 +28,9 @@ import java.net.NetworkInterface
  * зовём [onJoined]: адрес телефона уходит ГУ в MD_WIFI_IP, ГУ подключает TCP-каналы.
  * Вызовы из любых потоков, состояние - на главной нити.
  * Поиск пиров повторяем раз в [DISCOVER_RETRY_MS], пока не вошли: после короткой стоянки ГУ поднимает группу
- * позже, чем при холодном старте, и одного поиска не хватает (h214, Mazda G6S). BUSY от discoverPeers на Samsung -
- * включена точка доступа, с ней Wi-Fi Direct не работает: сообщаем [onBusy] один раз за попытку.
+ * позже, чем при холодном старте, и одного поиска не хватает (h214, Mazda G6S). ERROR/BUSY от discoverPeers тоже
+ * повторяем: сначала через stopPeerDiscovery, после двух неудач подряд - на свежем канале. BUSY при поднятой точке
+ * доступа - это она мешает Wi-Fi Direct (Samsung): сообщаем [onBusy] один раз за попытку.
  */
 class P2pJoin(
     private val ctx: Context,
@@ -48,6 +49,8 @@ class P2pJoin(
     private var connectAt = 0L
     private var discoverRuns = 0
     private var busyReported = false
+    /** Неудачных discoverPeers подряд: после [REINIT_AFTER_FAILS] пересоздаём канал. */
+    private var discoverFails = 0
     /** Группа собрана, ждём IPv4 по DHCP: приглашение уже не висит. */
     private var formed = false
     private var joinedIp: Inet4Address? = null
@@ -96,7 +99,23 @@ class P2pJoin(
                     m.cancelConnect(ch, null)
                     connecting = false
                 }
-                if (!connecting) discoverPeers(m, ch)
+                if (!connecting) when {
+                    // ERROR/BUSY без хотспота (h214, Samsung): фреймворк застрял, свежий канал помогает, как ручной перезапуск
+                    discoverFails >= REINIT_AFTER_FAILS -> {
+                        WLog.ev(WLog.P2P, "reinit", "fails" to discoverFails)
+                        ch.close()
+                        val fresh = m.initialize(ctx, Looper.getMainLooper()) { WLog.ev(WLog.P2P, "channel-lost") }
+                        channel = fresh
+                        discoverFails = 0
+                        discoverPeers(m, fresh)
+                    }
+                    discoverFails > 0 -> m.stopPeerDiscovery(ch, object : WifiP2pManager.ActionListener {
+                        override fun onSuccess() = again()
+                        override fun onFailure(reason: Int) = again()
+                        private fun again() { if (channel === ch && target != null && joinedIp == null && !connecting) discoverPeers(m, ch) }
+                    })
+                    else -> discoverPeers(m, ch)
+                }
             }
             main.postDelayed(this, DISCOVER_RETRY_MS)
         }
@@ -136,12 +155,18 @@ class P2pJoin(
         peerMode = true
         val n = ++discoverRuns
         m.discoverPeers(ch, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = WLog.ev(WLog.P2P, "discover", "res" to "ok", "n" to n)
+            override fun onSuccess() {
+                discoverFails = 0
+                WLog.ev(WLog.P2P, "discover", "res" to "ok", "n" to n)
+            }
             override fun onFailure(reason: Int) {
-                WLog.ev(WLog.P2P, "discover", "res" to "fail", "reason" to reasonName(reason), "n" to n)
-                if (reason == WifiP2pManager.BUSY && !busyReported && target != null) {
+                discoverFails++
+                val hotspot = hotspotUp()
+                WLog.ev(WLog.P2P, "discover", "res" to "fail", "reason" to reasonName(reason), "n" to n, "hotspot" to hotspot)
+                // BUSY бывает и без хотспота (h214): тогда просто повторяем, подсказку не показываем
+                if (reason == WifiP2pManager.BUSY && hotspot && !busyReported && target != null) {
                     busyReported = true
-                    AppLog.i("Wi-Fi Direct занят (BUSY): обычно включена точка доступа на телефоне")
+                    AppLog.i("Wi-Fi Direct занят (BUSY): включена точка доступа на телефоне")
                     onBusy()
                 }
             }
@@ -217,6 +242,11 @@ class P2pJoin(
         onJoined(lan.ip)
     }
 
+    /** Точка доступа телефона поднята: swlan* у Samsung, ap* у остальных, с IPv4. */
+    private fun hotspotUp(): Boolean = NetworkInterface.getNetworkInterfaces()?.toList().orEmpty().any { ni ->
+        (ni.name.startsWith("swlan") || ni.name.startsWith("ap")) && ni.isUp && ni.inetAddresses.toList().any { it is Inet4Address }
+    }
+
     private fun p2pIface(): LanIface? {
         for (ni in NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()) {
             if (!ni.name.startsWith("p2p") || !ni.isUp) continue
@@ -265,6 +295,7 @@ class P2pJoin(
         peerMode = false
         discoverRuns = 0
         busyReported = false
+        discoverFails = 0
         formed = false
         joinedIp = null
         iface = null
@@ -287,6 +318,7 @@ class P2pJoin(
         const val JOIN_TIMEOUT_MS = 30_000L
         const val DISCOVER_RETRY_MS = 15_000L
         const val CONNECT_STALE_MS = 20_000L
+        const val REINIT_AFTER_FAILS = 2
         const val IP_RETRY_MS = 500L
         const val IP_ATTEMPTS = 30
     }
