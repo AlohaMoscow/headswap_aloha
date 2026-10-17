@@ -1036,7 +1036,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private fun pickCarMake() {
         val makes = listOf<String?>(null) + CAR_MAKES
         val labels = makes.map { it ?: ctx.getString(R.string.set_car_make_default) }.toTypedArray()
-        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        AlertDialog.Builder(ctx, R.style.Theme_Headswap_Dialog)
             .setTitle(R.string.set_car_make)
             .setSingleChoiceItems(labels, makes.indexOf(aa.carMake)) { d, i ->
                 aa.carMake = makes[i]
@@ -1227,7 +1227,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private fun maybeShowAppsWarning() {
         if (aa.appsWarningShown) return
         aa.appsWarningShown = true
-        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        AlertDialog.Builder(ctx, R.style.Theme_Headswap_Dialog)
             .setTitle(R.string.apps_warn_title)
             .setMessage(R.string.apps_warn_text)
             .setPositiveButton(R.string.apps_warn_ok, null)
@@ -1256,7 +1256,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             pad(c, 14, 0, 14, 0)
             background = c.rippleBg(null, 20)
             isClickable = true
-            setOnClickListener { if (Updater.available(c) != null) Updater.start(host) else Updater.check(c, manual = true) }
+            setOnClickListener { if (Updater.available(c) != null) Updater.start(host, confirm = false) else Updater.check(c, manual = true) }
         }
         updStatus = status
         updButton = button
@@ -1274,7 +1274,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         val (text, color) = c.updateStatus()
         if (status.text.toString() != text) status.text = text
         status.setTextColor(c.clr(color))
-        val label = c.getString(if (Updater.available(c) != null) R.string.upd_btn_update else R.string.upd_btn_check)
+        val label = c.getString(if (Updater.available(c) != null) R.string.upd_btn_update_now else R.string.upd_btn_check)
         if (button.text.toString() != label) button.text = label
         button.visibility = if (Updater.step != Updater.Step.IDLE) View.GONE else View.VISIBLE
     }
