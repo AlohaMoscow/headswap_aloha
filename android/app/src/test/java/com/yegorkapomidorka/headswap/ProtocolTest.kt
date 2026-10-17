@@ -293,6 +293,44 @@ class ProtocolTest {
     }
 
     @Test
+    fun annexBHeadTypesStopAtFirstSlice() {
+        val idr = hex("00 00 00 01 09 F0 00 00 00 01 67 AA 00 00 00 01 68 BB 00 00 00 01 65 88 00 00 01 65 99 00 00 00 01 65 77")
+        assertEquals(listOf(9, 7, 8, 5), AnnexB.headTypes(idr))
+        assertEquals(listOf(9, 7, 8, 5, 5, 5), AnnexB.nalTypes(idr))
+        assertTrue(AnnexB.isIdr(idr))
+        assertFalse(AnnexB.startsWithSps(idr))
+        val p = hex("00 00 00 01 41 9A 00 00 00 01 41 9B")
+        assertEquals(listOf(1), AnnexB.headTypes(p))
+        assertFalse(AnnexB.isIdr(p))
+        // без слайсов (только конфиг) - все NAL, не IDR
+        val cfg = hex("00 00 00 01 67 AA 00 00 00 01 68 BB")
+        assertEquals(listOf(7, 8), AnnexB.headTypes(cfg))
+        assertFalse(AnnexB.isIdr(cfg))
+        assertTrue(AnnexB.startsWithSps(cfg))
+        assertTrue(AnnexB.isIdr(Wire.dataInner(Msg.VIDEO_DATA, 0, idr), 12))
+        assertFalse(AnnexB.isIdr(ByteArray(0)))
+        // fixSps смотрит только заголовок: SPS до слайса исправлен, «SPS» в данных после слайса не трогается
+        val withTail = hex("00 00 00 01 67 42 00 34 AB 00 00 00 01 65 88 00 00 00 01 67 42 00 34 CD")
+        assertArrayEquals(hex("00 00 00 01 67 42 80 1F AB 00 00 00 01 65 88 00 00 00 01 67 42 00 34 CD"), AnnexB.fixSps(withTail, 1280, 720))
+    }
+
+    @Test
+    fun writeToMatchesWriteSequence() {
+        for (size in listOf(0, 100, 16384, 40_000)) {
+            val inner = Wire.dataInner(Msg.VIDEO_DATA, 3, ByteArray(size) { (it * 13).toByte() })
+            val calls = ArrayList<ByteArray>()
+            val out = object : java.io.OutputStream() {
+                override fun write(b: Int) { calls += byteArrayOf(b.toByte()) }
+                override fun write(b: ByteArray, off: Int, len: Int) { calls += b.copyOfRange(off, off + len) }
+            }
+            Wire.writeTo(out, Ch.VIDEO, inner)
+            val expected = Wire.writeSequence(Ch.VIDEO, inner)
+            assertEquals(expected.size, calls.size)
+            for (i in expected.indices) assertArrayEquals(expected[i], calls[i])
+        }
+    }
+
+    @Test
     fun annexBNalTypesFromOffsetInCarlifeMessage() {
         // тело VIDEO_DATA внутри inner: заголовок [len][time][type 00 02 00 01] не должен дать ложный старт-код
         val frame = hex("00 00 00 01 67 AA 00 00 00 01 68 BB 00 00 01 65 CC")

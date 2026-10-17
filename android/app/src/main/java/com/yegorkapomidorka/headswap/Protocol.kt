@@ -4,6 +4,7 @@ import com.yegorkapomidorka.headswap.aa.CarlifeMediaInfo
 import com.yegorkapomidorka.headswap.aa.NaviField6
 import com.yegorkapomidorka.headswap.aa.NaviTurnInfo
 import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 
 /** Каналы внешнего заголовка (спека §2.2). */
 object Ch {
@@ -306,6 +307,17 @@ object Wire {
             p += n
         }
         return out
+    }
+
+    /** То же разбиение, что [writeSequence], но прямо в поток: куски тела пишутся из inner по смещению, без копий. */
+    fun writeTo(out: OutputStream, chan: Int, inner: ByteArray) {
+        out.write(outerHeader(chan, inner.size))
+        var p = 0
+        while (p < inner.size) {
+            val n = minOf(CHUNK, inner.size - p)
+            out.write(inner, p, n)
+            p += n
+        }
     }
 
     fun parseCmd(inner: ByteArray): CmdMsg? {
@@ -684,8 +696,12 @@ object Hex {
 object AnnexB {
     private val SC4 = byteArrayOf(0, 0, 0, 1)
 
-    /** Позиции стартовых кодов с байта [from]: (начало кода, длина кода 3 или 4). */
-    private fun startCodes(d: ByteArray, from: Int = 0): List<IntArray> {
+    /**
+     * Позиции стартовых кодов с байта [from]: (начало кода, длина кода 3 или 4). [untilVcl] - остановиться на первом
+     * слайсе (NAL 1/5): SPS/PPS/SEI/AUD кадра идут до слайсов, а тип картинки (IDR или нет) у всех её слайсов один,
+     * поэтому для этих вопросов хвост кадра (десятки КБ данных слайсов) читать не нужно.
+     */
+    private fun startCodes(d: ByteArray, from: Int = 0, untilVcl: Boolean = false): List<IntArray> {
         val res = ArrayList<IntArray>()
         var i = from
         while (i + 2 < d.size) {
@@ -693,6 +709,7 @@ object AnnexB {
                 if (d[i + 2].toInt() == 1) {
                     val s = if (i > from && d[i - 1].toInt() == 0 && (res.isEmpty() || res.last()[0] + res.last()[1] <= i - 1)) i - 1 else i
                     res.add(intArrayOf(s, i + 3 - s))
+                    if (untilVcl && i + 3 < d.size && isVcl(d[i + 3].toInt() and 0x1F)) return res
                     i += 3
                     continue
                 }
@@ -701,6 +718,8 @@ object AnnexB {
         }
         return res
     }
+
+    private fun isVcl(type: Int) = type == 1 || type == 5
 
     /** Все стартовые коды приводятся к 4-байтным 00 00 00 01. Данные без стартовых кодов возвращаются как есть. */
     fun normalize(d: ByteArray): ByteArray {
@@ -727,7 +746,23 @@ object AnnexB {
         return res
     }
 
-    fun startsWithSps(d: ByteArray) = nalTypes(d).firstOrNull() == 7
+    /**
+     * NAL-типы заголовка кадра: всё до первого слайса включительно (например [7, 8, 5] или [1]). Для решений по
+     * каждому кадру (IDR ли, есть ли SPS/PPS) вместо nalTypes: не читает данные слайсов. Полный список - nalTypes.
+     */
+    fun headTypes(d: ByteArray, from: Int = 0): List<Int> {
+        val res = ArrayList<Int>(4)
+        for (s in startCodes(d, from, untilVcl = true)) {
+            val p = s[0] + s[1]
+            if (p < d.size) res.add(d[p].toInt() and 0x1F)
+        }
+        return res
+    }
+
+    /** Кадр - IDR (первый слайс типа 5). */
+    fun isIdr(d: ByteArray, from: Int = 0) = headTypes(d, from).lastOrNull() == 5
+
+    fun startsWithSps(d: ByteArray) = headTypes(d).firstOrNull() == 7
 
     /**
      * Минимальный level_idc H.264 для кадра w x h при 30 fps по MaxFS: 31 до 720p (3600 MB), 40 до 8192 MB (1080p),
@@ -753,7 +788,8 @@ object AnnexB {
      */
     fun fixSps(d: ByteArray, w: Int, h: Int): ByteArray {
         var out = d
-        for (s in startCodes(d)) {
+        // SPS стоит до слайсов: дальше первого слайса не ищем (раньше весь кадр просматривался на каждом кадре)
+        for (s in startCodes(d, untilVcl = true)) {
             val p = s[0] + s[1]
             if (p + 3 >= d.size || (d[p].toInt() and 0x1F) != 7) continue
             val profile = d[p + 1].toInt() and 0xFF

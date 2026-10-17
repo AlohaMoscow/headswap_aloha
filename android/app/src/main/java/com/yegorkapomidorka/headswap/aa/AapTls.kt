@@ -124,7 +124,14 @@ class NoCheckTrustManager : X509ExtendedTrustManager() {
  */
 class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls12Only: Boolean = false) {
     private val engine: SSLEngine
-    private var inBuf = ByteArray(0)
+    /**
+     * Принятые и ещё не разобранные байты TLS (режим записи: данные в [0, position)). Буферы переиспользуются:
+     * раньше на каждую запись (до 16 КиБ видео) создавались новые inBuf, ByteBuffer под plaintext и промежуточные массивы.
+     */
+    private var netIn: ByteBuffer = ByteBuffer.allocate(NET_IN_INITIAL)
+    private var appOut: ByteBuffer? = null              // plaintext unwrap, только нить чтения
+    private var netOut: ByteBuffer? = null              // результат wrap, под wrapLock: wrap зовут и нить чтения (drain), и писатель
+    private val wrapLock = Any()
     var handshakeDone = false
         private set
     var closed = false
@@ -143,7 +150,7 @@ class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls
 
     /** Байты от пира (на первом вызове нет), в ответ - байты для пира. После вызова смотри handshakeDone. */
     fun handshakeStep(data: ByteArray? = null): ByteArray {
-        if (data != null && data.isNotEmpty()) inBuf += data
+        if (data != null && data.isNotEmpty()) appendIn(data)
         val out = ByteArrayOutputStream()
         var guard = 0
         while (guard++ < 1000) {
@@ -154,10 +161,8 @@ class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls
                     note(r)
                 }
                 HandshakeStatus.NEED_UNWRAP -> {
-                    if (inBuf.isEmpty()) return out.toByteArray()
-                    val src = ByteBuffer.wrap(inBuf)
-                    val r = unwrapFrom(src, ByteArrayOutputStream())
-                    inBuf = ByteArray(src.remaining()).also { src.get(it) }
+                    if (netIn.position() == 0) return out.toByteArray()
+                    val r = unwrapIn(null)
                     note(r)
                     if (r.status == SSLEngineResult.Status.BUFFER_UNDERFLOW) return out.toByteArray()
                 }
@@ -178,7 +183,7 @@ class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls
 
     /** Одна запись TLS (запись до 16 КиБ plaintext = один кадр AAP). */
     fun encrypt(plaintext: ByteArray): ByteArray {
-        val out = ByteArrayOutputStream()
+        val out = ByteArrayOutputStream(plaintext.size + 64)
         val src = ByteBuffer.wrap(plaintext)
         while (src.hasRemaining()) {
             val r = wrapInto(src, out)
@@ -194,8 +199,8 @@ class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls
      * запись из одних handshake-данных (TLS 1.3 session tickets).
      */
     fun decrypt(record: ByteArray, drain: Boolean = true): Decrypted {
-        inBuf += record
-        val plain = ByteArrayOutputStream()
+        appendIn(record)
+        val plain = Plain()
         val out = ByteArrayOutputStream()
         var guard = 0
         while (guard++ < 1000) {
@@ -204,21 +209,62 @@ class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls
                 continue
             }
             if (drain && engine.handshakeStatus == HandshakeStatus.NEED_WRAP) {
-                note(wrapInto(ByteBuffer.allocate(0), out))
+                note(wrapInto(EMPTY, out))
                 continue
             }
-            if (inBuf.isEmpty()) break
-            val src = ByteBuffer.wrap(inBuf)
-            val r = unwrapFrom(src, plain)
-            inBuf = ByteArray(src.remaining()).also { src.get(it) }
+            if (netIn.position() == 0) break
+            val r = unwrapIn(plain)
             note(r)
             if (r.status == SSLEngineResult.Status.BUFFER_UNDERFLOW || r.status == SSLEngineResult.Status.CLOSED) break
             if (r.bytesConsumed() == 0 && r.bytesProduced() == 0) break
         }
         // после CLOSED / разбора хвоста: что TLS хочет отправить (ответный close_notify и т.п.)
         var g2 = 0
-        while (drain && engine.handshakeStatus == HandshakeStatus.NEED_WRAP && g2++ < 10) note(wrapInto(ByteBuffer.allocate(0), out))
-        return Decrypted(plain.toByteArray(), out.toByteArray())
+        while (drain && engine.handshakeStatus == HandshakeStatus.NEED_WRAP && g2++ < 10) note(wrapInto(EMPTY, out))
+        return Decrypted(plain.result(), if (out.size() == 0) NO_BYTES else out.toByteArray())
+    }
+
+    /**
+     * Plaintext одного decrypt. Обычно кадр AAP = одна запись TLS = один кусок: он и возвращается, без склейки
+     * через ByteArrayOutputStream (которая копировала бы его ещё дважды).
+     */
+    private class Plain {
+        private var first: ByteArray? = null
+        private var more: ByteArrayOutputStream? = null
+
+        fun add(src: ByteArray, n: Int) {
+            if (n <= 0) return
+            val f = first
+            if (f == null && more == null) {
+                first = src.copyOf(n)
+                return
+            }
+            val m = more ?: ByteArrayOutputStream(f!!.size + n).also { it.write(f); more = it; first = null }
+            m.write(src, 0, n)
+        }
+
+        fun result(): ByteArray = first ?: more?.toByteArray() ?: NO_BYTES
+    }
+
+    /** Дописать принятые байты в netIn (растёт при нехватке). */
+    private fun appendIn(data: ByteArray) {
+        if (netIn.remaining() < data.size) {
+            val grown = ByteBuffer.allocate(maxOf(netIn.capacity() * 2, netIn.position() + data.size))
+            netIn.flip()
+            grown.put(netIn)
+            netIn = grown
+        }
+        netIn.put(data)
+    }
+
+    /** Один unwrap из netIn; неразобранный хвост (неполная запись) остаётся в начале netIn. */
+    private fun unwrapIn(plain: Plain?): SSLEngineResult {
+        netIn.flip()
+        try {
+            return unwrapFrom(netIn, plain)
+        } finally {
+            netIn.compact()
+        }
     }
 
     /** TLS-слой хочет что-то отправить (KeyUpdate, close_notify...). */
@@ -228,7 +274,7 @@ class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls
     fun drainOutgoing(): ByteArray {
         val out = ByteArrayOutputStream()
         var g = 0
-        while (engine.handshakeStatus == HandshakeStatus.NEED_WRAP && g++ < 10) note(wrapInto(ByteBuffer.allocate(0), out))
+        while (engine.handshakeStatus == HandshakeStatus.NEED_WRAP && g++ < 10) note(wrapInto(EMPTY, out))
         return out.toByteArray()
     }
 
@@ -238,34 +284,37 @@ class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls
     }
 
     private fun wrapInto(src: ByteBuffer, out: ByteArrayOutputStream): SSLEngineResult {
-        var dst = ByteBuffer.allocate(engine.session.packetBufferSize + 64)
+        val r = synchronized(wrapLock) { wrapLocked(src, out) }
+        if (r.handshakeStatus == HandshakeStatus.NEED_TASK) runTasks()
+        return r
+    }
+
+    private fun wrapLocked(src: ByteBuffer, out: ByteArrayOutputStream): SSLEngineResult {
+        var dst = netOut ?: ByteBuffer.allocate(engine.session.packetBufferSize + 64)
         while (true) {
+            dst.clear()
             val r = engine.wrap(src, dst)
             if (r.status == SSLEngineResult.Status.BUFFER_OVERFLOW) {
                 dst = ByteBuffer.allocate(dst.capacity() * 2)
                 continue
             }
-            dst.flip()
-            val b = ByteArray(dst.remaining())
-            dst.get(b)
-            out.write(b)
-            if (r.handshakeStatus == HandshakeStatus.NEED_TASK) runTasks()
+            netOut = dst
+            out.write(dst.array(), dst.arrayOffset(), dst.position())
             return r
         }
     }
 
-    private fun unwrapFrom(src: ByteBuffer, plain: ByteArrayOutputStream): SSLEngineResult {
-        var dst = ByteBuffer.allocate(engine.session.applicationBufferSize + 64)
+    private fun unwrapFrom(src: ByteBuffer, plain: Plain?): SSLEngineResult {
+        var dst = appOut ?: ByteBuffer.allocate(engine.session.applicationBufferSize + 64)
         while (true) {
+            dst.clear()
             val r = engine.unwrap(src, dst)
             if (r.status == SSLEngineResult.Status.BUFFER_OVERFLOW) {
                 dst = ByteBuffer.allocate(dst.capacity() * 2)
                 continue
             }
-            dst.flip()
-            val b = ByteArray(dst.remaining())
-            dst.get(b)
-            plain.write(b)
+            appOut = dst
+            plain?.add(dst.array(), dst.position())
             if (r.handshakeStatus == HandshakeStatus.NEED_TASK) runTasks()
             return r
         }
@@ -280,6 +329,9 @@ class AapTls(creds: AapCredentials, private val serverMode: Boolean = false, tls
 
     companion object {
         const val SNI_NAME = "android-auto"
+        private const val NET_IN_INITIAL = 32 * 1024
+        private val NO_BYTES = ByteArray(0)
+        private val EMPTY: ByteBuffer get() = ByteBuffer.allocate(0)
     }
 }
 

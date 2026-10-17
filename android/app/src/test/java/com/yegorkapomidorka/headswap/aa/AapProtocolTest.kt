@@ -124,6 +124,31 @@ class AapFramingTest {
         assertArrayEquals(b("ab"), r.push(2, 0x0A, b("b")))
         assertTrue(w.last().contains("99"))
     }
+
+    @Test
+    fun reassemblerBeyondDeclaredTotalAndBogusTotals() {
+        val w = ArrayList<String>()
+        val r = F.Reassembler { w.add(it) }
+        fun b(s: String) = s.toByteArray()
+        // данных больше, чем заявил FIRST: собирается всё, предупреждение о расхождении
+        assertNull(r.push(2, 0x09, b("aa"), 3))
+        assertNull(r.push(2, 0x08, b("bb")))
+        assertArrayEquals(b("aabbcc"), r.push(2, 0x0A, b("cc")))
+        assertTrue(w.last().contains("заявил 3"))
+        // отрицательный / огромный total не выделяется заранее, сообщение собирается как есть
+        assertNull(r.push(2, 0x09, b("x"), -5))
+        assertArrayEquals(b("xy"), r.push(2, 0x0A, b("y")))
+        assertNull(r.push(3, 0x09, b("p"), Int.MAX_VALUE))
+        assertArrayEquals(b("pq"), r.push(3, 0x0A, b("q")))
+        // ровно total: без предупреждений
+        val n = w.size
+        val big = ByteArray(40_000) { (it * 7).toByte() }
+        val parts = F.splitMessage(big, 2, 0)
+        var out: ByteArray? = null
+        for (p in parts) out = r.push(2, p.flags, p.chunk, p.total)
+        assertArrayEquals(big, out)
+        assertEquals(n, w.size)
+    }
 }
 
 class AapMessagesTest {

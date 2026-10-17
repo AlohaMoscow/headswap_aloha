@@ -1040,7 +1040,7 @@ class AaBridgeCore(
             return null
         }
         val b = AnnexB.normalize(annexB)
-        val types = AnnexB.nalTypes(b)
+        val types = AnnexB.headTypes(b)          // до первого слайса: IDR ли и есть ли SPS/PPS, данные слайсов не читаем
         lastAaFrameAt = clockMs()
         aaFrames++
         val t = transcoder
@@ -1196,7 +1196,7 @@ class AaBridgeCore(
             encDropped++
             return
         }
-        val types = AnnexB.nalTypes(data)
+        val types = AnnexB.headTypes(data)
         val idr = 5 in types
         if (!outGotIdr) {
             if (!idr) {

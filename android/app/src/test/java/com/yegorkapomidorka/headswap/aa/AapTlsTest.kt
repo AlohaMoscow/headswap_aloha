@@ -75,4 +75,29 @@ class AapTlsTest {
         assertTrue(rec.size > big.size)
         assertEquals(big.toList(), server.decrypt(rec).plaintext.toList())
     }
+
+    @Test
+    fun recordsSplitAndCoalescedAcrossDecryptCalls() {
+        // буфер приёма переиспользуется: хвост неполной записи должен дожить до следующего decrypt, несколько записей
+        // в одном вызове - склеиться по порядку
+        val client = AapTls(AapCerts.load(TestAssets.opener, "jvc"))
+        val server = AapTls(AapCerts.load(TestAssets.opener, "hur"), serverMode = true)
+        var toServer = client.handshakeStep()
+        repeat(6) {
+            val toClient = server.handshakeStep(toServer)
+            toServer = client.handshakeStep(toClient)
+        }
+        assertTrue(client.handshakeDone && server.handshakeDone)
+        val msgs = listOf(ByteArray(16384) { it.toByte() }, ByteArray(10) { 7 }, ByteArray(9000) { (it * 3).toByte() }, ByteArray(16384) { 1 })
+        val stream = msgs.map { client.encrypt(it) }.fold(ByteArray(0)) { a, x -> a + x }
+        val got = java.io.ByteArrayOutputStream()
+        var p = 0
+        for (cut in listOf(5, 3000, 16000, 20000, 1)) {
+            val n = minOf(cut, stream.size - p)
+            got.write(server.decrypt(stream.copyOfRange(p, p + n), drain = false).plaintext)
+            p += n
+        }
+        got.write(server.decrypt(stream.copyOfRange(p, stream.size), drain = false).plaintext)
+        assertEquals(msgs.fold(ByteArray(0)) { a, x -> a + x }.toList(), got.toByteArray().toList())
+    }
 }
