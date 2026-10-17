@@ -43,6 +43,9 @@ interface CarlifeLink {
      */
     fun requestMicRecord(start: Boolean): Boolean = false
 
+    /** Ключевой кадр энкодера (размер в байтах) ушёл в CarLife; зовётся только на ГУ с лимитом размера IDR (VW ID, h196). */
+    fun onEncodedKeyFrame(size: Int) {}
+
     /** Состояние видео-очереди (слив, бэклог, длина) для статистики моста; null = нет данных. */
     fun videoStats(): LinkVideoStats? = null
 
@@ -149,6 +152,8 @@ class AaBridgeCore(
     @Volatile var huDesayG6S = false           // ГУ Desay G6S (Mazda CX-5): NAVI=1 глушит штатное радио, маршрутный NAVI не шлём
         private set
     @Volatile var huVw20082120 = false         // VW (STATISTIC_INFO channel 20082120, h93): без heartbeat рвёт USB через ~3,7 с PAUSE
+        private set
+    @Volatile var huVw20082138 = false         // VW ID (channel 20082138, "VW BT 1538", h196): IDR > ~600 КиБ рвёт USB EIO
         private set
     @Volatile var huHyundaiCn7 = false         // ГУ Hyundai CN7 (product wp_cn7cpe_cn, h218): в режиме «Авто» музыка 32 кГц с ресэмплом 48→32
         private set
@@ -315,6 +320,7 @@ class AaBridgeCore(
         gotIdr = false
         huDesayG6S = false                     // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         huVw20082120 = false                   // HU_INFO / STATISTIC_INFO придут заново в этой сессии
+        huVw20082138 = false                   // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         huHyundaiCn7 = false                   // HU_INFO придёт заново в этой сессии
         mediaRateLogged = MEDIA_RATE
         resampler?.reset()
@@ -484,6 +490,7 @@ class AaBridgeCore(
      */
     fun onHuInfo(manufacturer: String?, model: String?, product: String? = null) {
         if (manufacturer == DESAY_MANUFACTURER && model == DESAY_G6S_MODEL) huDesayG6S = true
+        if (manufacturer == VW_20082138_MANUFACTURER) huVw20082138 = true
         if (product == HYUNDAI_CN7_PRODUCT) huHyundaiCn7 = true
     }
 
@@ -491,6 +498,7 @@ class AaBridgeCore(
     fun onHuStatistic(channel: String?) {
         if (channel == DESAY_G6S_CHANNEL) huDesayG6S = true
         if (channel == VW_20082120_CHANNEL) huVw20082120 = true
+        if (channel == VW_20082138_CHANNEL) huVw20082138 = true
     }
 
     /** CarLife-сессия закрыта (USB EIO / detach / Стоп). AA не трогаем; from - закрываемая ссылка, чужую не отцепляем. */
@@ -1202,6 +1210,7 @@ class AaBridgeCore(
                 log("BRIDGE IDR энкодера -> CarLife ${payload.size} Б nal=${AnnexB.nalTypes(payload)}", true)
             }
             AaState.status = "мост: AA -> CarLife (перекодирование)"
+            if (huVw20082138) link.onEncodedKeyFrame(payload.size)
             return
         }
         if (!link.sendVideo(data)) {
@@ -1214,6 +1223,7 @@ class AaBridgeCore(
         sent++
         if (idr) idrSent++
         AaState.bridgeSent = sent
+        if (idr && huVw20082138) link.onEncodedKeyFrame(data.size)
     }
 
     /**
@@ -1402,6 +1412,8 @@ class AaBridgeCore(
         const val DESAY_G6S_MODEL = "G6S"
         const val DESAY_G6S_CHANNEL = "20622116"          // STATISTIC_INFO.channel у Mazda CX-5; Vezel - 20832125, другая Mazda - 21520001
         const val VW_20082120_CHANNEL = "20082120"        // VW, protocol 1.0, versionName="RADIO" (h93); Tharu CNS3 - 20082122
+        const val VW_20082138_CHANNEL = "20082138"        // VW ID (h196): HU_INFO manufacturer=model="VW BT 1538"
+        const val VW_20082138_MANUFACTURER = "VW BT 1538"
         const val HYUNDAI_CN7_PRODUCT = "wp_cn7cpe_cn"    // HU_INFO.product Hyundai Elantra CN7 (h218): manufacturer QTI, model "sm6150_au for arm64"
         const val MEDIA_RATE = 48000
         const val MEDIA_RATE_CN7 = 32000
