@@ -83,3 +83,35 @@ class FrameGateTest {
         assertTrue(g.shouldEmit(171_000_000L))
     }
 }
+
+class RelayTickTest {
+    private val ms = 1_000_000L
+
+    @Test
+    fun staticScreenWakesOnlyForRedraw() {
+        // только что нарисовали: следующий tick ровно через idle, а не через 20 мс
+        assertEquals(100L, RelayTick.delayMs(1000 * ms, 1000 * ms, 100, false, 1000 * ms, 0, false))
+        assertEquals(60L, RelayTick.delayMs(1040 * ms, 1000 * ms, 100, false, 1000 * ms, 0, false))
+        // доли миллисекунды округляются вверх: tick не придёт раньше срока
+        assertEquals(1L, RelayTick.delayMs(1099 * ms + 1, 1000 * ms, 100, false, 0, 0, false))
+        // срок прошёл, а кадр не ушёл (гейт не пустил): повтор шагом, как прежний tick
+        assertEquals(RelayTick.STEP_MS, RelayTick.delayMs(1100 * ms, 1000 * ms, 100, false, 0, 0, false))
+        assertEquals(RelayTick.STEP_MS, RelayTick.delayMs(5000 * ms, 1000 * ms, 100, false, 0, 0, false))
+    }
+
+    @Test
+    fun gatedFrameIsDueAfterGatePeriod() {
+        // 15 fps: кадр задержан гейтом в 1010 мс -> tick в 1010 + 66.7 мс, раньше перерисовки по idle
+        val period = 1_000_000_000L / 15
+        assertEquals(67L, RelayTick.delayMs(1010 * ms, 1000 * ms, 100, true, 1010 * ms, period, false))
+        // без задержанного кадра период гейта не важен
+        assertEquals(90L, RelayTick.delayMs(1010 * ms, 1000 * ms, 100, false, 1010 * ms, period, false))
+        // гейт выключен (0): skipped не сокращает срок
+        assertEquals(90L, RelayTick.delayMs(1010 * ms, 1000 * ms, 100, true, 1010 * ms, 0, false))
+    }
+
+    @Test
+    fun introAnimatesEveryStep() {
+        assertEquals(RelayTick.STEP_MS, RelayTick.delayMs(1000 * ms, 1000 * ms, 100, false, 1000 * ms, 0, true))
+    }
+}

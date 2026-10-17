@@ -9,6 +9,7 @@ import com.yegorkapomidorka.headswap.Hex
 import com.yegorkapomidorka.headswap.InnerAssembler
 import com.yegorkapomidorka.headswap.LogThrottle
 import com.yegorkapomidorka.headswap.ProtocolDesync
+import com.yegorkapomidorka.headswap.ThreadPrio
 import com.yegorkapomidorka.headswap.Wire
 import com.yegorkapomidorka.headswap.aa.DrainMeter
 import java.io.FileInputStream
@@ -96,6 +97,7 @@ class StreamTransport(
     }
 
     private fun readLoop(sink: (Int, ByteArray) -> Unit, onClosed: (String) -> Unit) {
+        ThreadPrio.raise()          // тачи и микрофон ГУ
         val buf = ByteArray(Wire.CHUNK)
         try {
             while (!closed.get()) {
@@ -127,6 +129,7 @@ class StreamTransport(
     }
 
     private fun writeLoop(onWritten: (Int, ByteArray) -> Unit, onClosed: (String) -> Unit) {
+        ThreadPrio.raise()          // видео и звук в USB
         try {
             while (!closed.get()) {
                 val o = queue.take()

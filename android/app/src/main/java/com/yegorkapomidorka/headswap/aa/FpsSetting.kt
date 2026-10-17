@@ -61,3 +61,26 @@ class FrameGate(initialFps: Int) {
         const val PASS_ALL_FPS = 30
     }
 }
+
+/**
+ * Когда GL-реле просыпаться в следующий раз. Раньше tick шёл каждые 20 мс всегда (50 пробуждений в секунду и на
+ * статичной картинке, и без кадров вовсе), хотя работа нужна только к двум моментам: перерисовка на статике
+ * (последний кадр + idle) и выдача кадра, который задержал гейт fps (свежий кадр + период гейта). Чистая функция.
+ */
+object RelayTick {
+    /** Шаг анимации перехода и повтор, если кадр уже должен уйти, а гейт его не пустил (как прежний tick). */
+    const val STEP_MS = 20L
+
+    /**
+     * Задержка до следующего tick, мс. [skipped] - последний кадр задержан гейтом с периодом [gatePeriodNs] (0 - гейта нет).
+     * Пока идёт поток кадров, каждый кадр рисуется сам (onFrame) и переносит tick: реле не просыпается вовсе.
+     */
+    fun delayMs(nowNs: Long, lastDrawNs: Long, idleMs: Long, skipped: Boolean, lastFreshNs: Long, gatePeriodNs: Long, intro: Boolean): Long {
+        if (intro) return STEP_MS
+        var dueNs = lastDrawNs + idleMs * 1_000_000
+        if (skipped && gatePeriodNs > 0) dueNs = minOf(dueNs, lastFreshNs + gatePeriodNs)
+        val leftNs = dueNs - nowNs
+        if (leftNs <= 0) return STEP_MS
+        return ((leftNs + 999_999) / 1_000_000).coerceIn(1, idleMs)
+    }
+}

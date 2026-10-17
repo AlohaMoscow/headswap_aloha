@@ -2,6 +2,7 @@ package com.yegorkapomidorka.headswap.aa
 
 import com.yegorkapomidorka.headswap.LogThrottle
 import com.yegorkapomidorka.headswap.PbReader
+import com.yegorkapomidorka.headswap.ThreadPrio
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -313,6 +314,7 @@ class AapSession(
     private class PeerClosed(msg: String) : Exception(msg)
 
     private fun run() {
+        ThreadPrio.raise()          // приём видео и звука AA, расшифровка, подача в декодер
         try {
             try {
                 sock = (socketFactory ?: {
@@ -429,6 +431,7 @@ class AapSession(
     }
 
     private fun writerLoop() {
+        ThreadPrio.raise()          // ACK видео: без них AA упирается в окно maxUnacked и придерживает кадры
         while (true) {
             val job = outQueue.take()
             try {
