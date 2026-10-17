@@ -135,7 +135,7 @@ object Actions {
     }
 
     fun enableServiceDialog(ctx: Context) {
-        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        AlertDialog.Builder(ctx, R.style.Theme_Headswap_Dialog)
             .setTitle(ctx.getString(R.string.act_enable_title))
             .setMessage(ctx.getString(R.string.act_enable_message, ctx.getString(R.string.autosrv_label)))
             .setPositiveButton(ctx.getString(R.string.act_open)) { _, _ -> openAccessibilitySettings(ctx) }

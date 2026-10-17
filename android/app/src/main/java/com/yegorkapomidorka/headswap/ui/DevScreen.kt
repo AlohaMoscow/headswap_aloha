@@ -155,7 +155,7 @@ class DevScreen(host: MainActivity) : Screen(host) {
     }
 
     private fun confirmClear() {
-        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        AlertDialog.Builder(ctx, R.style.Theme_Headswap_Dialog)
             .setTitle(R.string.dev_clear_title)
             .setMessage(R.string.dev_clear_message)
             .setPositiveButton(R.string.dev_clear_confirm) { _, _ ->

@@ -12,6 +12,7 @@
     <string name="upd_status_installing">Открываю установщик…</string>
     <string name="upd_btn_check">Проверить</string>
     <string name="upd_btn_update">Обновить</string>
+    <string name="upd_btn_update_now">Обновить сейчас</string>
     <string name="upd_banner_sub">Нажмите, чтобы обновить, настройки сохранятся</string>
     <string name="upd_later">Позже</string>
 
