@@ -270,7 +270,7 @@ class CarLifeSession(
                 AppLog.i("== HU_INFO: $huInfo")
                 PbReader.parse(m.body)?.let {
                     WLog.ev(WLog.HS, "HU_INFO", "manufacturer" to PbReader.str(it, 13), "model" to PbReader.str(it, 14))
-                    bridge.onHuInfo(PbReader.str(it, 13), PbReader.str(it, 14))
+                    bridge.onHuInfo(PbReader.str(it, 13), PbReader.str(it, 14), PbReader.str(it, 15))
                 }
                 logDesay()
                 // ответа нет: Baidu только сохраняет (CarlifeDeviceInfoManager.setCarDeviceInfo)
