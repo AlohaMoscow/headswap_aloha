@@ -27,8 +27,15 @@ import java.net.NetworkInterface
  * и подключаемся PBC с groupOwnerIntent=0 (владелец группы - ГУ). Когда у интерфейса p2p* есть IPv4,
  * зовём [onJoined]: адрес телефона уходит ГУ в MD_WIFI_IP, ГУ подключает TCP-каналы.
  * Вызовы из любых потоков, состояние - на главной нити.
+ * Поиск пиров повторяем раз в [DISCOVER_RETRY_MS], пока не вошли: после короткой стоянки ГУ поднимает группу
+ * позже, чем при холодном старте, и одного поиска не хватает (h214, Mazda G6S). BUSY от discoverPeers на Samsung -
+ * включена точка доступа, с ней Wi-Fi Direct не работает: сообщаем [onBusy] один раз за попытку.
  */
-class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Address) -> Unit) {
+class P2pJoin(
+    private val ctx: Context,
+    private val onBusy: () -> Unit = {},
+    private val onJoined: (local: Inet4Address) -> Unit,
+) {
     private val main = Handler(Looper.getMainLooper())
     private val mgr: WifiP2pManager? = ctx.getSystemService(WifiP2pManager::class.java)
     private var channel: WifiP2pManager.Channel? = null
@@ -37,6 +44,12 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
     /** Мы подключились (или подключаемся): при stop снимаем группу. */
     private var connecting = false
     private var peerMode = false
+    /** Когда ушёл connect по пиру: приглашение без ответа дольше [CONNECT_STALE_MS] снимаем и ищем снова. */
+    private var connectAt = 0L
+    private var discoverRuns = 0
+    private var busyReported = false
+    /** Группа собрана, ждём IPv4 по DHCP: приглашение уже не висит. */
+    private var formed = false
     private var joinedIp: Inet4Address? = null
     @Volatile private var iface: LanIface? = null
 
@@ -68,6 +81,25 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
         AppLog.i("Wi-Fi Direct: вхожу в группу ГУ (${if (t.canJoinBySsid) "по ssid" else "по имени пира"})")
         if (t.canJoinBySsid) joinBySsid(m, ch, t) else discoverPeers(m, ch)
         main.postDelayed(timeout, JOIN_TIMEOUT_MS)
+        main.postDelayed(retry, DISCOVER_RETRY_MS)
+    }
+
+    private val retry = object : Runnable {
+        @SuppressLint("MissingPermission")
+        override fun run() {
+            val m = mgr ?: return
+            val ch = channel ?: return
+            if (target == null || joinedIp != null) return
+            if (peerMode) {
+                if (connecting && !formed && System.currentTimeMillis() - connectAt > CONNECT_STALE_MS) {
+                    WLog.ev(WLog.P2P, "connect-stale", "ms" to CONNECT_STALE_MS)
+                    m.cancelConnect(ch, null)
+                    connecting = false
+                }
+                if (!connecting) discoverPeers(m, ch)
+            }
+            main.postDelayed(this, DISCOVER_RETRY_MS)
+        }
     }
 
     private val timeout = Runnable {
@@ -102,10 +134,20 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
     private fun discoverPeers(m: WifiP2pManager, ch: WifiP2pManager.Channel) {
         if (target?.deviceName == null) return fail("нет имени пира ГУ")
         peerMode = true
+        val n = ++discoverRuns
         m.discoverPeers(ch, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = WLog.ev(WLog.P2P, "discover", "res" to "ok")
-            override fun onFailure(reason: Int) = WLog.ev(WLog.P2P, "discover", "res" to "fail", "reason" to reasonName(reason))
+            override fun onSuccess() = WLog.ev(WLog.P2P, "discover", "res" to "ok", "n" to n)
+            override fun onFailure(reason: Int) {
+                WLog.ev(WLog.P2P, "discover", "res" to "fail", "reason" to reasonName(reason), "n" to n)
+                if (reason == WifiP2pManager.BUSY && !busyReported && target != null) {
+                    busyReported = true
+                    AppLog.i("Wi-Fi Direct занят (BUSY): обычно включена точка доступа на телефоне")
+                    onBusy()
+                }
+            }
         })
+        // первые пиры могли прийти до нового поиска: проверяем уже известный список
+        if (n > 1) onPeers()
     }
 
     @SuppressLint("MissingPermission")
@@ -118,6 +160,7 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
             val dev: WifiP2pDevice = list.deviceList.firstOrNull { it.deviceName == name } ?: return@requestPeers
             if (connecting || target == null) return@requestPeers
             connecting = true
+            connectAt = System.currentTimeMillis()
             WLog.ev(WLog.P2P, "peer", "matched" to true, "status" to dev.status)
             val cfg = WifiP2pConfig().apply {
                 deviceAddress = dev.deviceAddress
@@ -140,6 +183,7 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
         m.requestConnectionInfo(ch) { info ->
             if (target == null) return@requestConnectionInfo
             if (info == null || !info.groupFormed) {
+                formed = false
                 if (joinedIp != null) {
                     WLog.ev(WLog.P2P, "lost")
                     AppLog.i("Wi-Fi Direct: группа ГУ распалась")
@@ -148,6 +192,7 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
                 }
                 return@requestConnectionInfo
             }
+            formed = true
             if (info.isGroupOwner) {
                 WLog.ev(WLog.P2P, "formed", "owner" to "phone", "note" to "ждали ГУ владельцем")
             }
@@ -203,6 +248,7 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
 
     private fun stopMain(why: String) {
         main.removeCallbacks(timeout)
+        main.removeCallbacks(retry)
         receiver?.let { try { ctx.unregisterReceiver(it) } catch (_: IllegalArgumentException) {} }
         receiver = null
         val m = mgr
@@ -217,6 +263,9 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
         target = null
         connecting = false
         peerMode = false
+        discoverRuns = 0
+        busyReported = false
+        formed = false
         joinedIp = null
         iface = null
     }
@@ -236,6 +285,8 @@ class P2pJoin(private val ctx: Context, private val onJoined: (local: Inet4Addre
 
     private companion object {
         const val JOIN_TIMEOUT_MS = 30_000L
+        const val DISCOVER_RETRY_MS = 15_000L
+        const val CONNECT_STALE_MS = 20_000L
         const val IP_RETRY_MS = 500L
         const val IP_ATTEMPTS = 30
     }

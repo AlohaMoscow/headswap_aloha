@@ -129,7 +129,12 @@ class BridgeService : Service() {
     private val audioDiag = AudioDiag()
     /** Ветка A, диагностика: RFCOMM `carlife` слушаем, пока ждём машину по Wi-Fi. Колбэки с bt-нити перекидываем на главную. */
     private val btProbe by lazy {
-        CarlifeBtProbe(this, onAccept = { main.post { onBtAccept() } }, onTargetInfo = { mac -> main.post { onBtTargetInfo(mac) } })
+        CarlifeBtProbe(
+            this,
+            onAccept = { main.post { onBtAccept() } },
+            onTargetInfo = { mac -> main.post { onBtTargetInfo(mac) } },
+            onP2pBusy = { main.post { onP2pBusy() } },
+        )
     }
     /** Автозапуск пропущен из-за неподключённой службы спецвозможностей: RETRY запустит его, когда она появится. */
     @Volatile private var serverStartPending = false
@@ -295,7 +300,10 @@ class BridgeService : Service() {
             ifaces = { LanIface.scan().let { all -> if (carNetwork != null) all.filter { it.name == carIface } else all } },
             bindNetwork = carNetwork,
             onIfaces = { list ->
-                CarLifeState.wireless = if (list.isEmpty()) getString(R.string.wl_state_no_hotspot)
+                // Wi-Fi Direct-машине хотспот не нужен, а включённый он занимает Wi-Fi Direct (h214): не просим его включить
+                CarLifeState.wireless = if (list.isEmpty()) {
+                    if (wifiDirectCar) waitingText("Wi-Fi Direct") else getString(R.string.wl_state_no_hotspot)
+                }
                 else waitingText(list.joinToString(", ") { it.name })
             },
         )
@@ -371,6 +379,12 @@ class BridgeService : Service() {
         if (carNetBusy) carNetImpl?.release("p2p")      // колбэки снимаются без вызовов: onUnavailable/onLost не придут
         if (CarWifi(this).isSet) logCarSkip()
         cancelHint()
+    }
+
+    /** discoverPeers вернул BUSY: на Samsung это включённая точка доступа, просим её выключить. */
+    private fun onP2pBusy() {
+        if (!wifiBMode || stopRequested || !linkWaiting) return
+        CarLifeState.wireless = getString(R.string.wl_state_p2p_busy)
     }
 
     private fun onBtAccept() {
