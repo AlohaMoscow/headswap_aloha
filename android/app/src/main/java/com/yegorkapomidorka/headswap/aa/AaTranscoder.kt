@@ -215,7 +215,7 @@ class AaTranscoder(
         if (!running) return
         winIn.incrementAndGet()
         totalIn.incrementAndGet()
-        val idr = 5 in AnnexB.nalTypes(annexB)
+        val idr = AnnexB.isIdr(annexB)
         synchronized(lock) {
             // мост подаёт кадры вне своей блокировки: stop() мог пройти между проверкой выше и lock, декодер не пересоздаём
             if (!running) return

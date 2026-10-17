@@ -137,8 +137,38 @@ object AapFraming {
      * размера с total возвращается как есть.
      */
     class Reassembler(private val warn: (String) -> Unit = {}) {
-        private val runs = HashMap<Int, ByteArrayOutputStream>()
+        private val runs = HashMap<Int, Run>()
         private val totals = HashMap<Int, Int?>()
+
+        /**
+         * Серия фрагментов одного сообщения. Если FIRST заявил разумный total, тело собирается сразу в массив этого
+         * размера (одна копия, без роста буфера и без toByteArray); не сошлось с total - дальше как раньше, через поток.
+         */
+        private class Run(total: Int?) {
+            private var arr: ByteArray? = if (total != null && total in 1..MAX_PREALLOC) ByteArray(total) else null
+            private var spill: ByteArrayOutputStream? = if (arr == null) ByteArrayOutputStream() else null
+            private var pos = 0
+
+            fun write(b: ByteArray) {
+                val a = arr
+                if (a != null) {
+                    if (pos + b.size <= a.size) {
+                        System.arraycopy(b, 0, a, pos, b.size)
+                        pos += b.size
+                        return
+                    }
+                    spill = ByteArrayOutputStream(pos + b.size).also { it.write(a, 0, pos) }
+                    arr = null
+                }
+                spill!!.write(b)
+                pos += b.size
+            }
+
+            fun result(): ByteArray {
+                val a = arr ?: return spill!!.toByteArray()
+                return if (pos == a.size) a else a.copyOf(pos)
+            }
+        }
 
         fun push(chan: Int, flags: Int, plaintext: ByteArray, total: Int? = null): ByteArray? {
             val first = (flags and FLAG_FIRST) != 0
@@ -152,7 +182,7 @@ object AapFraming {
             }
             if (first) {
                 if (runs.containsKey(chan)) warn("ch$chan: FIRST при открытой серии, старая сброшена")
-                runs[chan] = ByteArrayOutputStream().also { it.write(plaintext) }
+                runs[chan] = Run(total).also { it.write(plaintext) }
                 totals[chan] = total
                 return null
             }
@@ -165,7 +195,7 @@ object AapFraming {
             if (!last) return null
             val declared = totals[chan]
             drop(chan)
-            val res = run.toByteArray()
+            val res = run.result()
             if (declared != null && declared != res.size) warn("ch$chan: склеено ${res.size} Б, а FIRST заявил $declared Б")
             return res
         }
@@ -176,5 +206,10 @@ object AapFraming {
         }
 
         fun openRuns(): List<Int> = runs.keys.sorted()
+
+        private companion object {
+            /** total от телефона не доверенный: больше - собираем потоком, как раньше (кадры AA - сотни КБ). */
+            const val MAX_PREALLOC = 8 * 1024 * 1024
+        }
     }
 }

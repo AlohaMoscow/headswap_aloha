@@ -873,11 +873,10 @@ class CarLifeSession(
             vFrames++
             vBytes += size
             if (vFrames == 1L) WLog.ev(WLog.HS, "first-video", "bytes" to size)
-            val nals = AnnexB.nalTypes(inner, 12)
-            val key = 5 in nals
+            val key = AnnexB.isIdr(inner, 12)
             if (key) vKeys++
             if (vFrames <= 5 || key) {
-                AppLog.msg("TX", chan, inner.size, type, declared, "nal=$nals", inner, ui = vFrames <= 5)
+                AppLog.msg("TX", chan, inner.size, type, declared, "nal=${AnnexB.nalTypes(inner, 12)}", inner, ui = vFrames <= 5)
             }
         }
     }

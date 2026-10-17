@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Один байтовый поток с внешним заголовком [chan u32][len u32]: USB AOA и debug-TCP.
  * Код чтения и записи перенесён из CarLifeSession без изменений поведения: одна FIFO-очередь на все каналы,
- * единственный писатель, заголовок отдельным write и тело кусками <= 16384 (Wire.writeSequence), flush на сообщение.
+ * единственный писатель, заголовок отдельным write и тело кусками <= 16384 (Wire.writeTo), flush на сообщение.
  */
 class StreamTransport(
     private val input: InputStream,
@@ -137,7 +137,7 @@ class StreamTransport(
                 }
                 // заголовок отдельным write, тело следом кусками <= 16384 (спека §1.4)
                 val t0 = System.nanoTime()
-                for (part in Wire.writeSequence(o.chan, o.inner)) output.write(part)
+                Wire.writeTo(output, o.chan, o.inner)
                 output.flush()
                 drain.onWrite(clock(), video, o.inner.size, System.nanoTime() - t0)
                 onWritten(o.chan, o.inner)
