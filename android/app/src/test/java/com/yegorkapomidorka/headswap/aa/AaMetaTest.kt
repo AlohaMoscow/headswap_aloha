@@ -602,6 +602,58 @@ class AaMetaTest {
     }
 
     @Test
+    fun hyundaiCn7FlagByProduct() {
+        val r = Rig()
+        r.core.onHuInfo("QTI", "sm6150_au for arm64")
+        assertFalse("без product флага нет", r.core.huHyundaiCn7)
+        r.core.onHuInfo("QTI", "sm6150_au for arm64", "other_product")
+        assertFalse("чужой product - нет", r.core.huHyundaiCn7)
+        r.core.onHuInfo("QTI", "sm6150_au for arm64", "wp_cn7cpe_cn")
+        assertTrue(r.core.huHyundaiCn7)
+    }
+
+    @Test
+    fun hyundaiCn7FlagResetsOnNewSession() {
+        val r = Rig()
+        r.core.onHuInfo("QTI", "sm6150_au for arm64", "wp_cn7cpe_cn")
+        r.core.onCarlifeClosed()
+        r.core.attach(MetaLink())
+        assertFalse("новая сессия - флаг заново по HU_INFO", r.core.huHyundaiCn7)
+    }
+
+    /** Ссылка, запоминающая INIT и данные MEDIA. */
+    private class CapLink(private val d: MetaLink = MetaLink()) : CarlifeLink by d {
+        val inits = ArrayList<ByteArray>()
+        var dataBytes = 0
+        override fun sendAudio(channel: Int, type: Int, payload: ByteArray): Boolean {
+            if (type == CarlifeAudio.MEDIA_INIT) inits.add(payload)
+            if (type == CarlifeAudio.MEDIA_DATA) dataBytes += payload.size
+            return d.sendAudio(channel, type, payload)
+        }
+    }
+
+    private fun mediaOut(cn7: Boolean): CapLink {
+        val link = CapLink()
+        val core = AaBridgeCore({ _, _ -> }, clockMs = { 1_000_000L })
+        core.attach(link)
+        if (cn7) core.onHuInfo("QTI", "sm6150_au for arm64", "wp_cn7cpe_cn")
+        core.onCarlifeStart()
+        repeat(3) { core.onAudioData(M.CH_AUDIO_MEDIA, ByteArray(8192), 0) }
+        return link
+    }
+
+    @Test
+    fun hyundaiCn7MediaIs32kHz() {
+        val cn7 = mediaOut(true)
+        assertEquals(1, cn7.inits.size)
+        assertArrayEquals(CarlifeAudio.initBody(32000, 2, 16), cn7.inits[0])
+        assertTrue("3 x 2048 кадра -> 4096 кадров", cn7.dataBytes == 4096 * 4)
+        val usual = mediaOut(false)
+        assertArrayEquals(CarlifeAudio.initBody(48000, 2, 16), usual.inits[0])
+        assertEquals(3 * 8192, usual.dataBytes)
+    }
+
+    @Test
     fun mediaInfoWaitsForPlaying() {
         val r = Rig()
         r.start()

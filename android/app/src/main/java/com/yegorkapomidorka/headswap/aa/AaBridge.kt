@@ -150,6 +150,10 @@ class AaBridgeCore(
         private set
     @Volatile var huVw20082120 = false         // VW (STATISTIC_INFO channel 20082120, h93): без heartbeat рвёт USB через ~3,7 с PAUSE
         private set
+    @Volatile var huHyundaiCn7 = false         // ГУ Hyundai CN7 (product wp_cn7cpe_cn, h218): музыка 32 кГц с ресэмплом 48→32
+        private set
+    private val resampler = Resampler48to32()
+    private var cn7Logged = false
     private val audioInited = HashMap<Int, Boolean>()
     private val audioLogged = HashMap<Int, Long>()
 
@@ -306,6 +310,9 @@ class AaBridgeCore(
         gotIdr = false
         huDesayG6S = false                     // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         huVw20082120 = false                   // HU_INFO / STATISTIC_INFO придут заново в этой сессии
+        huHyundaiCn7 = false                   // HU_INFO придёт заново в этой сессии
+        cn7Logged = false
+        resampler.reset()
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
         meta.onAttach()
         link.showPlaceholder(placeholderText)
@@ -444,9 +451,13 @@ class AaBridgeCore(
         }
     }
 
-    /** HU_INFO ГУ разобран: Desay G6S опознаём по производителю и модели (другие ГУ Desay SV под запрет не попадают). */
-    fun onHuInfo(manufacturer: String?, model: String?) {
+    /**
+     * HU_INFO ГУ разобран: Desay G6S опознаём по производителю и модели (другие ГУ Desay SV под запрет не попадают),
+     * Hyundai CN7 - по product.
+     */
+    fun onHuInfo(manufacturer: String?, model: String?, product: String? = null) {
         if (manufacturer == DESAY_MANUFACTURER && model == DESAY_G6S_MODEL) huDesayG6S = true
+        if (product == HYUNDAI_CN7_PRODUCT) huHyundaiCn7 = true
     }
 
     /** STATISTIC_INFO ГУ разобран: запасной признак Desay G6S и признак VW 20082120 - канал сборки прошивки. */
@@ -686,7 +697,7 @@ class AaBridgeCore(
             return
         }
         if (audioInited[ch] != true) {
-            val rate = if (ch == CarlifeAudio.CH_MEDIA) 48000 else 16000
+            val rate = if (ch != CarlifeAudio.CH_MEDIA) 16000 else if (huHyundaiCn7) MEDIA_RATE_CN7 else MEDIA_RATE
             val channels = if (ch == CarlifeAudio.CH_MEDIA) 2 else 1
             if (ch == CarlifeAudio.CH_TTS && NAVI_STATUS_ENABLED) {
                 ttsNaviHeld = true
@@ -709,9 +720,15 @@ class AaBridgeCore(
             } else {
                 mediaPaused = false
                 mediaGateDrops = 0
+                resampler.reset()                // каждый новый MEDIA INIT - поток с чистого листа
+                if (huHyundaiCn7 && !cn7Logged) {
+                    cn7Logged = true
+                    log("BRIDGE ГУ Hyundai CN7 (h218): музыка 32 кГц, ресэмпл 48→32", true)
+                }
                 musicStatus(1)
             }
         }
+        var out = pcm
         if (ch == CarlifeAudio.CH_MEDIA) {
             val eq = eqProvider()
             if (eq != eqLogged) {
@@ -720,11 +737,15 @@ class AaBridgeCore(
             }
             equalizer.update(eq)
             equalizer.process(pcm)
+            if (huHyundaiCn7) {
+                out = resampler.process(pcm)
+                if (out.isEmpty()) return
+            }
         }
         var off = 0
-        while (off < pcm.size) {
-            val n = minOf(CarlifeAudio.MAX_CHUNK, pcm.size - off)
-            val chunk = if (off == 0 && n == pcm.size) pcm else pcm.copyOfRange(off, off + n)
+        while (off < out.size) {
+            val n = minOf(CarlifeAudio.MAX_CHUNK, out.size - off)
+            val chunk = if (off == 0 && n == out.size) out else out.copyOfRange(off, off + n)
             if (!link.sendAudio(ch, CarlifeAudio.dataType(ch), chunk)) {
                 audioDropped++
             } else {
@@ -1344,6 +1365,9 @@ class AaBridgeCore(
         const val DESAY_G6S_MODEL = "G6S"
         const val DESAY_G6S_CHANNEL = "20622116"          // STATISTIC_INFO.channel у Mazda CX-5; Vezel - 20832125, другая Mazda - 21520001
         const val VW_20082120_CHANNEL = "20082120"        // VW, protocol 1.0, versionName="RADIO" (h93); Tharu CNS3 - 20082122
+        const val HYUNDAI_CN7_PRODUCT = "wp_cn7cpe_cn"    // HU_INFO.product Hyundai Elantra CN7 (h218): manufacturer QTI, model "sm6150_au for arm64"
+        const val MEDIA_RATE = 48000
+        const val MEDIA_RATE_CN7 = 32000
         const val KEYFRAME_WAIT_MS = 1500L
         const val KEYFRAME_RETRY_MS = 4000L
         private const val NEVER = Long.MIN_VALUE / 4
