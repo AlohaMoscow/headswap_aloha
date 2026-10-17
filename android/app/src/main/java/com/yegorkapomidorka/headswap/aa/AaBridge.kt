@@ -150,10 +150,11 @@ class AaBridgeCore(
         private set
     @Volatile var huVw20082120 = false         // VW (STATISTIC_INFO channel 20082120, h93): без heartbeat рвёт USB через ~3,7 с PAUSE
         private set
-    @Volatile var huHyundaiCn7 = false         // ГУ Hyundai CN7 (product wp_cn7cpe_cn, h218): музыка 32 кГц с ресэмплом 48→32
+    @Volatile var huHyundaiCn7 = false         // ГУ Hyundai CN7 (product wp_cn7cpe_cn, h218): в режиме «Авто» музыка 32 кГц с ресэмплом 48→32
         private set
-    private val resampler = Resampler48to32()
-    private var cn7Logged = false
+    @Volatile var musicRateProvider: () -> MusicRate = { MusicRate.DEFAULT }
+    private var resampler: MusicResampler? = null    // null при 48000: PCM идёт как есть
+    private var mediaRateLogged = MEDIA_RATE
     private val audioInited = HashMap<Int, Boolean>()
     private val audioLogged = HashMap<Int, Long>()
 
@@ -311,8 +312,8 @@ class AaBridgeCore(
         huDesayG6S = false                     // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         huVw20082120 = false                   // HU_INFO / STATISTIC_INFO придут заново в этой сессии
         huHyundaiCn7 = false                   // HU_INFO придёт заново в этой сессии
-        cn7Logged = false
-        resampler.reset()
+        mediaRateLogged = MEDIA_RATE
+        resampler?.reset()
         if (aaVideoSeen) placeholderText = TEXT_WAIT_FRAME
         meta.onAttach()
         link.showPlaceholder(placeholderText)
@@ -697,7 +698,8 @@ class AaBridgeCore(
             return
         }
         if (audioInited[ch] != true) {
-            val rate = if (ch != CarlifeAudio.CH_MEDIA) 16000 else if (huHyundaiCn7) MEDIA_RATE_CN7 else MEDIA_RATE
+            val setting = if (ch == CarlifeAudio.CH_MEDIA) musicRateProvider() else MusicRate.AUTO
+            val rate = if (ch != CarlifeAudio.CH_MEDIA) 16000 else setting.hz ?: if (huHyundaiCn7) MEDIA_RATE_CN7 else MEDIA_RATE
             val channels = if (ch == CarlifeAudio.CH_MEDIA) 2 else 1
             if (ch == CarlifeAudio.CH_TTS && NAVI_STATUS_ENABLED) {
                 ttsNaviHeld = true
@@ -720,11 +722,13 @@ class AaBridgeCore(
             } else {
                 mediaPaused = false
                 mediaGateDrops = 0
-                resampler.reset()                // каждый новый MEDIA INIT - поток с чистого листа
-                if (huHyundaiCn7 && !cn7Logged) {
-                    cn7Logged = true
-                    log("BRIDGE ГУ Hyundai CN7 (h218): музыка 32 кГц, ресэмпл 48→32", true)
+                // частота фиксируется на MEDIA INIT; каждый новый INIT - поток с чистого листа
+                resampler = if (rate == MEDIA_RATE) null else resampler?.takeIf { it.outRate == rate }?.also { it.reset() } ?: MusicResampler(rate)
+                if (rate != MEDIA_RATE && rate != mediaRateLogged) {
+                    val why = if (setting.hz != null) "настройка" else "авто: Hyundai CN7"
+                    log("BRIDGE музыка $rate Гц, ресэмпл $MEDIA_RATE→$rate ($why)", true)
                 }
+                mediaRateLogged = rate
                 musicStatus(1)
             }
         }
@@ -737,8 +741,9 @@ class AaBridgeCore(
             }
             equalizer.update(eq)
             equalizer.process(pcm)
-            if (huHyundaiCn7) {
-                out = resampler.process(pcm)
+            val rs = resampler
+            if (rs != null) {
+                out = rs.process(pcm)
                 if (out.isEmpty()) return
             }
         }

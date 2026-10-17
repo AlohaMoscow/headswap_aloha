@@ -702,6 +702,7 @@ class BridgeService : Service() {
             val log = { line: String, ui: Boolean -> AppLog.i(line, ui) }
             val core = AaBridgeCore(log, clockUs = { SystemClock.elapsedRealtimeNanos() / 1_000 })
             core.micModeProvider = { aaPrefs.micMode }
+            core.musicRateProvider = { aaPrefs.musicRate }
             core.phoneMic = PhoneMicCapture(applicationContext)
             core.usbAudioEnabled = aaPrefs.usbAudio
             EqLive.settings = aaPrefs.eq
