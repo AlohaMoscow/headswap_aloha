@@ -5,6 +5,7 @@ import com.yegorkapomidorka.headswap.AppLog
 import com.yegorkapomidorka.headswap.Ch
 import com.yegorkapomidorka.headswap.InnerAssembler
 import com.yegorkapomidorka.headswap.Msg
+import com.yegorkapomidorka.headswap.ThreadPrio
 import com.yegorkapomidorka.headswap.Wire
 import com.yegorkapomidorka.headswap.aa.DrainMeter
 import com.yegorkapomidorka.headswap.link.diag.WLog
@@ -380,6 +381,7 @@ class MultiSocketTransport internal constructor(
     }
 
     private fun readLoop(chan: Int, s: Socket, sink: (Int, ByteArray) -> Unit) {
+        ThreadPrio.raise()
         try {
             val din = DataInputStream(BufferedInputStream(s.getInputStream(), READ_BUF))
             while (!closed.get()) {
@@ -420,6 +422,7 @@ class MultiSocketTransport internal constructor(
     }
 
     private fun writeLoop(chan: Int, s: Socket, onWritten: (Int, ByteArray) -> Unit) {
+        ThreadPrio.raise()
         val q = queues.getValue(chan)
         val video = chan == Ch.VIDEO
         try {

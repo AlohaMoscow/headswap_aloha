@@ -42,7 +42,7 @@ class GlRelay(
     targetFps: Int = 0,
 ) {
     private val gate = FrameGate(targetFps)
-    private val thread = HandlerThread("aa-gl-relay")
+    private val thread = HandlerThread("aa-gl-relay", android.os.Process.THREAD_PRIORITY_DISPLAY)
     private lateinit var handler: Handler
     private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var context: EGLContext = EGL14.EGL_NO_CONTEXT
@@ -122,7 +122,7 @@ class GlRelay(
             stop()
             throw IllegalStateException("инициализация GL: ${it.message}", it)
         }
-        handler.postDelayed(tick, 20)
+        handler.post(tick)
     }
 
     private val tick = object : Runnable {
@@ -139,8 +139,21 @@ class GlRelay(
                 val lateSkipped = skipped && now - lastFreshNs >= gate.periodNs()
                 if ((idle || lateSkipped) && drawGated()) redraws.incrementAndGet()
             }
-            handler.postDelayed(this, 20)
+            scheduleTick()
         }
+    }
+
+    /**
+     * Перенести tick на момент, когда он понадобится (RelayTick). Без кадра повторять нечего: tick не взводится,
+     * его взведёт первый кадр (onFrame). Только GL-нить.
+     */
+    private fun scheduleTick() {
+        handler.removeCallbacks(tick)
+        if (released || !haveFrame) return
+        val delay = RelayTick.delayMs(
+            SystemClock.elapsedRealtimeNanos(), lastDrawNs, idleRedrawMs, skipped, lastFreshNs, gate.periodNs(), introArmed,
+        )
+        handler.postDelayed(tick, delay)
     }
 
     /**
@@ -185,6 +198,7 @@ class GlRelay(
         introArmed = true
         introStartNs = 0
         log("GlRelay: переход заглушка -> AA взведён (${banner.width}x${banner.height})")
+        scheduleTick()                              // анимация перехода идёт шагами STEP_MS и на статичном AA
     }
 
     /** Новая AA-сессия: старый кадр больше не повторять до первого нового. */
@@ -275,6 +289,7 @@ class GlRelay(
             fresh.incrementAndGet()
             lastFreshNs = SystemClock.elapsedRealtimeNanos()
             drawGated(fresh = true)
+            scheduleTick()
         } catch (t: Throwable) {
             log("GlRelay.onFrame: ${t.javaClass.simpleName}: ${t.message}")
         }
