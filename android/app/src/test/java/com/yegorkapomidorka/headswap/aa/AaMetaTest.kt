@@ -579,6 +579,28 @@ class AaMetaTest {
     }
 
     @Test
+    fun vwIdFlagByManufacturerAndChannelAndReset() {
+        val r = Rig()
+        assertTrue(!r.core.huVw20082138)
+        r.core.onHuInfo("VW BT 1538", "VW BT 1538")
+        assertTrue(r.core.huVw20082138)
+        r.core.onCarlifeClosed()
+        r.core.attach(MetaLink())
+        assertTrue("новая сессия - флаг заново", !r.core.huVw20082138)
+        r.core.onHuStatistic("20082138")
+        assertTrue(r.core.huVw20082138)
+    }
+
+    @Test
+    fun vwIdFlagNotSetForOtherVw() {
+        val r = Rig()
+        r.core.onHuInfo("", "")
+        r.core.onHuStatistic("20082120")
+        assertTrue(r.core.huVw20082120)
+        assertTrue(!r.core.huVw20082138)
+    }
+
+    @Test
     fun routeNaviOffForDesayByChannel() {
         val r = Rig()
         r.core.onHuInfo("", "")

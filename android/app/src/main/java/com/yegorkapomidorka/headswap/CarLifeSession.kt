@@ -63,6 +63,7 @@ class CarLifeSession(
     /** Воздух (6 сокетов): своя лесенка битрейта, PAUSE-keepalive чаще, WL-строки видео. USB и tcp-debug - как было. */
     private val air = transport.caps == TransportCaps.TCP6
     private val bitratePolicy = BitratePolicy(mode.bitrate, profile = if (air) BitrateProfile.WIFI else BitrateProfile.USB)
+    @Volatile private var vwIdrCutMs = NEVER_MS
     private val pauseKeepaliveMs = if (air) PAUSE_KEEPALIVE_AIR_MS else PAUSE_KEEPALIVE_MS
     private var overflows = 0
     private var maxQueueFrames = 0
@@ -602,6 +603,7 @@ class CarLifeSession(
             if (qf > maxQueueFrames) maxQueueFrames = qf
             val real = VideoQueueLimit.backlogMs(transport.queuedVideoBytes, rate)
             val sinceOverflow = lastOverflowMs.let { if (it == NEVER_MS) -1L else now - it }
+            applyVwCeiling()
             val old = bitratePolicy.current
             val bps = bitratePolicy.update(now, VideoQueueLimit.policyBacklogMs(real, sinceOverflow), rate) ?: return
             if (placeholder?.setBitrate(bps) ?: bridge.setEncoderBitrate(bps)) {
@@ -613,6 +615,31 @@ class CarLifeSession(
         } catch (e: Exception) {
             AppLog.e("адаптация битрейта", e)
         }
+    }
+
+    /**
+     * VW ID (h196): ГУ рвёт USB EIO на IDR > ~600 КиБ. Потолок перекодирования 4 Мбит/с под флагом ГУ (флаг мог прийти
+     * после старта энкодера - битрейт снижается на лету). Остальные ГУ не затрагиваются.
+     */
+    private fun applyVwCeiling() {
+        if (!bridge.huVw20082138) return
+        val old = bitratePolicy.current
+        if (!bitratePolicy.lowerCeiling(VW_20082138_CEILING_BPS)) return
+        AppLog.i("VW 20082138: потолок битрейта ${bitratePolicy.ceilingBps / 1000} кбит/с (лимит размера IDR)")
+        if (bitratePolicy.current != old) bridge.setEncoderBitrate(bitratePolicy.current)
+    }
+
+    /** Страховка VW ID: IDR > 450 КБ - потолок ×0,75 (не ниже 1,5 Мбит/с), не чаще раза в секунду; кадр уже ушёл. */
+    override fun onEncodedKeyFrame(size: Int) {
+        if (size <= VW_20082138_IDR_LIMIT) return
+        val now = SystemClock.elapsedRealtime()
+        if (vwIdrCutMs != NEVER_MS && now - vwIdrCutMs < VW_20082138_CUT_INTERVAL_MS) return
+        applyVwCeiling()
+        val old = bitratePolicy.current
+        if (!bitratePolicy.lowerCeiling(maxOf(VW_20082138_MIN_BPS, (bitratePolicy.ceilingBps * 0.75).toInt()))) return
+        vwIdrCutMs = now
+        AppLog.i("VW 20082138: IDR $size Б > $VW_20082138_IDR_LIMIT, потолок битрейта -> ${bitratePolicy.ceilingBps}")
+        if (bitratePolicy.current != old) bridge.setEncoderBitrate(bitratePolicy.current)
     }
 
     /** Аудио моста: канал MEDIA/TTS, заголовок 12 байт; time = millis & 0xFFFFFFFF в DATA, 0 в INIT/STOP (как Baidu). */
@@ -726,6 +753,7 @@ class CarLifeSession(
 
     /** Транскодер моста: декодер AA (кадр режима) -> кроп -> Surface энкодера (выход режима). null, если MediaCodec не поднялся. */
     override fun createTranscoder(out: TranscodeOutput): VideoTranscoder? = try {
+        applyVwCeiling()
         AaTranscoder(
             mode.outW, mode.outH, targetFps, bitratePolicy.current, out, { AppLog.i(it, false) },
             srcWidth = mode.aaW, srcHeight = mode.aaH, crop = mode.crop,
@@ -988,6 +1016,10 @@ class CarLifeSession(
         private val TOUCH_TO_AA = setOf(0, 1, 2, 5, 6)
         private const val MAX_AUDIO_QUEUE = 180       // звук не принимается, если в общей очереди больше пакетов
         private const val BITRATE_POLL_MS = 100L
+        private const val VW_20082138_CEILING_BPS = 4_000_000
+        private const val VW_20082138_MIN_BPS = 1_500_000
+        private const val VW_20082138_IDR_LIMIT = 450_000
+        private const val VW_20082138_CUT_INTERVAL_MS = 1000L
         private const val NEVER_MS = Long.MIN_VALUE
         private const val SILENCE_MS = 10_000L
         private const val PAUSE_KEEPALIVE_MS = 2_000L  // Desay G6S: пустой VIDEO_DATA
