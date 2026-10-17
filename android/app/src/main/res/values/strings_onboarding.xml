@@ -7,6 +7,11 @@
     <string name="step_aa_dev_primary">Open Android Auto</string>
     <string name="step_aa_dev_short">Android Auto developer mode</string>
 
+    <string name="step_aa_unknown_title">Unknown sources in Android Auto</string>
+    <string name="step_aa_unknown_body">To get video, YouTube and a browser on the head unit (Fermata Auto, ParkedTube, AABrowser), turn on in Android Auto: Settings → ⋮ → Developer settings → Unknown sources. Without it, Android Auto will not show apps installed outside Google Play.</string>
+    <string name="step_aa_unknown_primary">Open Android Auto settings</string>
+    <string name="step_aa_unknown_short">Unknown sources</string>
+
     <string name="step_autostart_title">Auto-start head unit server</string>
     <string name="step_autostart_body">Turn on the accessibility service “%1$s”. It starts the head unit server by itself when you plug in the USB cable. The service sees only Android Auto windows.</string>
     <string name="step_autostart_hint">If the item is grayed out: Settings → Apps → Headswap → ⋮ → “Allow restricted settings”. Without the service you must start the server by hand before every trip: Android Auto → ⋮ → “Start head unit server”.</string>

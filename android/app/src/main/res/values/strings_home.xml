@@ -77,6 +77,9 @@
     <string name="mock_aa_notifications">Notifications</string>
     <string name="mock_aa_cars">Connected cars</string>
     <string name="mock_aa_version">Version</string>
+    <string name="mock_aadev_title">Developer settings</string>
+    <string name="mock_aadev_resolution">Video resolution</string>
+    <string name="mock_aadev_unknown">Unknown sources</string>
     <string name="mock_a11y_title">Accessibility</string>
     <string name="mock_a11y_downloaded">Downloaded apps</string>
     <string name="mock_notif_now">Headswap · now</string>

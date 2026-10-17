@@ -6,6 +6,11 @@
     <string name="step_aa_dev_primary">Открыть Android Auto</string>
     <string name="step_aa_dev_short">Режим разработчика AA</string>
 
+    <string name="step_aa_unknown_title">Неизвестные источники в Android Auto</string>
+    <string name="step_aa_unknown_body">Чтобы на магнитоле появились видео, YouTube и браузер (Fermata Auto, ParkedTube, AABrowser), включите в Android Auto: Настройки → ⋮ → Настройки разработчика → Неизвестные источники. Без этого Android Auto не покажет приложения, установленные не из Google Play.</string>
+    <string name="step_aa_unknown_primary">Открыть настройки Android Auto</string>
+    <string name="step_aa_unknown_short">Неизвестные источники</string>
+
     <string name="step_autostart_title">Автозапуск сервера ГУ</string>
     <string name="step_autostart_body">Включите службу спецвозможностей «%1$s»: она сама запускает сервер ГУ при подключении кабеля. Служба видит только окна Android Auto.</string>
     <string name="step_autostart_hint">Если пункт серый: Настройки → Приложения → Headswap → ⋮ → «Разрешить ограниченные настройки». Без службы сервер придётся запускать вручную перед каждой поездкой: Android Auto → ⋮ → «Вкл. сервер головного устр-ва».</string>

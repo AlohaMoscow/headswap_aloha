@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +18,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -76,6 +78,9 @@ enum class SettingsSection(val key: String, val titleRes: Int, val iconRes: Int)
     /** Эквалайзер: вход из «Звук и микрофон», на главном экране своей строки нет. */
     EQ("eq", R.string.eq_title, R.drawable.ic_equalizer),
     HEADUNIT("headunit", R.string.set_sec_headunit, R.drawable.ic_car),
+
+    /** Каталог чужих AA-приложений (Fermata Auto, ParkedTube, AABrowser) и предупреждение про видео в движении. */
+    APPS("apps", R.string.set_sec_apps, R.drawable.ic_open),
 
     /** Беспровод: только в сборке с BuildConfig.WIRELESS_BETA. */
     WIRELESS("wireless", R.string.wl_title, R.drawable.ic_wifi),
@@ -139,9 +144,6 @@ private fun Context.updateStatus(): Pair<String, Int> {
         else -> getString(R.string.upd_status_never) to R.color.on2
     }
 }
-
-/** Страница «Поддержать Егора» на сайте (реквизиты там, в приложении их нет). */
-private const val SUPPORT_URL = "https://yegorkapomidorka.com/headswap/support/"
 
 /** Главный экран настроек: разделы с текущими значениями, помощь, версия. */
 class SettingsScreen(host: MainActivity) : Screen(host) {
@@ -250,6 +252,8 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             set(SettingsSection.HEADUNIT, c.getString(R.string.set_sum_headunit, aa.certSet.uppercase(), auto))
         }
 
+        set(SettingsSection.APPS, c.getString(R.string.set_sum_apps, HuApps.detect(c).installed.size))
+
         val (upd, color) = c.updateStatus()
         set(SettingsSection.UPDATES, upd, color)
 
@@ -260,7 +264,11 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         }
     }
 
-    /** «Поддержать Егора»: контурная пилюля под версией, открывает страницу поддержки на сайте. */
+    /**
+     * «Поддержать Егора»: контурная пилюля под версией, открывает страницу поддержки на сайте
+     * (реквизиты там, в приложении их нет). URL по языку: ru — СБП на /headswap/support/,
+     * остальные — PayPal на /headswap/en/#donate (R.string.set_support_url).
+     */
     private fun supportButton(): View {
         val c = ctx
         val fg = c.clr(R.color.acc)
@@ -274,7 +282,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             addView(c.text(c.getString(R.string.set_support), 15f, 600, fg))
             setOnClickListener {
                 try {
-                    c.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(SUPPORT_URL)))
+                    c.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(c.getString(R.string.set_support_url))))
                 } catch (e: Exception) {
                     AppLog.e("поддержка: браузер не открылся: ${e.message}")
                 }
@@ -358,6 +366,8 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     private var eqUsbNote: TextView? = null
     private var eqEntrySub: TextView? = null
     private var eqEntryRow: View? = null
+    /** Списки «Установлено на телефоне» и «Рекомендуем»: пересобираются при каждом возврате на экран. */
+    private var appsHost: LinearLayout? = null
     private var svcStatus: TextView? = null
     private var svcButton: TextView? = null
     private var updStatus: TextView? = null
@@ -387,6 +397,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
             SettingsSection.SOUND -> buildSound()
             SettingsSection.EQ -> buildEq()
             SettingsSection.HEADUNIT -> buildHeadunit()
+            SettingsSection.APPS -> buildApps()
             SettingsSection.UPDATES -> body.addView(updateCard(), lp(MATCH, WRAP).margins(ctx, 0, 8, 0, 0))
             SettingsSection.WIRELESS -> body.addView(wirelessCard(), lp(MATCH, WRAP).margins(ctx, 0, 8, 0, 0))
         }
@@ -398,8 +409,10 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         refreshMic()
         refreshEq()
         refreshEqEntry()
+        refreshApps()
         refreshUpdate()
         refreshWireless()
+        if (section == SettingsSection.APPS) maybeShowAppsWarning()
     }
 
     override fun tick() {
@@ -1035,7 +1048,7 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
     }
 
     private fun refreshCarMake() {
-        makeValue?.text = aa.carMake ?: ctx.getString(R.string.set_car_make_default)
+        makeValue?.text = aa.carMake ?: ctx.getString(R.string.set_car_make_default_short)
     }
 
     private fun certCard(): View {
@@ -1095,6 +1108,130 @@ class SettingsSectionScreen(host: MainActivity, val section: SettingsSection) : 
         )
         status.setTextColor(c.clr(if (connected) R.color.ok else R.color.warn))
         svcButton?.visibility = if (connected) View.GONE else View.VISIBLE
+    }
+
+    // --- приложения для магнитолы ---
+
+    private fun buildApps() {
+        val c = ctx
+        body.addView(
+            c.hbox(12).apply {
+                background = c.shape(c.clr(R.color.warnc), 16)
+                pad(c, 14, 12, 14, 12)
+                addView(c.icon(R.drawable.ic_alert, 22, c.clr(R.color.warn)))
+                addView(c.text(c.getString(R.string.apps_warn_banner), 14f, 500).apply { lineHeight = c.dp(20) }, lp(0, WRAP, 1f))
+            },
+            lp(MATCH, WRAP).margins(c, 0, 8, 0, 0),
+        )
+
+        appsHost = c.vbox(6).also { body.addView(it, lp(MATCH, WRAP)) }
+
+        body.addView(c.sectionTitle(c.getString(R.string.apps_hint_title)))
+        note(c.getString(R.string.apps_hint_text))
+        refreshApps()
+    }
+
+    private fun appButton(label: String, onClick: () -> Unit): TextView {
+        val c = ctx
+        return c.text(label, 15f, 600, c.clr(R.color.acc)).apply {
+            gravity = Gravity.CENTER
+            pad(c, 14, 0, 14, 0)
+            background = c.rippleBg(null, 20)
+            isClickable = true
+            setOnClickListener { onClick() }
+        }
+    }
+
+    /** Найденное на телефоне: иконка и имя самого приложения, описание из каталога (если есть), подпись про «Неизвестные источники». */
+    private fun installedAppRow(pkg: String, label: CharSequence, icon: Drawable?, catalog: HuApp?): View {
+        val c = ctx
+        val canOpen = HuApps.launchIntent(c, pkg) != null
+        return c.hbox(12).apply {
+            pad(c, 16, 12, 12, 12)
+            icon?.let { addView(ImageView(c).apply { setImageDrawable(it) }, c.lpDp(c.dp(24), 24)) }
+            addView(c.vbox(4).apply {
+                addView(c.text(label, 17f, 500))
+                catalog?.let { addView(c.text(c.getString(it.descRes), 14f, 400, c.clr(R.color.on2))) }
+                if (catalog != null && HuApps.status(c, catalog).unsupported) {
+                    addView(c.text(c.getString(R.string.apps_unsupported), 13f, 400, c.clr(R.color.warn)))
+                }
+            }, lp(0, WRAP, 1f))
+            if (canOpen) addView(appButton(c.getString(R.string.apps_open)) { HuApps.open(c, pkg) }, c.lpDp(WRAP, 44))
+        }
+    }
+
+    /** Запись каталога, которой на телефоне нет: описание, требование, «Скачать». */
+    private fun recommendedAppRow(app: HuApp): View {
+        val c = ctx
+        val unsupported = HuApps.status(c, app).unsupported
+        return c.vbox(6).apply {
+            pad(c, 16, 12, 12, 8)
+            addView(c.text(app.name, 17f, 500))
+            addView(c.text(c.getString(app.descRes), 14f, 400, c.clr(R.color.on2)))
+            app.reqRes?.let { addView(c.text(c.getString(it), 13f, 400, c.clr(R.color.on2))) }
+            if (unsupported) {
+                addView(c.text(c.getString(R.string.apps_unsupported), 13f, 400, c.clr(R.color.warn)))
+            } else {
+                addView(c.hbox(4).apply {
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    addView(appButton(c.getString(R.string.apps_download)) { HuApps.download(c, app) }, c.lpDp(WRAP, 44))
+                }, lp(MATCH, WRAP))
+            }
+        }
+    }
+
+    /** Поиск по PackageManager: зовётся при каждом возврате на экран (после браузера и установщика). */
+    private fun refreshApps() {
+        val host = appsHost ?: return
+        val c = ctx
+        val pm = c.packageManager
+        val sel = HuApps.detect(c)
+        host.removeAllViews()
+
+        host.addView(c.sectionTitle(c.getString(R.string.apps_installed_title)))
+        val rows = sel.installed.mapNotNull { pkg ->
+            try {
+                val info = pm.getApplicationInfo(pkg, 0)
+                Triple(pkg, info.loadLabel(pm), info)
+            } catch (_: PackageManager.NameNotFoundException) {
+                null
+            }
+        }.sortedBy { it.second.toString().lowercase() }
+        if (rows.isEmpty()) {
+            host.addView(c.text(c.getString(R.string.apps_installed_empty), 14f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(20) })
+        } else {
+            // одна подпись на всю секцию: в списке только приложения не из Play
+            host.addView(c.text(c.getString(R.string.apps_installed_note), 13f, 400, c.clr(R.color.on2)).apply { lineHeight = c.dp(18) },
+                lp(MATCH, WRAP).apply { bottomMargin = c.dp(8) })
+            val card = c.card()
+            for ((i, r) in rows.withIndex()) {
+                if (i > 0) card.addView(c.divider())
+                val icon = try { r.third.loadIcon(pm) } catch (_: Exception) { null }
+                card.addView(installedAppRow(r.first, r.second, icon, HuApps.CATALOG.firstOrNull { it.pkg == r.first }), lp(MATCH, WRAP))
+            }
+            host.addView(card, lp(MATCH, WRAP))
+        }
+
+        if (sel.recommended.isNotEmpty()) {
+            host.addView(c.sectionTitle(c.getString(R.string.apps_recommended_title)))
+            val card = c.card()
+            for ((i, app) in sel.recommended.withIndex()) {
+                if (i > 0) card.addView(c.divider())
+                card.addView(recommendedAppRow(app), lp(MATCH, WRAP))
+            }
+            host.addView(card, lp(MATCH, WRAP))
+        }
+    }
+
+    /** Один раз за установку: видео на ходу не блокируем, ответственность на водителе. */
+    private fun maybeShowAppsWarning() {
+        if (aa.appsWarningShown) return
+        aa.appsWarningShown = true
+        AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(R.string.apps_warn_title)
+            .setMessage(R.string.apps_warn_text)
+            .setPositiveButton(R.string.apps_warn_ok, null)
+            .show()
     }
 
     // --- обновления ---

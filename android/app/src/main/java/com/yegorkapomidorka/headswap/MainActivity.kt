@@ -243,7 +243,7 @@ class MainActivity : Activity() {
                 "mic_test" -> Actions.micTest(this)
                 "transcode_test" -> Actions.transcodeTest(this, intent.getStringExtra("opts") ?: "")
                 "screen_main" -> toHome()
-                "screen_settings" -> {                         // --es section appearance|video|sound|headunit|updates
+                "screen_settings" -> {                         // --es section appearance|video|sound|headunit|apps|updates
                     toHome()
                     showSettings()
                     SettingsSection.byKey(intent.getStringExtra("section"))?.let { showSettingsSection(it) }

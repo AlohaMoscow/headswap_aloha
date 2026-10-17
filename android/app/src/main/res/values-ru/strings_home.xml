@@ -76,6 +76,9 @@
     <string name="mock_aa_notifications">Уведомления</string>
     <string name="mock_aa_cars">Подключённые автомобили</string>
     <string name="mock_aa_version">Сведения о версиях</string>
+    <string name="mock_aadev_title">Настройки разработчика</string>
+    <string name="mock_aadev_resolution">Разрешение видео</string>
+    <string name="mock_aadev_unknown">Неизвестные источники</string>
     <string name="mock_a11y_title">Специальные возможности</string>
     <string name="mock_a11y_downloaded">Загруженные службы</string>
     <string name="mock_notif_now">Headswap · сейчас</string>

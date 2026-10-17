@@ -60,8 +60,9 @@
     <string name="set_cert_hint">Смените, если Android Auto не подключается</string>
 
     <string name="set_car_make">Марка автомобиля</string>
-    <string name="set_car_make_default">По умолчанию</string>
-    <string name="set_car_make_note">Логотип на кнопке выхода в Android Auto (эксперимент). Применится при следующем подключении.</string>
+    <string name="set_car_make_default">Без марки (видео и YouTube через Fermata работают)</string>
+    <string name="set_car_make_default_short">Без марки</string>
+    <string name="set_car_make_note">Логотип марки на кнопке выхода из Android Auto. С выбранной маркой Android Auto скрывает сторонние видеоприложения (Fermata Auto). Применится при следующем подключении.</string>
 
     <string name="set_autostart">Автозапуск сервера ГУ</string>
     <string name="set_autostart_sub">При подключении кабеля и после сессии AA</string>
@@ -85,9 +86,29 @@
     <string name="set_check_ready">Проверить готовность</string>
     <string name="set_for_devs">Для разработчиков</string>
     <string name="set_support">Поддержать Егора</string>
+    <string name="set_support_url">https://yegorkapomidorka.com/headswap/support/</string>
     <string name="set_sec_appearance">Внешний вид</string>
     <string name="set_sec_sound">Звук и микрофон</string>
     <string name="set_sec_headunit">Головное устройство</string>
+    <string name="set_sec_apps">Приложения для магнитолы</string>
+    <string name="set_sum_apps">Найдено: %1$d</string>
+    <string name="apps_warn_banner">Видео — только на стоянке. На ходу смотрите на дорогу: используете на свой страх и риск.</string>
+    <string name="apps_warn_title">Видео и движение</string>
+    <string name="apps_warn_text">Headswap не блокирует видео в движении. Водитель отвечает за безопасность сам: не смотрите видео за рулём, включайте его только на стоянке.</string>
+    <string name="apps_warn_ok">Понятно</string>
+    <string name="apps_installed_title">Установлено на телефоне</string>
+    <string name="apps_installed_note">Не из Google Play — видно в Android Auto только с «Неизвестными источниками»</string>
+    <string name="apps_installed_empty">Пока ничего не найдено. Поставьте приложение из списка ниже или любое другое приложение для Android Auto.</string>
+    <string name="apps_recommended_title">Рекомендуем</string>
+    <string name="apps_download">Скачать</string>
+    <string name="apps_open">Открыть</string>
+    <string name="apps_fermata_desc">Видео с телефона, YouTube, зеркало экрана</string>
+    <string name="apps_parkedtube_desc">YouTube на весь экран магнитолы, русская клавиатура</string>
+    <string name="apps_aabrowser_desc">Браузер на весь экран магнитолы</string>
+    <string name="apps_aabrowser_req">Нужен Android 15+</string>
+    <string name="apps_unsupported">На этом телефоне не пойдёт: нужен Android 15 или новее.</string>
+    <string name="apps_hint_title">Не вижу приложение в Android Auto</string>
+    <string name="apps_hint_text">Проверьте галку «Неизвестные источники» в Android Auto и что в настройке «Марка автомобиля» выбрано «Без марки» — с выбранной маркой Android Auto скрывает видеоприложения. Затем перезапустите сервер ГУ. После обновления Android Auto приложения иногда пропадают — это на стороне Google.</string>
     <string name="set_mode">Режим</string>
     <string name="set_help">Помощь</string>
     <string name="set_sum_appearance">Язык: %1$s · тема: %2$s</string>

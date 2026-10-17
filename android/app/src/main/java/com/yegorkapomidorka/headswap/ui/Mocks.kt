@@ -20,6 +20,15 @@ object Mocks {
                 ),
             )
         }
+        StepId.AA_UNKNOWN -> ctx.vbox(10).apply {
+            addView(ctx.label(ctx.getString(R.string.mock_aadev_title)))
+            addView(
+                ctx.list(
+                    ctx.row(ctx.getString(R.string.mock_aadev_resolution)),
+                    ctx.row(ctx.getString(R.string.mock_aadev_unknown), hi = true, h = 56, trailing = ctx.fakeSwitch()),
+                ),
+            )
+        }
         StepId.AUTOSTART -> ctx.vbox(10).apply {
             addView(ctx.label(ctx.getString(R.string.mock_a11y_title)))
             addView(

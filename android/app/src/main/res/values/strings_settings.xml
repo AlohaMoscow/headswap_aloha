@@ -60,8 +60,9 @@
     <string name="set_cert_hint">Change it if Android Auto does not connect</string>
 
     <string name="set_car_make">Car make</string>
-    <string name="set_car_make_default">Default</string>
-    <string name="set_car_make_note">Logo on the exit button in Android Auto (experiment). Applies on the next connection.</string>
+    <string name="set_car_make_default">No make (video and YouTube via Fermata work)</string>
+    <string name="set_car_make_default_short">No make</string>
+    <string name="set_car_make_note">Car make logo on the Android Auto exit button. With a make selected, Android Auto hides third-party video apps (Fermata Auto). Applies on next connection.</string>
 
     <string name="set_autostart">Auto-start head unit server</string>
     <string name="set_autostart_sub">When the USB cable is connected and after an Android Auto session</string>
@@ -85,9 +86,29 @@
     <string name="set_check_ready">Check readiness</string>
     <string name="set_for_devs">For developers</string>
     <string name="set_support">Support Yegor</string>
+    <string name="set_support_url">https://yegorkapomidorka.com/headswap/en/#donate</string>
     <string name="set_sec_appearance">Appearance</string>
     <string name="set_sec_sound">Sound and microphone</string>
     <string name="set_sec_headunit">Head unit</string>
+    <string name="set_sec_apps">Head unit apps</string>
+    <string name="set_sum_apps">Found: %1$d</string>
+    <string name="apps_warn_banner">Video is for parked use only. While driving, watch the road: use at your own risk.</string>
+    <string name="apps_warn_title">Video and driving</string>
+    <string name="apps_warn_text">Headswap does not block video while the car is moving. The driver is responsible for safety: do not watch video while driving, use it only when parked.</string>
+    <string name="apps_warn_ok">Got it</string>
+    <string name="apps_installed_title">Installed on this phone</string>
+    <string name="apps_installed_note">Not from Google Play — shown in Android Auto only with “Unknown sources” enabled</string>
+    <string name="apps_installed_empty">Nothing found yet. Install an app from the list below or any other Android Auto app.</string>
+    <string name="apps_recommended_title">Recommended</string>
+    <string name="apps_download">Download</string>
+    <string name="apps_open">Open</string>
+    <string name="apps_fermata_desc">Phone video, YouTube, screen mirroring</string>
+    <string name="apps_parkedtube_desc">Full-screen YouTube on the head unit, Russian keyboard</string>
+    <string name="apps_aabrowser_desc">Full-screen browser on the head unit</string>
+    <string name="apps_aabrowser_req">Requires Android 15+</string>
+    <string name="apps_unsupported">Will not work on this phone: Android 15 or newer is required.</string>
+    <string name="apps_hint_title">I do not see the app in Android Auto</string>
+    <string name="apps_hint_text">Check the “Unknown sources” checkbox in Android Auto and that “Car make” is set to “No make”: with a make selected, Android Auto hides video apps. Then restart the head unit server. After an Android Auto update the apps sometimes disappear — that is on Google’s side.</string>
     <string name="set_mode">Mode</string>
     <string name="set_help">Help</string>
     <string name="set_sum_appearance">Language: %1$s · theme: %2$s</string>
